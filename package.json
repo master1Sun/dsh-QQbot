@@ -1,0 +1,112 @@
+{
+  "name": "@sunjuntao/dsh-qqbot",
+  "version": "0.1.0",
+  "description": "把 QQ 官方机器人（Webhook 回调）接入本机 DeepSeek Harness：QQ 群/单聊消息（含群全量消息上下文）→ DSH 会话 → 回复发回 QQ，支持被动回复与群主动消息。Connect the official QQ bot (webhook callback) to a local DeepSeek Harness.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./types/host/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/host/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "keywords": [
+    "dsh",
+    "plugin",
+    "qq",
+    "qqbot",
+    "bot",
+    "webhook",
+    "deepseek-harness",
+    "dsh-plugin"
+  ],
+  "author": "master1Sun",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/master1Sun/dsh-QQbot.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    },
+    "compatibility": {
+      "dsh": "0.1.2-rc.1",
+      "profiles": [
+        "web"
+      ]
+    }
+  },
+  "scripts": {
+    "link-dsh-deps": "node scripts/deploy/link-dsh-deps.mjs",
+    "postinstall": "node scripts/deploy/link-dsh-deps.mjs",
+    "build": "node scripts/build/build.mjs",
+    "build:cli": "node scripts/build/build-cli.mjs",
+    "build:types": "tsc --emitDeclarationOnly --declaration --rootDir src --outDir types --skipLibCheck",
+    "typecheck": "tsc --noEmit",
+    "sync": "node scripts/deploy/sync-to-profile.mjs",
+    "deploy": "npm run build && npm run sync",
+    "prepublishOnly": "npm run build && npm run build:cli && npm run build:types"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@tencent-connect/qqbot-connector": "^1.2.0",
+    "@tencent-connect/qqbot-nodejs": "^1.0.4",
+    "js-yaml": "^5.4.1",
+    "qrcode": "^1.5.4",
+    "react-dom": "^18.3.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1-rc.1",
+    "@deepseek-ai/dsh-credentials": "0.0.1-rc.1 || >=0.1.0-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-host-webserver": "0.0.1-rc.1 || >=0.1.0-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-webhook": "0.1.2-alpha.2 || >=0.1.2-rc.1 <0.2.0-0",
+    "@deepseek-ai/schemastery": "^3.18.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": false
+    },
+    "@deepseek-ai/dsh-credentials": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-webhook": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.31",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.6.0"
+  }
+}

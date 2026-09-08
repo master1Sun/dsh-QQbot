@@ -1,0 +1,204 @@
+/**
+ * 插件配置：运行时解析。
+ *
+ * 配置来源合并（高 → 低）：cordis entry 配置 > config.json（设置界面保存）>
+ * credentials.json（扫码 / 手动保存的凭据）> 环境变量（仅 appId/appSecret）> 默认值。
+ * 解析是容错的：缺凭据不抛错（插件照常加载，状态接口提示未配置，引导扫码/填写）。
+ */
+
+/** 可选的显式模型路由，格式 "provider/model[:输出token上限]"。 */
+export interface QqbotModelSelection {
+  provider: string;
+  model: string;
+  maxTokens?: number;
+}
+
+export interface QqbotConfig {
+  appId: string;
+  appSecret: string;
+  secretEnv: string;
+  /** 凭据来源（status 展示）：config / secretEnv / store / env / none。 */
+  credentialSource: string;
+  source: string;
+  adminToken: string;
+  workspacePath: string;
+  agentPreset: string;
+  /** 群全量非 AT 消息使用的聊天 Preset（不执行工具）；留空跟随 agentPreset。 */
+  agentPresetChat: string;
+  permissionPreset: string;
+  model: QqbotModelSelection | null;
+  allowC2c: boolean;
+  allowGroups: string[];
+  allowUsers: string[];
+  atContextMessages: number;
+  groupBufferMax: number;
+  replyChunkChars: number;
+  maxRepliesPerMessage: number;
+  proactiveFallback: boolean;
+  /** 消息本地归档（审计轨迹），写入 ~/.dsh/qqbot/archive/。 */
+  archiveEnabled: boolean;
+  /** 回复优先用 QQ Markdown（msg_type=2），平台拒绝时逐条回退纯文本。 */
+  markdownReply: boolean;
+  /**
+   * 回复顶部引用用户原话（v2 群/C2C 无原生引用卡片，用文本引用块表达）。
+   * Markdown 回复为 `> **昵称**：原话`，纯文本为「昵称：原话」。
+   */
+  /**
+   * 出站引用范围：off=不引用；at=仅 @/单聊 回复引用（避免群全量刷屏）；all=全部回复都引用。
+   * 入站引用（解析用户引用的上一条消息并注入上下文）不受此开关影响，始终生效。
+   */
+  quoteReply: "off" | "at" | "all";
+  /** 引用原话的字数上限（超长截断）。 */
+  quoteMaxChars: number;
+  /** 群全量消息价值回复总开关。 */
+  groupFullReply: boolean;
+  /** 价值评分阈值（0–10）。 */
+  valueThreshold: number;
+  /** 同群两次全量回复最小间隔（毫秒）。 */
+  groupCooldownMs: number;
+  /** 同一发送者两次被回复最小间隔（毫秒）。 */
+  senderCooldownMs: number;
+  apiBase: string;
+  tokenUrl: string;
+  /** 入站图片/文件附件转发进会话（让模型"看"图）。 */
+  multimodalInbound: boolean;
+  /** 语音消息处理方式：off=忽略；note=注入说明占位；download=下载并注入 URL；asr=调用 asrEndpoint 转写。 */
+  voiceTranscription: "off" | "note" | "download" | "asr";
+  /** 外部语音转写服务（POST 音频字节/URL → 返回文本），voiceTranscription=asr 时使用。 */
+  asrEndpoint: string;
+  /** 入群/加好友欢迎语开关。 */
+  welcomeEnabled: boolean;
+  /** 欢迎语模板（{nick} 占位昵称）。 */
+  welcomeMessage: string;
+  /** 用户用 🗑️ 表情回应机器人消息时撤回它。 */
+  reactionRecall: boolean;
+  /** 群消息命中这些词时撤回并跳过回复（敏感词过滤）。 */
+  bannedWords: string[];
+  /** 每聊天的长期记忆（跨 /new 保留上下文）。 */
+  memoryEnabled: boolean;
+  /** 主动消息每日配额（0=不限制）；超出后停止主动发送并告警。 */
+  quotaPerDay: number;
+}
+
+function str(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** "provider/model" 或 "provider/model:cap" → 显式模型路由；非法返回 null。 */
+export function parseModelSelection(raw: string): QqbotModelSelection | null {
+  const text = raw.trim();
+  if (!text || !text.includes("/")) return null;
+  const [provider, rest] = text.split("/", 2);
+  if (!provider || !rest) return null;
+  const [model, capRaw] = rest.split(":", 2);
+  if (!model) return null;
+  const cap = Number(capRaw);
+  return {
+    provider,
+    model,
+    ...(Number.isSafeInteger(cap) && cap > 0 ? { maxTokens: cap } : {}),
+  };
+}
+
+/**
+ * QqbotModelSelection → "provider/model[:cap]"。
+ * config.get 回读设置页用：生效配置里的 model 已解析为对象，
+ * 设置页下拉期望与保存时一致的字符串形式，须反向序列化。
+ */
+export function stringifyModelSelection(model: QqbotModelSelection | null | undefined): string {
+  if (!model || typeof model.provider !== "string" || typeof model.model !== "string") return "";
+  if (!model.provider || !model.model) return "";
+  return `${model.provider}/${model.model}${model.maxTokens ? `:${model.maxTokens}` : ""}`;
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function boolOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+/** 枚举取值：不在白名单内回退到默认值。 */
+function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
+  return typeof value === "string" && (options as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
+function listOr(value: unknown, fallback: string[]): string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === "string") && value.length > 0
+    ? value as string[]
+    : fallback;
+}
+
+export interface ConfigOverrides {
+  /** cordis entry 传入的显式配置（最高优先级，只取非空值）。 */
+  entry?: Partial<QqbotConfig>;
+  /** 设置界面 config.json。 */
+  stored?: Record<string, unknown>;
+  /** credentials.json（扫码 / 手动保存）。 */
+  credentials?: { appId?: string; appSecret?: string };
+}
+
+/** 容错解析：缺凭据不抛错，credentialSource 记录实际来源。 */
+export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: ConfigOverrides = {}): QqbotConfig {
+  const pick = (key: keyof QqbotConfig & string): unknown =>
+    entry[key] !== undefined && entry[key] !== "" ? entry[key] : stored[key];
+
+  // 凭据：多机器人下，每个机器人的 per-bot 凭据（credentials）为权威来源；entry 直填 / 环境变量仅兜底。
+  // 否则 entry 上残留的旧 appId/appSecret 会覆盖 per-bot 凭据，导致「invalid appid or secret」(100016)。
+  // secretEnv 已在运行时由 resolveSecret 解析并注入 credentials.appSecret，故此处无需再读 entry.secretEnv。
+  const envAppId = process.env.QQBOT_APP_ID ?? "";
+  const envSecret = process.env.QQBOT_APP_SECRET ?? "";
+  const appId = str(credentials.appId) || str(entry.appId) || envAppId;
+  const appSecret = str(credentials.appSecret) || str(entry.appSecret) || envSecret;
+  const credentialSource = str(credentials.appSecret)
+    ? "store"
+    : str(entry.appSecret)
+      ? "config"
+      : envSecret ? "env" : "none";
+
+  return {
+    appId,
+    appSecret,
+    secretEnv: str(pick("secretEnv") as string),
+    credentialSource: appId && appSecret ? credentialSource : "none",
+    source: str(pick("source") as string) || "primary-qq",
+    adminToken: str(pick("adminToken") as string),
+    workspacePath: str(pick("workspacePath") as string) || process.cwd(),
+    agentPreset: str(pick("agentPreset") as string),
+    agentPresetChat: str(pick("agentPresetChat") as string),
+    permissionPreset: str(pick("permissionPreset") as string),
+    model: parseModelSelection(str(pick("model") as string)),
+    allowC2c: boolOr(pick("allowC2c"), true),
+    allowGroups: listOr(pick("allowGroups"), ["*"]),
+    allowUsers: listOr(pick("allowUsers"), ["*"]),
+    atContextMessages: clampInt(pick("atContextMessages"), 0, 50, 10),
+    groupBufferMax: clampInt(pick("groupBufferMax"), 0, 200, 50),
+    replyChunkChars: clampInt(pick("replyChunkChars"), 200, 4000, 1000),
+    maxRepliesPerMessage: clampInt(pick("maxRepliesPerMessage"), 1, 5, 5),
+    proactiveFallback: boolOr(pick("proactiveFallback"), false),
+    archiveEnabled: boolOr(pick("archiveEnabled"), true),
+    markdownReply: boolOr(pick("markdownReply"), true),
+    quoteReply: oneOf(pick("quoteReply"), ["off", "at", "all"], "at"),
+    quoteMaxChars: clampInt(pick("quoteMaxChars"), 20, 1000, 120),
+    groupFullReply: boolOr(pick("groupFullReply"), true),
+    valueThreshold: clampInt(pick("valueThreshold"), 0, 10, 5),
+    groupCooldownMs: clampInt(pick("groupCooldownMs"), 0, 30 * 60_000, 60_000),
+    senderCooldownMs: clampInt(pick("senderCooldownMs"), 0, 30 * 60_000, 30_000),
+    apiBase: str(pick("apiBase") as string) || "https://api.sgroup.qq.com",
+    tokenUrl: str(pick("tokenUrl") as string) || "https://bots.qq.com/app/getAppAccessToken",
+    multimodalInbound: boolOr(pick("multimodalInbound"), true),
+    voiceTranscription: oneOf(pick("voiceTranscription"), ["off", "note", "download", "asr"], "note"),
+    asrEndpoint: str(pick("asrEndpoint") as string),
+    welcomeEnabled: boolOr(pick("welcomeEnabled"), false),
+    welcomeMessage: str(pick("welcomeMessage") as string),
+    reactionRecall: boolOr(pick("reactionRecall"), false),
+    bannedWords: Array.isArray(pick("bannedWords"))
+      ? (pick("bannedWords") as unknown[]).filter((w): w is string => typeof w === "string" && w.length > 0)
+      : [],
+    memoryEnabled: boolOr(pick("memoryEnabled"), true),
+    quotaPerDay: clampInt(pick("quotaPerDay"), 0, 100000, 50),
+  };
+}

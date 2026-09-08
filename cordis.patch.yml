@@ -1,0 +1,4 @@
+# dsh-qqbot bundle patch：把插件挂进 web profile
+- insert:
+    - id: qqbot
+      name: '@sunjuntao/dsh-qqbot'
