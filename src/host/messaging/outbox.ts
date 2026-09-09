@@ -6,9 +6,9 @@
  * 容量上限 200 条，超出丢弃最旧；每条最多重试 5 次，之后标记失败并清除。
  */
 import { randomUUID } from "node:crypto";
-import { readStoreJson, writeStoreJson, pluginDataDir } from "./store-file.js";
+import { readStoreJson, writeStoreJson, pluginDataDir } from "../infra/store-file.js";
 import { join } from "node:path";
-import { toShanghaiISO } from "../shared/time.js";
+import { toShanghaiISO } from "../../shared/time.js";
 
 const OUTBOX_PATH = () => join(pluginDataDir(), "outbox.json");
 const OUTBOX_CAP = 200;

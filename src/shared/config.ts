@@ -72,8 +72,8 @@ export interface QqbotConfig {
   /**
    * 出站引用范围（仅群聊生效，单聊一律不引用）：off=不引用；at=仅群 @ 回复引用（避免群全量刷屏）；
    * all=群聊全部回复都引用。引用通过 QQ 原生 message_reference 渲染为可点击定位的引用卡片。
-   * 带引用的消息走主动消息通道（不传 msg_id）：实测两者同传时手机端同一条内容出现两次
-   * （电脑端正常），仅 message_reference 是「有引用且内容只出现一次」的唯一组合。
+   * 引用卡片与被动回复凭证 msg_id 同传（2026-09 实测矩阵：仅 message_reference 的主动消息通道
+   * 手机端同一条内容出现两条；仅 msg_id 不显示引用；被动同传是唯一「有引用且只出现一次」的组合）。
    * 卡片发送失败自动降级为普通被动回复（无卡片，内容不丢）。
    * 入站引用（解析用户引用的上一条消息并注入上下文）不受此开关影响，始终生效。
    */
@@ -116,6 +116,10 @@ export interface QqbotConfig {
   ssrfGuard: boolean;
   /** 本地路径白名单：qqbot_send_* 工具只能发送工作区/插件数据目录内的文件。 */
   localPathWhitelist: boolean;
+  /** 「对话权限」注入：把 _default.md 包成指令块注入 prompt 顶部（openclaw 风格）。 */
+  permissionInjection: boolean;
+  /** 权限管理员 openid 白名单：空 = 不设限（任何人可改默认权限）；配了则仅名单内可改，"*" = 全部。 */
+  permissionAdmins: string[];
   /** 按群覆盖配置：群 openid → 覆盖字段（仅聊天行为子集）。 */
   groupOverrides: Record<string, GroupOverrideConfig>;
 }
@@ -305,6 +309,8 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     sanitizeReplies: boolOr(pick("sanitizeReplies"), true),
     ssrfGuard: boolOr(pick("ssrfGuard"), true),
     localPathWhitelist: boolOr(pick("localPathWhitelist"), true),
+    permissionInjection: boolOr(pick("permissionInjection"), true),
+    permissionAdmins: listOr(pick("permissionAdmins"), []),
     groupOverrides: resolveGroupOverrides(pick("groupOverrides")),
   };
 }

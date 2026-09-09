@@ -5,7 +5,7 @@ import type {
   BotState,
   GroupBufferEntry,
   PassiveReplyRecord,
-} from "../shared/types.js";
+} from "../../shared/types.js";
 
 export function createBotState(): BotState {
   return {

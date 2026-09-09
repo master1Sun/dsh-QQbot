@@ -7,7 +7,7 @@
  */
 import { readStoreJson, writeStoreJson, pluginDataDir } from "./store-file.js";
 import { join } from "node:path";
-import { toShanghaiISO } from "../shared/time.js";
+import { toShanghaiISO } from "../../shared/time.js";
 
 const QUOTA_PATH = () => join(pluginDataDir(), "quota.json");
 

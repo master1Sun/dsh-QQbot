@@ -11,17 +11,20 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 import type { JsonValue } from "@deepseek-ai/dsh-util-values";
 import type { JsonSchemaNode, ToolDefinition, ToolOutputDefinition, ToolRunContext } from "@deepseek-ai/dsh-tools";
-import { MAX_SCHEDULES_PER_CHAT, ScheduleStore, type ScheduleEntry } from "./schedule.js";
-import type { BotRuntimeManager } from "./bots.js";
-import type { ChatMemoryStore } from "./memory.js";
-import type { BotState } from "../shared/types.js";
-import { assertLocalMediaPath, assertSafeMediaUrl, defaultAllowedRoots } from "./net-guard.js";
-import { sanitizeOutgoingText } from "./sanitize.js";
+import { MAX_SCHEDULES_PER_CHAT, ScheduleStore, type ScheduleEntry } from "../schedule/schedule.js";
+import type { BotRuntimeManager } from "../bots.js";
+import type { ChatMemoryStore } from "../infra/memory.js";
+import type { ScriptGenerator } from "../schedule/script-gen.js";
+import type { BotState } from "../../shared/types.js";
+import { assertLocalMediaPath, assertSafeMediaUrl, defaultAllowedRoots } from "../infra/net-guard.js";
+import { sanitizeOutgoingText } from "../messaging/sanitize.js";
 
 export interface QqbotToolsContext {
   /** 多机器人运行时：按会话反查来源机器人（各自独立的状态 / 客户端）。 */
   bots: BotRuntimeManager;
   store: ScheduleStore;
+  /** AI 脚本生成器：tool 模式含 genPrompt 的任务保存后入队生成。 */
+  scriptGen?: ScriptGenerator;
   /** 每聊天长期记忆（qqbot_memory_* 工具）。 */
   memory?: ChatMemoryStore;
   logger: Pick<Console, "info" | "warn" | "error">;
@@ -42,11 +45,24 @@ function describeEntry(entry: ScheduleEntry, index: number): Record<string, unkn
     index,
     id: entry.id,
     type: entry.type,
-    ...(entry.type === "daily" ? { time: entry.time } : { minutes: entry.minutes }),
-    content: entry.content,
+    mode: entry.mode ?? "text",
+    ...(entry.type === "daily" ? { time: entry.time } : {}),
+    ...(entry.type === "interval" ? { minutes: entry.minutes } : {}),
+    ...(entry.type === "cron" ? { cron: entry.cron, tz: entry.tz } : {}),
+    ...(entry.type === "at" ? { at: entry.at } : {}),
+    ...(entry.weekdays?.length ? { weekdays: entry.weekdays } : {}),
+    ...(entry.mode === "tool"
+      ? {
+          command: entry.command ?? "",
+          ...(entry.cwd ? { cwd: entry.cwd } : {}),
+          resultMode: entry.resultMode ?? "raw",
+          ...(entry.tool ? { tool: entry.tool, args: entry.args ?? {} } : {}),
+        }
+      : { content: entry.content }),
     enabled: entry.enabled,
     nextRunAt: entry.nextRunAt ?? null,
     lastSentAt: entry.lastSentAt ?? null,
+    lastError: entry.lastError ?? null,
   };
 }
 
@@ -83,7 +99,7 @@ async function guardMediaSource(
   }
 }
 
-export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsContext): ToolDefinition[] {
+export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: QqbotToolsContext): ToolDefinition[] {
   /** 按会话反查来源机器人；未绑定聊天时抛出模型可读的错误。 */
   const requireBot = (exec: { agent?: { id?: unknown } }): {
     appId: string;
@@ -124,43 +140,84 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
     {
       name: "qqbot_schedule_add",
       description: [
-        "为当前 QQ 聊天添加一条定时主动消息（由来源机器人发送）。",
-        "两种类型：daily（每天固定 HH:mm 发送一次，需提供 time）；interval（每 N 分钟循环发送，需提供 minutes，最小 5）。",
-        "每个聊天最多 5 条。用户说「每天九点提醒我…」「每 30 分钟发一次…」时调用。",
+        "为当前 QQ 聊天添加一条定时主动任务（由来源机器人发送）。",
+        "定时类型：daily（每天 HH:mm）、interval（每 N 分钟，>=5）、cron（标准 5 段表达式，可带时区）、at（一次性绝对时间，到点后自动删除）。",
+        "执行方式：text（直接发送 content）、ai（把 content 当指令交给 AI 生成）、tool（到点执行一条命令并把结果推送给用户）。",
+        "tool 模式即「生成工具 → 解析工具 → 执行 → 回传结果」：你需要自己写出完整可执行命令行（command），例如",
+        '"python C:/scripts/report.py"、"powershell -File C:/scripts/check.ps1"、"C:/scripts/backup.bat"、"node C:/scripts/sync.mjs"；',
+        "可用 cwd 指定工作目录；resultMode=raw 直接推送原始输出，resultMode=ai 则把输出交给 AI 整理成简洁播报后再推送（输出很长时推荐）。",
+        "daily/interval 可附加 weekdays（0-6 数组，仅在该星期触发）。每个聊天最多 5 条。",
+        "用户说「每天九点提醒我…」「每 30 分钟发一次…」「每周一到周五早九点播报」「下周三下午三点提醒我开会」",
+        "「每天早上跑一次那个 py 脚本把结果发我」时调用。"
       ].join(" "),
       parameters: {
         type: "object",
         properties: {
-          type: { type: "string", enum: ["daily", "interval"], description: "定时类型" },
-          time: { type: "string", description: "daily 时的发送时间，格式 HH:mm（本地时区），如 09:30" },
+          type: { type: "string", enum: ["daily", "interval", "cron", "at"], description: "定时类型" },
+          time: { type: "string", description: "daily 时的发送时间，格式 HH:mm（上海时间），如 09:30" },
           minutes: { type: "number", description: "interval 时的间隔分钟数（>=5）" },
-          content: { type: "string", description: "mode=text 时为要发送的消息内容；mode=ai 时为交给 AI 的生成指令（如「总结这个群昨天聊了什么」）" },
-          mode: { type: "string", enum: ["text", "ai"], description: "text=到点直接发送 content；ai=到点由 AI 按 content 生成内容后回复（默认 text）" },
+          cron: { type: "string", description: 'cron 类型时的 5 段表达式，如 "0 9 * * 1-5"' },
+          tz: { type: "string", description: "cron/at 的时区（IANA，如 Asia/Shanghai / America/New_York），默认 Asia/Shanghai" },
+          at: { type: "string", description: "at 类型时的 ISO 时间（如 2026-09-10T09:00:00+08:00）" },
+          weekdays: { type: "array", items: { type: "number" }, description: "daily/interval 的星期过滤（0=周日..6=周六）" },
+          content: { type: "string", description: "text/ai 模式的内容（tool 模式可省略）" },
+          mode: { type: "string", enum: ["text", "ai", "tool"], description: "执行方式（默认 text）" },
+          command: {
+            type: "string",
+            description: 'tool 模式要执行的完整命令行，如 "python C:/scripts/report.py" / "powershell -File C:/scripts/check.ps1" / "C:/scripts/backup.bat"。与 genPrompt 二选一'
+          },
+          genPrompt: {
+            type: "string",
+            description: "AI 脚本描述词：填写任务目标（如「抓取某网页价格写入 csv」），保存后由系统后台让 AI 生成脚本落盘并自动回填命令。生成期间任务不执行，生成完成后按计划执行（过点不补跑）"
+          },
+          cwd: { type: "string", description: "tool 模式命令的工作目录（可选）" },
+          resultMode: {
+            type: "string",
+            enum: ["raw", "ai"],
+            description: "tool 模式结果处理：raw=直接推送命令输出（默认）；ai=把输出交给 AI 整理成播报后推送"
+          },
+          tool: { type: "string", description: "@deprecated 旧版动作 id，已由 command 取代" },
+          args: { type: "object", description: "@deprecated 旧版动作参数，已由 command 取代" }
         },
-        required: ["type", "content"],
+        required: ["type"],
         additionalProperties: false,
       },
       output: OBJECT_OUTPUT,
       async execute(args: unknown, exec: ToolRunContext) {
         const { appId, scope, openid } = requireBot(exec);
-        const a = args as { type?: string; time?: string; minutes?: number; content?: string; mode?: string };
+        const a = args as {
+          type?: string; time?: string; minutes?: number; cron?: string; tz?: string; at?: string;
+          weekdays?: unknown; content?: string; mode?: string; command?: string; genPrompt?: string;
+          cwd?: string; resultMode?: string; tool?: string; args?: Record<string, unknown>;
+        };
         const result = await store.add({
           scope,
           openid,
           type: a.type ?? "",
           time: a.time,
           minutes: a.minutes,
-          content: a.content ?? "",
+          cron: a.cron,
+          tz: a.tz,
+          at: a.at,
+          weekdays: a.weekdays,
+          content: a.content,
+          command: a.command,
+          genPrompt: a.genPrompt,
+          cwd: a.cwd,
+          resultMode: a.resultMode,
+          tool: a.tool,
+          args: a.args,
           appId,
           mode: a.mode,
         });
         if (!result.ok) return { ok: false, error: result.error };
+        if (result.entry?.genStatus === "pending") scriptGen?.enqueue(result.entry);
         const mine = store.listForChat(scope, openid);
-        logger.info(`[dsh-qqbot] AI 添加定时消息 → ${scope}:${openid}（机器人 ${appId}）`);
+        logger.info(`[dsh-qqbot] AI 添加定时任务 → ${scope}:${openid}（机器人 ${appId}）`);
         return {
           ok: true,
           chat: `${scope}:${openid}`,
-          schedule: describeEntry(result.entry, mine.indexOf(result.entry) + 1),
+          schedule: describeEntry(result.entry!, mine.indexOf(result.entry!) + 1),
           remaining: MAX_SCHEDULES_PER_CHAT - mine.length,
         };
       },
@@ -185,7 +242,39 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
         }
         const result = await store.remove(scope, openid, String(index));
         if (!result.ok) return { ok: false, error: result.error };
-        return { ok: true, removed: describeEntry(result.entry, index) };
+        return { ok: true, removed: describeEntry(result.entry!, index) };
+      },
+    },
+    {
+      name: "qqbot_schedule_set",
+      description: "启用或禁用当前 QQ 聊天的一条定时主动消息（按 qqbot_schedule_list 返回的序号）。禁用后该任务不再执行（不发送、不占主动消息配额），可随时重新启用；重新启用后从当前时刻重算下次运行，不补跑禁用期间的任务。",
+      parameters: {
+        type: "object",
+        properties: {
+          index: { type: "number", description: "要修改的序号（1 开始，见 qqbot_schedule_list）" },
+          enabled: { type: "boolean", description: "true=启用（恢复执行）；false=禁用（暂停执行）" }
+        },
+        required: ["index", "enabled"],
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        const { appId, scope, openid } = requireBot(exec);
+        const a = args as { index?: unknown; enabled?: unknown };
+        const index = Number(a.index);
+        if (!Number.isSafeInteger(index) || index < 1) {
+          return { ok: false, error: "index 必须是正整数序号" };
+        }
+        if (typeof a.enabled !== "boolean") {
+          return { ok: false, error: "enabled 必须是布尔值（true=启用 / false=禁用）" };
+        }
+        const mine = store.listForChat(scope, openid);
+        const target = mine[index - 1];
+        if (!target) return { ok: false, error: `未找到该定时消息（序号 1-${mine.length}）` };
+        const result = await store.setEnabled(target.id, a.enabled);
+        if (!result.ok) return { ok: false, error: result.error };
+        logger.info(`[dsh-qqbot] AI ${a.enabled ? "启用" : "禁用"}定时任务 → ${scope}:${openid}（机器人 ${appId}）`);
+        return { ok: true, schedule: describeEntry(result.entry!, index) };
       },
     },
     {

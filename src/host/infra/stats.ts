@@ -8,8 +8,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pluginDataDir } from "./store-file.js";
-import { toShanghaiISO } from "../shared/time.js";
-import type { BotCounters } from "../shared/types.js";
+import { toShanghaiISO } from "../../shared/time.js";
+import type { BotCounters } from "../../shared/types.js";
 
 export const ZERO_COUNTERS: BotCounters = { received: 0, sessions: 0, replies: 0, proactive: 0, errors: 0 };
 

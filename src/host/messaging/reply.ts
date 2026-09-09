@@ -13,12 +13,12 @@
  * 回复给用户（而非静默）——已有部分文本则附加提示，无文本则只发提示；
  * 同一聊天 60 秒内只提示一次。
  */
-import type { BotRuntime, BotRuntimeManager } from "./bots.js";
-import { PASSIVE_REPLY_LIMIT } from "./qq/api.js";
+import type { BotRuntime, BotRuntimeManager } from "../bots.js";
+import { PASSIVE_REPLY_LIMIT } from "../qq/api.js";
 import type { Outbox } from "./outbox.js";
-import type { QuotaTracker } from "./quota.js";
-import { tr } from "../shared/reply-i18n.js";
-import { configForGroup } from "../shared/config.js";
+import type { QuotaTracker } from "../infra/quota.js";
+import { tr } from "../../shared/reply-i18n.js";
+import { configForGroup } from "../../shared/config.js";
 import { sanitizeOutgoingText } from "./sanitize.js";
 import {
   appendAssistantText,
@@ -89,22 +89,26 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
     const text = sanitizeOutgoingText(rawText, { enabled: config.sanitizeReplies });
     if (!text) return;
     const limit = Math.min(config.maxRepliesPerMessage, PASSIVE_REPLY_LIMIT[record.target.scope]);
-    // 原生引用卡片（message_reference）与被动回复凭证（msg_id）二选一，不能同传。实测组合矩阵：
-    //   msg_id + message_reference → 引用显示，但手机端同一条内容出现两次（两条相同内容堆叠，电脑端正常）；
-    //   仅 msg_id（openclaw 同款）  → 两端都不显示引用（实测「引用没了」）；
-    //   仅 message_reference       → 唯一「有引用且内容只出现一次」的组合 → 带引用时走主动消息通道（无 msg_id）。
+    // 出站引用组合矩阵（平台主动消息能力收敛后实测定版）：
+    //   仅 message_reference（主动通道，不传 msg_id）→ 手机端同一条内容出现两条；
+    //   仅 msg_id                                    → 两端都不显示引用（实测「引用没了」）；
+    //   msg_id + message_reference 被动同传           → 唯一「有引用且只出现一次」的组合。
+    // 门控：仅群聊（单聊一律不引用）+ quoteReply（off=不引用；at=仅群 @；all=群聊全部回复）
+    // + 必须有 REFIDX 索引（官方要求 message_reference.message_id 用事件 ext 的 msg_idx，
+    //   原始 msg id 平台无法解析）+ 必须有 msg_id（被动凭证，同传必需）。
     // 门控：仅群聊（单聊一律不引用）+ quoteReply（off=不引用；at=仅群 @；all=群聊全部回复）
     // + 必须有 REFIDX 索引（官方要求 message_reference.message_id 用事件 ext 的 msg_idx，
     //   原始 msg id 平台无法解析）→ 索引缺失或未过门控时走普通被动回复。
-    // 引用（主动）发送仅在被平台明确拒绝（HTTP 4xx，确定未创建消息）时降级为普通被动回复
-    // （msg_id，无卡片）；结果不确定的失败（超时/网络/5xx）不重发——重发会造成同一条内容
+    // 引用发送仅在被平台明确拒绝（HTTP 4xx，确定未创建消息）时降级为普通被动回复
+    // （无卡片），并写入归档；结果不确定的失败（超时/网络/5xx）不重发——重发会造成同一条内容
     // 出现两次（手机端「两条重复内容」的头号来源），直接抛出走投递出箱。
     // 限制：message_reference 与 Markdown 同时携带时，部分场景下平台会剥离 Markdown 改为纯文本
     // （引用卡片仍保留）。这是 QQ 平台约束，无法两全；若需保留 Markdown 排版，请将 quoteReply 设为 off。
     const quoteReply = record.target.scope === "group"
       && config.quoteReply !== "off"
       && (config.quoteReply === "all" || record.quoteMention)
-      && Boolean(record.selfIdx);
+      && Boolean(record.selfIdx)
+      && Boolean(record.msgId);
     const chunks = chunkReply(text, config.replyChunkChars, limit);
     if (chunks.length === 0) return;
     let usedMarkdown = config.markdownReply;
@@ -117,13 +121,14 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
       }
       if (isProactive && quota && !(await quota.tryConsume())) break;
       const seq = record.nextSeq++;
-      // withQuote=true：主动消息通道（无 msg_id）+ 引用卡片；false：被动回复（msg_id，无卡片）。
+      // withQuote=true：被动回复（msg_id + msgSeq）同传引用卡片（message_reference=REFIDX）；
+      // false：普通被动回复（msg_id，无卡片）。
       const sendOnce = (withQuote: boolean) =>
         bot.client.sendReply(record.target, chunk, withQuote
-          ? { markdown: usedMarkdown, quoteMsgId: record.selfIdx }
+          ? { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown, quoteMsgId: record.selfIdx }
           : { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown });
       try {
-        let channel = quoteReply ? "引用(主动)" : "被动";
+        let channel = quoteReply ? "被动(引用)" : "被动";
         let result: { mode: "markdown" | "text"; id?: string };
         if (quoteReply) {
           try {
@@ -136,6 +141,14 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
               "[dsh-qqbot] 引用卡片被平台拒绝，本片降级为普通被动回复（无卡片）:",
               quoteError instanceof Error ? quoteError.message : quoteError,
             );
+            bot.archiver.append({
+              kind: "session",
+              chat: record.chatKey,
+              group: record.target.scope === "group" ? record.target.openid : undefined,
+              sender: "",
+              content: "",
+              note: `引用卡片被平台拒绝（${quoteError instanceof Error ? quoteError.message.slice(0, 120) : String(quoteError)}），本条已降级为普通被动回复（无引用）`,
+            });
             channel = "被动(引用降级)";
             result = await sendOnce(false);
           }

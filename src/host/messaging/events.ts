@@ -7,8 +7,8 @@
  *
  * 所有动作走主动消息通道（受每日配额约束），失败只告警不影响主流程。
  */
-import type { BotRuntime } from "./bots.js";
-import { tr, type ReplyLocale } from "../shared/reply-i18n.js";
+import type { BotRuntime } from "../bots.js";
+import { tr, type ReplyLocale } from "../../shared/reply-i18n.js";
 import { isOwnSent, rememberSent } from "./state.js";
 
 /** QQ 平台「垃圾桶」表情回应的已知 id（不同端可能用文本名）。 */

@@ -16,21 +16,22 @@ import { randomUUID } from "node:crypto";
 import type { WebhookRule, WebhookSessionRequest } from "@deepseek-ai/dsh-webhook";
 import { WebhookRuleId } from "@deepseek-ai/dsh-webhook";
 import type { Agent as LiveAgent } from "@deepseek-ai/dsh-agent";
-import type { BotRuntime } from "./bots.js";
-import { runCommand, type CommandContext } from "./commands.js";
+import type { BotRuntime } from "../bots.js";
+import { runCommand, type CommandContext } from "../chat/commands.js";
+import { resolvePermission, permissionBlock } from "../infra/permissions.js";
 import { formatInboundQuoteContext } from "./quote.js";
 import { inboundRefEntry, parseRefIdx } from "./ref-index.js";
-import type { ScheduleStore } from "./schedule.js";
-import type { ChatMemoryStore } from "./memory.js";
-import type { QqbotConfig } from "../shared/config.js";
-import { configForGroup } from "../shared/config.js";
+import type { ScheduleStore } from "../schedule/schedule.js";
+import type { ChatMemoryStore } from "../infra/memory.js";
+import type { QqbotConfig } from "../../shared/config.js";
+import { configForGroup } from "../../shared/config.js";
 import {
   addGroupMessage,
   markIncoming,
   markSeen,
   recentGroupMessages,
 } from "./state.js";
-import { buildGroupFullPrompt, evaluateGroupMessage } from "./value-filter.js";
+import { buildGroupFullPrompt, evaluateGroupMessage } from "../infra/value-filter.js";
 import {
   atBot,
   parseMessagePayload,
@@ -39,7 +40,7 @@ import {
   type PassiveReplyRecord,
   type QqAttachment,
   type QqMessagePayload,
-} from "../shared/types.js";
+} from "../../shared/types.js";
 
 export interface QqRuleContext {
   /** 按 AppID 取机器人运行时；取不到或事件无归属时返回主机器人。 */
@@ -50,7 +51,7 @@ export interface QqRuleContext {
   /** 每聊天长期记忆（memoryEnabled 开启时注入 prompt）。 */
   memory?: ChatMemoryStore;
   /** 主动消息每日配额（/广播 等命令消耗）。 */
-  quota?: import("./quota.js").QuotaTracker;
+  quota?: import("../infra/quota.js").QuotaTracker;
   logger: Pick<Console, "info" | "warn" | "error">;
 }
 
@@ -421,11 +422,12 @@ export function createQqRule({
 
       // QQ 重推去重。
       if (!markSeen(state, delivery.deliveryId)) return null;
-      // 与全量事件的双推送去重（同一条 @ 消息两个事件只处理一次）。
-      if (!markIncoming(state, target.openid, sender, content)) return null;
       const msgId = payload.id ?? "";
       // 定时任务的合成事件没有 msg_id：回复走主动消息通道（消耗配额），放行。
       const scheduled = payload.__scheduled === true;
+      // 与全量事件的双推送去重（同一条 @ 消息两个事件只处理一次）。
+      // 合成事件单次派发、无双推送，且相同 prompt 的重复测试不应被内容去重吞掉——跳过。
+      if (!scheduled && !markIncoming(state, target.openid, sender, content)) return null;
       if (!msgId && !scheduled) {
         logger.warn("[dsh-qqbot] 消息缺少 id，无法被动回复，忽略");
         return null;
@@ -466,7 +468,7 @@ interface EnterConversationArgs {
   bot: BotRuntime;
   agents: QqRuleContext["agents"];
   logger: Pick<Console, "warn" | "error" | "info">;
-  payload: import("../shared/types.js").QqMessagePayload;
+  payload: import("../../shared/types.js").QqMessagePayload;
   target: { scope: "c2c" | "group"; openid: string };
   msgId: string;
   deliveryId: string;
@@ -497,7 +499,7 @@ const CHAT_ONLY_HINT = [
 ].join("\n");
 
 /** 统一会话入口：复用已绑定会话（followup）或请求创建新会话。 */
-function enterConversation(args: EnterConversationArgs): WebhookSessionRequest | null {
+async function enterConversation(args: EnterConversationArgs): Promise<WebhookSessionRequest | null> {
   const {
     bot, agents, logger, payload, target, msgId, deliveryId,
     allowTools, quoteContext, attachmentContext, memoryBlock, quoteMention, promptBuilder,
@@ -526,6 +528,10 @@ function enterConversation(args: EnterConversationArgs): WebhookSessionRequest |
     ...(selfIdx ? { selfIdx } : {}),
   };
   const sender = senderIdOf(payload);
+  // 权限注入：仅 prompt（用户消息）可靠——宿主 WebhookSessionRequest 无逐消息系统提示字段，
+  // 系统提示经 ctx.systemPrompt.section 在会话绑定前组装，按用户注入有竞态。
+  const permissionRaw = config.permissionInjection ? await resolvePermission(bot.appId) : null;
+  const permissionText = permissionRaw ? permissionBlock(permissionRaw) : null;
   // 提示词分层：长期记忆 → 附件上下文 → 引用上下文 → 消息本体，
   // 让模型按「背景 → 附件 → 用户在回应什么 → 用户说什么」的顺序理解。
   const body = allowTools ? promptBuilder() : `${CHAT_ONLY_HINT}\n\n${promptBuilder()}`;
@@ -533,6 +539,7 @@ function enterConversation(args: EnterConversationArgs): WebhookSessionRequest |
   if (quoteContext) prompt = `${quoteContext}\n\n${prompt}`;
   if (attachmentContext) prompt = `${attachmentContext}\n\n${prompt}`;
   if (memoryBlock) prompt = `${memoryBlock}\n\n${prompt}`;
+  if (permissionText) prompt = `${permissionText}\n\n${prompt}`;
 
   // 1) 会话复用：同聊天键已绑定且 Agent 存活 → 直接 followup。
   const boundId = state.chatSession.get(chatKey);

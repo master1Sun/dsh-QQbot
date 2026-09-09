@@ -19,8 +19,8 @@
  */
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pluginDataDir } from "./store-file.js";
-import type { QqMessagePayload } from "../shared/types.js";
+import { pluginDataDir } from "../infra/store-file.js";
+import type { QqMessagePayload } from "../../shared/types.js";
 
 export interface RefIndexEntry {
   /** QQ 引用索引键（REFIDX_*）。 */

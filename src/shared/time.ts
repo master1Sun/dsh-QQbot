@@ -25,6 +25,13 @@ export function shanghaiMonth(date: Date = new Date()): string {
   return `${y}-${m}`;
 }
 
+/** 取上海时间的年月日（用于归档文件按天滚动），形如 2026-09-09。 */
+export function shanghaiDay(date: Date = new Date()): string {
+  const sh = shanghaiWallClock(date);
+  const d = String(sh.getUTCDate()).padStart(2, "0");
+  return `${shanghaiMonth(date)}-${d}`;
+}
+
 /** 序列化为上海时间 ISO 字符串（含 +08:00 偏移，可被 new Date() 往返解析）。 */
 export function toShanghaiISO(date: Date = new Date()): string {
   const shifted = new Date(date.getTime() + SHANGHAI_OFFSET_MS);

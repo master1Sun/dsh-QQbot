@@ -67,8 +67,8 @@ export interface StoredBotConfig {
   agentPresetChat?: string;
   /** 权限 Preset。 */
   permissionPreset?: string;
-  /** "provider/model[:上限]"；留空跟随宿主默认模型。 */
-  model?: string;
+  /** 模型选择（设置页写入 { provider, model }）；兼容历史 "provider/model[:上限]" 字符串，留空跟随宿主默认模型。 */
+  model?: { provider: string; model: string } | string;
   /** AppSecret 的 DSH 凭据引用（优先级高于 appSecret 明文）。 */
   secretEnv?: string;
   /** 是否接受单聊（C2C）消息。 */
@@ -135,6 +135,10 @@ export interface StoredBotConfig {
   ssrfGuard?: boolean;
   /** 本地路径白名单（仅工作区/插件数据目录内的文件可发送）。 */
   localPathWhitelist?: boolean;
+  /** 对话权限注入：把「用户权限设定」块 prepend 到会话 prompt（/perm 自助管理）。 */
+  permissionInjection?: boolean;
+  /** 权限管理员名单（openid 列表；空=不设限，任何人可用 /perm 修改；"*"=全部）。 */
+  permissionAdmins?: string[];
   /** 按群覆盖配置：群 openid → 覆盖字段（聊天行为子集）。 */
   groupOverrides?: Record<string, unknown>;
   [key: string]: unknown;
@@ -150,7 +154,7 @@ export const BOT_CONFIG_FIELDS = [
   "multimodalInbound", "voiceTranscription", "asrEndpoint",
   "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords",
   "memoryEnabled", "quotaPerDay", "replyLocale",
-  "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "groupOverrides",
+  "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "permissionInjection", "permissionAdmins", "groupOverrides",
 ] as const;
 
 /**
@@ -196,6 +200,8 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   sanitizeReplies: true,
   ssrfGuard: true,
   localPathWhitelist: true,
+  permissionInjection: true,
+  permissionAdmins: [],
   groupOverrides: {},
 };
 

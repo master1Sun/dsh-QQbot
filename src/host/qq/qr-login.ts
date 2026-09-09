@@ -9,8 +9,8 @@
  */
 import { startQrConnect, type QrConnectCredentials } from "@tencent-connect/qqbot-connector";
 import QRCode from "qrcode";
-import { saveCredentials, type StoredCredentials } from "./store-file.js";
-import { toShanghaiISO } from "../shared/time.js";
+import { saveCredentials, type StoredCredentials } from "../infra/store-file.js";
+import { toShanghaiISO } from "../../shared/time.js";
 
 export type QrLoginStatus = "idle" | "pending" | "success" | "failure";
 

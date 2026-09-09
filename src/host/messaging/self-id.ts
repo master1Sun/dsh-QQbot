@@ -11,7 +11,7 @@
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pluginDataDir } from "./store-file.js";
+import { pluginDataDir } from "../infra/store-file.js";
 
 function filePath(appId: string): string {
   return join(pluginDataDir(), "self-openids", `${appId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);

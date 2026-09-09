@@ -15,21 +15,25 @@
  *  - 设置界面：dsh 设置页「QQ 机器人」（connection.rpc 通道）。
  */
 import type { Context } from "@deepseek-ai/cordis";
-import { loadConfiguredModels, type ModelOption } from "./catalogs.js";
-import { createAdminService } from "./admin.js";
+import { loadConfiguredModels, type ModelOption } from "./admin/catalogs.js";
+import { createAdminService } from "./admin/admin.js";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
-import { QrLoginManager } from "./qr-login.js";
-import { createQqRule } from "./rule.js";
-import { installReplyPump } from "./reply.js";
-import { makeQqbotRoutes } from "./routes.js";
+import { QrLoginManager } from "./qq/qr-login.js";
+import { createQqRule } from "./messaging/rule.js";
+import { installReplyPump } from "./messaging/reply.js";
+import { makeQqbotRoutes } from "./admin/routes.js";
 import { BotRuntimeManager, type BotRuntime } from "./bots.js";
-import { loadGlobalConfig, saveCredentials, upsertBot, type StoredBot, type StoredCredentials } from "./store-file.js";
-import { ScheduleStore, Scheduler, type ScheduleEntry } from "./schedule.js";
-import { registerQqbotTools } from "./tools.js";
-import { ChatMemoryStore } from "./memory.js";
-import { Outbox } from "./outbox.js";
-import { QuotaTracker } from "./quota.js";
-import { handleRawEvent } from "./events.js";
+import { loadGlobalConfig, saveCredentials, upsertBot, type StoredBot, type StoredCredentials } from "./infra/store-file.js";
+import { ScheduleStore, Scheduler, type ScheduleBus, type ScheduleEntry } from "./schedule/schedule.js";
+import { runCommand, formatCommandResult, composeParsePrompt, normalizeScriptCommand } from "./schedule/command-runner.js";
+import { runScheduledAction } from "./schedule/schedule-actions.js";
+import { createScriptGenerator, type ScriptGenerator, type ScriptGenLlm } from "./schedule/script-gen.js";
+import { sanitizeOutgoingText } from "./messaging/sanitize.js";
+import { registerQqbotTools } from "./chat/tools.js";
+import { ChatMemoryStore } from "./infra/memory.js";
+import { Outbox } from "./messaging/outbox.js";
+import { QuotaTracker } from "./infra/quota.js";
+import { handleRawEvent } from "./messaging/events.js";
 import type { QqbotConfig } from "../shared/config.js";
 
 export const name = "qqbot";
@@ -159,15 +163,34 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   // 定时消息：store + 30s 调度循环（按归属机器人发送）。
   const schedules = new ScheduleStore(logger);
   await schedules.load();
+  // tool 模式 AI 脚本生成器：genPrompt 非空的任务由它生成脚本并回填命令。
+  const scriptGen: ScriptGenerator = createScriptGenerator({
+    store: schedules,
+    resolveModel: (appId?: string) => {
+      const bot = (appId ? bots.get(appId) : undefined) ?? bots.primary();
+      const m = bot?.config.model;
+      return m && typeof m === "object" ? { provider: m.provider, model: m.model } : undefined;
+    },
+    getLlm: () => {
+      const host = ctx;
+      const llm = (typeof host.get === "function" ? host.get("llm") : undefined) ?? host.llm;
+      return llm as unknown as ScriptGenLlm | undefined;
+    },
+    logger,
+  });
   // 主动消息每日配额（以主机器人配置为准）。
   const quota = new QuotaTracker(logger, () => bots.primary()?.config.quotaPerDay ?? 50);
   // AI 模式定时任务：把 prompt 当作合成事件注入 webhookRuntime，
   // 机器人在目标聊天创建会话生成内容并回复（回复走主动消息通道，消耗配额）。
-  const generateAndSend = async (entry: ScheduleEntry, bot: BotRuntime): Promise<void> => {
+  // 返回 deliveryId 供测试执行等待真实投递结果。
+  const dispatchPrompt = (bot: BotRuntime, entry: ScheduleEntry, text: string): string => {
     if (!runtime) throw new Error("webhook 运行时不可用，AI 定时任务无法创建会话");
     const eventId = `sched-${entry.id}-${Date.now()}`;
     const deliveryId = `qqws:${eventId}`;
     const isGroup = entry.scope === "group";
+    // 合成事件绕过真实 websocket 入口，必须手动登记 deliveryId→bot 映射，
+    // 否则 reply pump 的 botForDelivery 解析失败 → 会话不绑定 → 消息永不发送。
+    bots.registerDelivery(deliveryId, bot.appId);
     runtime.dispatch({
       kind: "qq",
       source: bot.config.source,
@@ -180,7 +203,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
           t: isGroup ? "GROUP_AT_MESSAGE_CREATE" : "C2C_MESSAGE_CREATE",
           d: {
             id: eventId,
-            content: entry.content,
+            content: text,
             timestamp: new Date().toISOString(),
             ...(isGroup ? { group_openid: entry.openid } : {}),
             author: isGroup
@@ -193,15 +216,60 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       },
       receivedAt: Date.now(),
     } as never);
+    return deliveryId;
+  };
+  const generateAndSend = async (entry: ScheduleEntry, bot: BotRuntime): Promise<string> => {
+    return dispatchPrompt(bot, entry, entry.content);
+  };
+  // tool 模式：优先走动作注册表（send_message/send_image/...），否则执行命令；
+  // resultMode=ai 把命令输出交给 AI 整理后播报，raw 直接发格式化结果。
+  const executeTool = async (entry: ScheduleEntry, bot: BotRuntime): Promise<void> => {
+    if (!entry.command && entry.tool) {
+      await runScheduledAction(entry.tool, entry.args, { bot, scope: entry.scope, openid: entry.openid, logger });
+      return;
+    }
+    const raw = entry.command?.trim();
+    if (!raw) throw new Error("该定时任务未配置要执行的命令");
+    const command = normalizeScriptCommand(raw) ?? raw;
+    if (command !== raw) {
+      logger.info(`[dsh-qqbot] 定时任务命令已按扩展名自动改写：${raw} → ${command}`);
+      entry.command = command;
+    }
+    const result = await runCommand(command, { cwd: entry.cwd });
+    logger.info(
+      `[dsh-qqbot] 定时任务命令执行完毕 ok=${result.ok} exit=${result.exitCode ?? "-"} ${Math.round(result.durationMs)}ms → ${entry.scope}:${entry.openid}`
+    );
+    const output = result.stdout.trim();
+    if (!result.ok || output.length === 0) {
+      const reason = !result.ok
+        ? result.stdout.trim() || result.stderr.trim() || result.error || `命令执行失败（退出码 ${result.exitCode ?? "?"}）`
+        : "脚本执行成功但无输出内容";
+      entry.lastError = reason;
+      throw new Error(reason);
+    }
+    if (entry.resultMode === "ai") {
+      dispatchPrompt(bot, entry, composeParsePrompt(command, result));
+      return;
+    }
+    await bot.client.sendText(
+      { scope: entry.scope, openid: entry.openid },
+      sanitizeOutgoingText(formatCommandResult(result), { enabled: bot.config.sanitizeReplies })
+    );
   };
   const scheduler = new Scheduler({
     store: schedules,
     resolveBot: (appId?: string) => (appId ? bots.get(appId) : undefined) ?? bots.primary(),
     quota,
     generateAndSend,
+    executeTool,
     logger,
+    // 宿主会话总线：测试执行时监听 session/event 等待真实投递结果
+    //（cordis ctx 运行时有 on/off，静态类型缺 off，此处断言）。
+    bus: ctx as unknown as ScheduleBus,
   });
   scheduler.start();
+  // 启动时把遗留的「脚本生成中」任务重新入队（上次进程中断的补偿）。
+  scriptGen.flushPending();
 
   // 每聊天长期记忆 + 投递出箱（可靠性）。
   const memory = new ChatMemoryStore(logger);
@@ -291,6 +359,8 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     bots,
     gconf,
     schedules,
+    scheduler,
+    scriptGen,
     qr,
     logger,
     runtimeReady: () => Boolean(runtime),
@@ -402,7 +472,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   }
 
   // AI 工具：让模型帮忙设置/取消/查看定时消息、发送主动消息与图片、管理长期记忆。
-  const disposeTools = registerQqbotTools(ctx, { bots, store: schedules, memory, logger });
+  const disposeTools = registerQqbotTools(ctx, { bots, store: schedules, scriptGen, memory, logger });
 
   // HTTP 路由：管理端点（status / qr / send）。
   const route = makeQqbotRoutes({ logger, admin });
@@ -431,7 +501,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
 
   // 启动时按 bots.json 重建所有已启用机器人的连接（不阻塞 dsh 启动，结果看日志）。
   const anyConfigured = await (async () => {
-    const { loadBotsFile } = await import("./store-file.js");
+    const { loadBotsFile } = await import("./infra/store-file.js");
     const file = await loadBotsFile();
     return file.bots.some((b) => b.enabled);
   })();

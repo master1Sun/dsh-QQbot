@@ -30,7 +30,7 @@ QQ 聊天窗口 ◀──被动回复──── 回复泵（session/event，�
 - **AI 工具**：`qqbot_schedule_list` / `qqbot_schedule_add`（支持 mode=ai）/ `qqbot_schedule_remove` / `qqbot_send_message` / `qqbot_send_image` / `qqbot_send_file` / `qqbot_send_voice` / `qqbot_memory_add` / `qqbot_memory_list` / `qqbot_memory_clear`，通过 `exec.agent.id` 反查当前聊天与来源机器人，用户说「每天九点提醒我喝水」「记住这个群在准备团建」即可自动完成。
 - **登录方式**：设置页「添加机器人」——扫码（官方 SDK 下发凭据）或手动填写 AppID/AppSecret，凭据按机器人写入 `bots.json` 并立即热生效；`secretEnv`（DSH 凭据引用，优先级最高）在机器人详情中按机器人配置；终端 `dsh-qqbot login` 扫码写入 `credentials.json`（0600），作为 entry 单机器人模式的兜底凭据。
 - **设置界面**：dsh 设置 → **QQ 机器人**，机器人列表卡片（主机器人标识 / 启用状态 / 连接状态）→ 点卡片进详情（连接状态、行为配置、运行统计、移除接入），支持添加 / 删除 / 启用停用 / 设为主机器人 / 重试连接。
-- **消息归档**：`~/.dsh/qqbot/archive/archive-YYYY-MM.jsonl`，记录 inbound / reply / proactive / session，可在设置中开关。
+- **消息归档**：`~/.dsh/qqbot/archive/archive-YYYY-MM-DD.jsonl`（按天一个文件，上海时间；旧版月文件首次使用时自动拆分迁移），记录 inbound / reply / proactive / session，可在设置中开关。
 - **被动回复**：按 `msg_id` + `msg_seq` 回复，遵守官方限额（群 5 分钟 / 5 次，单聊 60 分钟 / 4 次）；优先 Markdown（失败逐片降级纯文本），超长自动分片。
 - **回复引用**：出站引用为**原生引用卡片**——按 `quoteReply` 范围（`at` 仅群 @，`all` 全部，`off` 不引用；单聊一律不引用）附带 `message_reference`，QQ 客户端渲染为可点击定位到用户原消息的引用卡片。带引用的消息走主动消息通道（不传 `msg_id`）：实测 `msg_id` 与 `message_reference` 同传时，手机端同一条内容会出现两次（电脑端正常）；仅 `msg_id` 则两端都不显示引用；仅 `message_reference` 是「有引用且内容只出现一次」的唯一组合。卡片仅在**平台明确拒绝**（HTTP 4xx，确定未创建消息）时降级为普通被动回复；结果不确定的失败（超时/网络/5xx）不重发，直接走投递出箱——结果不确定时重发正是「同一条内容出现两次」的来源。入站方向始终生效：本地维护 REFIDX 引用索引（`~/.dsh/qqbot/ref-index-<appId>.jsonl`），用户引用聊天中某条消息时，被引用原文恢复后注入模型上下文（标注为外部未信任数据）。
 - **AI 报错提示**：AI 请求失败（如 API 余额不足、超时）时向来源聊天回复 `⚠️ AI 回复出错：<平台错误信息>`，不再静默无回复；已有部分正常文本则附加在文本之后。同一聊天 60 秒内最多提示一次，连续报错不刷屏。
@@ -75,7 +75,13 @@ npm run build:types  # 类型声明输出到根 types/（可选）
 ## 目录结构
 
 ```
-src/host/     插件运行时（bots/admin/rule/reply/schedule/qq(api+ws)…）
+src/host/     插件运行时（入口 index.ts + bots.ts，按功能分子目录）
+  ├─ admin/      设置页 RPC 与管理（admin/routes/catalogs/updater）
+  ├─ messaging/  消息收发管线（rule/reply/events/state/outbox/sanitize/quote/ref-index/self-id）
+  ├─ schedule/   定时任务与脚本执行（schedule/schedule-actions/script-gen/command-runner）
+  ├─ chat/       聊天命令与宿主工具（commands/tools）
+  ├─ qq/         QQ 平台对接（api/ws/qr-login）
+  └─ infra/      基础设施（store-file/quota/net-guard/value-filter/memory/permissions/archive/stats）
 src/client/   设置界面（index.tsx + i18n.ts，挂 dsh 设置页「QQ 机器人」）
 src/shared/   前后端共用（config / time / types）
 src/cli.ts    终端凭据管理 CLI（build:cli 单独打包）
@@ -123,7 +129,7 @@ verify-client.mjs / render-verify.mjs   根级契约与渲染校验
 | `maxRepliesPerMessage` | `5` | 每条消息最多被动回复次数（官方上限） |
 | `markdownReply` | `true` | 优先 Markdown 回复，被拒降级纯文本 |
 | `sanitizeReplies` | `true` | 发送前剥离 `system-reminder`/`<think>` 等隐藏标签块（出站防泄漏） |
-| `quoteReply` | `at` | 出站引用范围（仅群聊生效，单聊一律不引用）：`off` 不引用；`at` 仅群 @ 回复（推荐）；`all` 群聊全部回复。引用为原生 `message_reference` 卡片，走主动消息通道（不传 `msg_id`，两者同传手机端内容会重复）；仅平台明确拒绝（HTTP 4xx）时降级普通被动回复，结果不确定的失败（超时/网络/5xx）不重发、走投递出箱 |
+| `quoteReply` | `at` | 出站引用范围（仅群聊生效，单聊一律不引用）：`off` 不引用；`at` 仅群 @ 回复（推荐）；`all` 群聊全部回复。引用为原生 `message_reference` 卡片，与被动回复凭证 `msg_id` **同传**（2026-09 实测矩阵：仅 `message_reference` 的主动消息通道手机端同一条内容出现两条；仅 `msg_id` 不显示引用；被动同传是唯一可行组合；合成事件无 `msg_id` 不引用）；仅平台明确拒绝（HTTP 4xx）时降级普通被动回复，结果不确定的失败（超时/网络/5xx）不重发、走投递出箱。降级发生时会在消息归档写一条 note（含平台拒绝原因） |
 | `quoteMaxChars` | `120` | 引用原话注入上下文的字数上限（入站引用恢复用） |
 | `archiveEnabled` | `true` | 消息本地归档（审计轨迹） |
 | `proactiveFallback` | `false` | 被动回复失败时改用主动消息重发 |

@@ -12,12 +12,13 @@ import { homedir } from "node:os";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ModelOption } from "./catalogs.js";
-import type { QrLoginManager } from "./qr-login.js";
-import type { ScheduleStore, ScheduleEntry } from "./schedule.js";
-import { readArchiveRecords } from "./archive.js";
+import type { QrLoginManager } from "../qq/qr-login.js";
+import type { ScheduleStore, ScheduleEntry, Scheduler } from "../schedule/schedule.js";
+import type { ScriptGenerator } from "../schedule/script-gen.js";
+import { listArchiveDays, readArchiveDay, readArchiveRecords, removeArchiveDay } from "../infra/archive.js";
 import { applyUpdate, checkUpdate } from "./updater.js";
-import { toShanghaiISO } from "../shared/time.js";
-import type { BotRuntimeManager, BotRuntime } from "./bots.js";
+import { toShanghaiISO } from "../../shared/time.js";
+import type { BotRuntimeManager, BotRuntime } from "../bots.js";
 import {
   patchBotConfig,
   removeBot as storeRemoveBot,
@@ -28,10 +29,10 @@ import {
   BOT_CONFIG_FIELDS,
   type GlobalConfig,
   type StoredBot,
-} from "./store-file.js";
-import type { QqbotConfig } from "../shared/config.js";
-import { resolveConfig, stringifyModelSelection } from "../shared/config.js";
-import type { ReplyTarget } from "../shared/types.js";
+} from "../infra/store-file.js";
+import type { QqbotConfig } from "../../shared/config.js";
+import { resolveConfig, stringifyModelSelection } from "../../shared/config.js";
+import type { ReplyTarget } from "../../shared/types.js";
 
 export interface AdminServiceContext {
   /** 多机器人运行时：所有按 appId 的查询 / 操作入口。 */
@@ -39,6 +40,10 @@ export interface AdminServiceContext {
   /** 全局配置（仅 adminToken；其余配置一律按机器人独立保存）。 */
   gconf: GlobalConfig;
   schedules: ScheduleStore;
+  /** 调度器：设置页「测试」按钮执行一次（schedule.runOnce）。 */
+  scheduler?: Scheduler;
+  /** AI 脚本生成器：保存含 genPrompt 的任务后入队生成。 */
+  scriptGen?: ScriptGenerator;
   qr: QrLoginManager;
   logger: Pick<Console, "info" | "warn" | "error">;
   /** webhook 运行时是否可用（不可用时 QQ 消息不会创建会话）。 */
@@ -56,7 +61,7 @@ const maskAppId = (appId: string): string =>
   appId.length <= 8 ? appId : `${appId.slice(0, 4)}••••${appId.slice(-4)}`;
 
 export function createAdminService(ctx: AdminServiceContext) {
-  const { bots, gconf, schedules, qr, logger, runtimeReady } = ctx;
+  const { bots, gconf, schedules, scriptGen, qr, logger, runtimeReady } = ctx;
   const primaryAppId = () => bots.primaryAppId();
 
   /** 单个机器人的可序列化摘要（bots.list / status 共用）。 */
@@ -341,12 +346,49 @@ export function createAdminService(ctx: AdminServiceContext) {
       type: String(payload.type ?? ""),
       time: typeof payload.time === "string" ? payload.time : undefined,
       minutes: typeof payload.minutes === "number" ? payload.minutes : undefined,
-      content: String(payload.content ?? ""),
+      cron: typeof payload.cron === "string" ? payload.cron : undefined,
+      tz: typeof payload.tz === "string" ? payload.tz : undefined,
+      at: typeof payload.at === "string" ? payload.at : undefined,
+      weekdays: Array.isArray(payload.weekdays) ? payload.weekdays.map((w) => Number(w)).filter((w) => Number.isFinite(w)) : undefined,
+      content: typeof payload.content === "string" ? payload.content : undefined,
+      command: typeof payload.command === "string" ? payload.command : undefined,
+      cwd: typeof payload.cwd === "string" ? payload.cwd : undefined,
+      resultMode: payload.resultMode === "ai" || payload.resultMode === "raw" ? payload.resultMode : undefined,
+      genPrompt: typeof payload.genPrompt === "string" ? payload.genPrompt : undefined,
+      tool: typeof payload.tool === "string" ? payload.tool : undefined,
+      args: payload.args && typeof payload.args === "object" && !Array.isArray(payload.args) ? payload.args as Record<string, unknown> : undefined,
       createdBy: "settings",
       appId,
-      ...(payload.mode === "ai" || payload.mode === "text" ? { mode: payload.mode } : {}),
+      ...(payload.mode === "ai" || payload.mode === "text" || payload.mode === "tool" ? { mode: payload.mode } : {}),
+      // 省略 enabled 时：新建=启用，编辑=保留原状态。
+      ...(typeof payload.enabled === "boolean" ? { enabled: payload.enabled } : {}),
     });
-    return added.ok ? { ok: true, data: { schedule: added.entry } } : { ok: false, error: added.error };
+    if (added.ok) {
+      if (added.entry?.genStatus === "pending") scriptGen?.enqueue(added.entry);
+      return { ok: true, data: { schedule: added.entry } };
+    }
+    return { ok: false, error: added.error };
+  };
+
+  /** 启用 / 禁用（设置页行内开关）。 */
+  const scheduleSetEnabled = async (payload: { id?: unknown; enabled?: unknown }) => {
+    const id = typeof payload.id === "string" ? payload.id.trim() : "";
+    if (!id) return { ok: false, error: "缺少 id" };
+    if (typeof payload.enabled !== "boolean") return { ok: false, error: "enabled 必须是布尔值" };
+    const res = await schedules.setEnabled(id, payload.enabled);
+    if (!res.ok) return { ok: false, error: res.error };
+    logger.info(`[dsh-qqbot] 定时任务 ${id} 已${payload.enabled ? "启用" : "禁用"}`);
+    return { ok: true, data: { schedule: res.entry } };
+  };
+
+  /** 测试执行一次（真实发送，但不计入主动消息配额、不改下次触发时间）。 */
+  const scheduleRunOnce = async (payload: { id?: unknown }) => {
+    const id = typeof payload.id === "string" ? payload.id.trim() : "";
+    if (!id) return { ok: false, error: "缺少 id" };
+    if (!ctx.scheduler) return { ok: false, error: "调度器不可用" };
+    const r = await ctx.scheduler.runOnce(id);
+    if (r.ok) return { ok: true, data: { message: r.message } };
+    return { ok: false, error: r.message };
   };
 
   const scheduleRemove = async (payload: { scope?: unknown; openid?: unknown; id?: unknown; index?: unknown }) => {
@@ -364,11 +406,36 @@ export function createAdminService(ctx: AdminServiceContext) {
 
   // ── 消息归档（设置页「消息归档」弹窗：只读最近记录） ─────────────────────────
 
-  const archiveList = async (payload: { appId?: unknown; limit?: unknown }) => {
-    const appId = typeof payload.appId === "string" && payload.appId ? payload.appId : primaryAppId();
+  const archiveAppId = (payload: { appId?: unknown }) =>
+    typeof payload.appId === "string" && payload.appId ? payload.appId : primaryAppId();
+
+  const archiveList = async (payload: { appId?: unknown; limit?: unknown; day?: unknown }) => {
+    const appId = archiveAppId(payload);
+    // 带 day：读该天归档（设置页日期列表点击进入）。
+    if (typeof payload.day === "string" && payload.day) {
+      const result = await readArchiveDay({ bot: appId, day: payload.day, limit: 500 });
+      return { ok: true, data: { appId, day: payload.day, ...result } };
+    }
     const limit = typeof payload.limit === "number" && Number.isSafeInteger(payload.limit) ? payload.limit : undefined;
     const result = await readArchiveRecords({ bot: appId, limit });
     return { ok: true, data: { appId, ...result } };
+  };
+
+  /** 列举每个归档天的条数（顺带触发旧月文件 → 天文件迁移）。 */
+  const archiveDays = async (payload: { appId?: unknown }) => {
+    const appId = archiveAppId(payload);
+    const days = await listArchiveDays(appId, logger);
+    return { ok: true, data: { appId, days } };
+  };
+
+  /** 删除某天归档中当前机器人的记录（其余机器人的保留）。 */
+  const archiveRemoveDay = async (payload: { appId?: unknown; day?: unknown }) => {
+    const appId = archiveAppId(payload);
+    const day = typeof payload.day === "string" ? payload.day : "";
+    const result = await removeArchiveDay({ bot: appId, day });
+    logger.info(`[dsh-qqbot] 已删除归档 ${day} 中机器人 ${appId} 的 ${result.removed} 条记录${result.fileDeleted ? "（天文件已整删）" : ""}`);
+    const days = await listArchiveDays(appId, logger);
+    return { ok: true, data: { appId, day, ...result, days } };
   };
 
   // ── 版本检查与自更新（GitHub master1Sun/dsh-QQbot） ──────────────────────────
@@ -435,7 +502,11 @@ export function createAdminService(ctx: AdminServiceContext) {
         case "schedule.list": result = await scheduleList(payload); break;
         case "schedule.add": result = await scheduleAdd(payload); break;
         case "schedule.remove": result = await scheduleRemove(payload); break;
+        case "schedule.setEnabled": result = await scheduleSetEnabled(payload); break;
+        case "schedule.runOnce": result = await scheduleRunOnce(payload); break;
         case "archive.list": result = await archiveList(payload); break;
+        case "archive.days": result = await archiveDays(payload); break;
+        case "archive.removeDay": result = await archiveRemoveDay(payload); break;
         case "stats.reset": {
           const bot = await bots.resetCounters(typeof payload.appId === "string" ? payload.appId : undefined);
           result = bot

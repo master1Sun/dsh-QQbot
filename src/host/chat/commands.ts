@@ -14,15 +14,16 @@
 import { randomUUID } from "node:crypto";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { MessageId } from "@deepseek-ai/dsh-llm";
-import type { QqApiClient } from "./qq/api.js";
-import { PASSIVE_REPLY_LIMIT } from "./qq/api.js";
-import type { QqbotConfig } from "../shared/config.js";
-import { helpText, tr, type ReplyLocale } from "../shared/reply-i18n.js";
-import { MAX_SCHEDULES_PER_CHAT, type ScheduleEntry, type ScheduleStore } from "./schedule.js";
-import type { ChatMemoryStore, MemoryEntry } from "./memory.js";
-import type { QuotaTracker } from "./quota.js";
-import { lastSent, rememberSent } from "./state.js";
-import type { BotState, PassiveReplyRecord, ReplyTarget } from "../shared/types.js";
+import type { QqApiClient } from "../qq/api.js";
+import { PASSIVE_REPLY_LIMIT } from "../qq/api.js";
+import type { QqbotConfig } from "../../shared/config.js";
+import { helpText, tr, type ReplyLocale } from "../../shared/reply-i18n.js";
+import { MAX_SCHEDULES_PER_CHAT, type ScheduleEntry, type ScheduleStore } from "../schedule/schedule.js";
+import type { ChatMemoryStore, MemoryEntry } from "../infra/memory.js";
+import type { QuotaTracker } from "../infra/quota.js";
+import { lastSent, rememberSent } from "../messaging/state.js";
+import { clearDefault, isPermissionAdmin, readDefault, writeDefault } from "../infra/permissions.js";
+import type { BotState, PassiveReplyRecord, ReplyTarget } from "../../shared/types.js";
 
 export interface CommandContext {
   getConfig: () => QqbotConfig;
@@ -167,7 +168,7 @@ export async function runCommand(
           return { handled: true };
         }
         const result = await ctx.schedules.remove(scope, openid, target);
-        await reply(result.ok ? T(`已删除：${describe(result.entry, 0).slice(3)}`) : T(result.error));
+        await reply(result.ok ? T(`已删除：${describe(result.entry!, 0).slice(3)}`) : T(result.error ?? ""));
         return { handled: true };
       }
 
@@ -179,7 +180,7 @@ export async function runCommand(
         });
         await reply(result.ok
           ? T(`已设置：每天 ${daily[1]} 发送「${daily[2].slice(0, 50)}」`)
-          : T(result.error));
+          : T(result.error ?? ""));
         return { handled: true };
       }
 
@@ -192,7 +193,7 @@ export async function runCommand(
         });
         await reply(result.ok
           ? T(`已设置：每 ${minutes} 分钟发送「${interval[3].slice(0, 50)}」`)
-          : T(result.error));
+          : T(result.error ?? ""));
         return { handled: true };
       }
 
@@ -312,6 +313,39 @@ export async function runCommand(
         source: { kind: "user" },
       });
       await reply(T("已向当前任务补充指令。"));
+      return { handled: true };
+    }
+    case "/perm":
+    case "/权限": {
+      // 默认权限自助管理：view 任何人可读；set/clear 受 permissionAdmins 约束
+      // （名单为空=不设限，任何人可改；"*"=全部）。
+      const isAdmin = isPermissionAdmin(config.permissionAdmins, sender);
+      const parts = arg.split(/\s+/);
+      const sub = (parts[0] ?? "").toLowerCase();
+      const rest = arg.slice(sub.length).trim();
+      if (sub === "view") {
+        const current = await readDefault(ctx.appId);
+        await reply(current ? `${T("当前默认权限：")}\n\n${current}` : T("尚未设置默认权限。"));
+      } else if (sub === "set") {
+        if (!isAdmin) {
+          await reply(T("只有权限管理员可以设置默认权限（permissionAdmins 已配置名单，仅名单内可改）。"));
+          return { handled: true };
+        }
+        if (!rest) {
+          await reply(T("用法：/perm set <对所有用户生效的权限内容>"));
+          return { handled: true };
+        }
+        await writeDefault(ctx.appId, rest);
+        await reply(T("已保存所有用户的默认权限，新对话将注入。"));
+      } else if (sub === "clear") {
+        if (!isAdmin) {
+          await reply(T("只有权限管理员可以清除默认权限（permissionAdmins 已配置名单，仅名单内可改）。"));
+          return { handled: true };
+        }
+        await reply(await clearDefault(ctx.appId) ? T("已清除默认权限。") : T("没有可清除的默认权限。"));
+      } else {
+        await reply(T("用法：/perm set <内容> | /perm view | /perm clear"));
+      }
       return { handled: true };
     }
 

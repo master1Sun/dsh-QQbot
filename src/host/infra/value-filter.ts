@@ -8,7 +8,7 @@
  *
  * 直接 @机器人（GROUP_AT_MESSAGE_CREATE）与单聊不经过此过滤，始终回复。
  */
-import type { GroupBufferEntry, QqMessagePayload } from "../shared/types.js";
+import type { GroupBufferEntry, QqMessagePayload } from "../../shared/types.js";
 
 export interface ValueFilterConfig {
   /** 是否启用群全量回复。 */

@@ -8,7 +8,7 @@
  */
 import { unlink } from "node:fs/promises";
 import { qrConnect } from "@tencent-connect/qqbot-connector";
-import { credentialsPath, loadCredentials, pluginDataDir, saveCredentials, type StoredCredentials } from "./host/store-file.js";
+import { credentialsPath, loadCredentials, pluginDataDir, saveCredentials, type StoredCredentials } from "./host/infra/store-file.js";
 import { toShanghaiISO } from "./shared/time.js";
 
 const HELP = [

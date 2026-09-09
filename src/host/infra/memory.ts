@@ -36,11 +36,30 @@ function memoryPath(chatKey: string): string {
   return join(pluginDataDir(), "memory", `${safeName(chatKey)}.md`);
 }
 
+/** 单个字符的终端显示宽度：全角/宽符号（CJK、全角标点、韩文等）算 2，其余算 1。 */
+function charWidth(ch: string): number {
+  return /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6\u3000-\u303F]/.test(ch)
+    ? 2
+    : 1;
+}
+
+/** 按显示宽度截断（中文按 2 个宽度计），避免全角内容实际占位超限。 */
+function truncateByWidth(text: string, maxChars: number): string {
+  let width = 0;
+  let out = "";
+  for (const ch of text) {
+    width += charWidth(ch);
+    if (width > maxChars) break;
+    out += ch;
+  }
+  return out;
+}
+
 /**
  * 净化记忆文本——只留对话内容本身：
  *  - 剥离 markdown 标记（* _ ~ ` # >）与 emoji/符号图元（\p{Extended_Pictographic}，含 ★ ● ◆ 等）；
  *  - 剥离装饰性标签框（【】〖〗）与行首列表符/编号（- 1. ① 等）；
- *  - 折叠连续空白，截断到单条上限。
+ *  - 折叠连续空白，截断到单条上限（按显示宽度）。
  */
 export function sanitizeMemoryText(raw: string, maxChars = MEMORY_MAX_CHARS): string {
   let text = raw.normalize("NFC");
@@ -49,7 +68,7 @@ export function sanitizeMemoryText(raw: string, maxChars = MEMORY_MAX_CHARS): st
   text = text.replace(/[【〖】〗]/g, "");
   text = text.replace(/^\s*(?:[-*•·–—]|\d{1,3}[.)、]|[①-⑳])\s*/g, "");
   text = text.replace(/\s{2,}/g, " ").trim();
-  return text.slice(0, maxChars);
+  return truncateByWidth(text, maxChars);
 }
 
 export class ChatMemoryStore {

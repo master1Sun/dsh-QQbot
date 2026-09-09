@@ -11,16 +11,16 @@
  *   sessionId  → appId（会话绑定时登记）
  * 回复泵据此把助手回复发回「来源机器人」的聊天，而不是全局单例客户端。
  */
-import { createBotState } from "./state.js";
-import { createValueFilterState } from "./value-filter.js";
-import { Archiver } from "./archive.js";
-import { RefIndex } from "./ref-index.js";
-import { SelfOpenidStore } from "./self-id.js";
+import { createBotState } from "./messaging/state.js";
+import { createValueFilterState } from "./infra/value-filter.js";
+import { Archiver } from "./infra/archive.js";
+import { RefIndex } from "./messaging/ref-index.js";
+import { SelfOpenidStore } from "./messaging/self-id.js";
 import { QqApiClient } from "./qq/api.js";
 import { QqWsSource, type WsStatus } from "./qq/ws.js";
-import { StatsStore, ZERO_COUNTERS } from "./stats.js";
+import { StatsStore, ZERO_COUNTERS } from "./infra/stats.js";
 import { resolveConfig, type QqbotConfig } from "../shared/config.js";
-import { loadBotsFile, type BotsFile, type StoredBot } from "./store-file.js";
+import { loadBotsFile, type BotsFile, type StoredBot } from "./infra/store-file.js";
 import type { BotState, QqEnvelope } from "../shared/types.js";
 
 export interface BotRuntime {

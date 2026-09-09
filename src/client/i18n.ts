@@ -30,6 +30,10 @@ const EN = Object.freeze({
   "跟随 Host 默认": "Follow host default",
   "关闭": "Close",
   "取消": "Cancel",
+  "确定": "OK",
+  "确认操作": "Confirm",
+  "确认删除": "Delete",
+  "确认禁用": "Disable",
   "刷新": "Refresh",
   "刷新中…": "Refreshing…",
   "加载中…": "Loading…",
@@ -347,9 +351,8 @@ const EN = Object.freeze({
   "每天（指定时刻）": "Daily (set time)",
   "间隔（循环分钟）": "Interval (minutes)",
   "每天发送时间": "Daily time",
-  "上海时间（UTC+8），24 小时制 HH:mm，例如 09:30。":
-    "Asia/Shanghai time (UTC+8), 24-hour HH:mm, e.g. 09:30.",
-  "09:30": "09:30",
+  "上海时间（UTC+8）；点击输入框用时间选择器选取。":
+    "Asia/Shanghai time (UTC+8); click the field to pick a time.",
   "间隔分钟": "Interval minutes",
   "两次发送之间的间隔分钟数，最小 5 分钟。间隔越小消耗的主动消息配额越多。":
     "Minutes between sends, minimum 5. Shorter intervals consume more proactive-message quota.",
@@ -386,8 +389,8 @@ const EN = Object.freeze({
   "列出这个机器人名下的全部定时消息（每天定时与间隔循环），可单条删除；删除立即生效并落盘。":
     "Lists all scheduled messages under this bot (daily and interval), each removable; removal takes effect immediately and is persisted.",
   "查看定时消息": "View scheduled messages",
-  "开启「消息本地归档」后，收发的消息会写入 ~/.dsh/qqbot/archive/（按月分文件）。这里只读展示最近的记录，最新在前。":
-    "With \"message archiving\" on, sent/received messages are written to ~/.dsh/qqbot/archive/ (one file per month). This shows recent records read-only, newest first.",
+  "开启「消息本地归档」后，收发的消息会写入 ~/.dsh/qqbot/archive/（按天分文件）。这里只读展示最近的记录，最新在前。":
+    "With \"message archiving\" on, sent/received messages are written to ~/.dsh/qqbot/archive/ (one file per day). This shows recent records read-only, newest first.",
   "查看归档": "View archive",
 
   // ── replyLocale 下拉 ──
@@ -401,8 +404,11 @@ const EN = Object.freeze({
   "这个机器人名下的全部定时发送任务（含聊天命令与 AI 设置的）":
     "All scheduled send tasks under this bot (from chat commands and AI alike)",
   "正在读取定时消息…": "Loading scheduled messages…",
-  "还没有定时消息。可在聊天里发 /定时 每天 09:00 内容，或直接让 AI 帮你设置。":
-    "No scheduled messages yet. Send /定时 daily 09:00 text in chat, or just ask the AI to set one up.",
+  "还没有定时消息。可在聊天里发 /定时 每天 09:00 内容、让 AI 帮你设置，或点上方「＋ 新增」。":
+    "No scheduled messages yet. Send /定时 daily 09:00 text in chat, ask the AI to set one up, or click “＋ New” above.",
+  "＋ 新增": "＋ New",
+  "新增定时消息": "New scheduled message",
+  "创建": "Create",
   "AI 生成": "AI-generated",
   "来自设置页": "From settings",
   "来自 AI": "From AI",
@@ -411,13 +417,39 @@ const EN = Object.freeze({
   "删除中…": "Removing…",
   "确定删除这条定时消息？删除后立即停止发送。":
     "Remove this scheduled message? It stops sending immediately.",
+  // ── 定时任务启用 / 禁用 ──
+  "禁用": "Disable",
+  "已禁用": "Disabled",
+  "禁用中…": "Disabling…",
+  "启用中…": "Enabling…",
+  "已禁用，不会执行": "Disabled — will not run",
+  "确定禁用这条定时任务？禁用后不再执行，可随时重新启用。":
+    "Disable this scheduled task? It stops running until you re-enable it.",
+  // ── 定时任务 AI 脚本生成 ──
+  "命令来源": "Command source",
+  "手写命令": "Manual command",
+  "AI 生成脚本": "AI-generate script",
+  "AI 脚本描述词": "AI script prompt",
+  "脚本生成中…": "Generating script…",
+  "脚本生成失败": "Script generation failed",
+  "生成完成后开始执行；已过的触发时刻不补跑": "Runs once the script is ready; missed times are not replayed",
+  "脚本生成中…完成后自动回填命令并按计划执行。": "Generating script… The command is filled in automatically when done, then the schedule resumes.",
+  "手写命令=自己写完整命令行；AI 生成脚本=只写任务描述，保存后由 AI 后台生成脚本并自动回填命令。":
+    "Manual command = write the full command line yourself; AI-generate script = just describe the task, and AI writes the script in the background and fills in the command automatically.",
+  "描述这个定时任务要做的事（如「抓取某网页今日价格并输出一行文本」）。保存后 AI 后台生成脚本：生成期间任务不执行；完成后自动按计划执行（已过的触发时刻不补跑）。":
+    "Describe what this scheduled task should do (e.g. \"fetch today's price from a page and print one line\"). After saving, AI generates the script in the background: the task does not run until it is ready, then resumes on schedule (missed times are not replayed).",
 
   // ── 归档弹窗 ──
   "本地落盘的最近收发记录（只读，最新在前；按当前机器人过滤）":
     "Recent locally archived messages (read-only, newest first; filtered by the current bot)",
+  "本地落盘的收发记录（按当前机器人过滤）：左栏选日期查看内容，× 删除该天归档":
+    "Locally archived messages (filtered by the current bot): pick a date on the left to view it, click × to delete that day's archive",
   "正在读取归档…": "Loading archive…",
-  "归档为空。开启「消息本地归档」并收到消息后，这里会出现记录。":
-    "Archive is empty. Records appear here once \"message archiving\" is on and messages arrive.",
+  "该天没有记录。开启「消息本地归档」并收到消息后，这里会出现记录。":
+    "No records on this day. Records appear here once \"message archiving\" is on and messages arrive.",
+  "归档日期文件": "Archive date files",
+  "暂无归档文件": "No archive files yet",
+  "删除该天归档（仅此机器人的记录）": "Delete this day's archive (only this bot's records)",
   "收到": "Received",
   "回复": "Reply",
   "主动": "Proactive",
@@ -486,6 +518,137 @@ const EN = Object.freeze({
     "Banned words that only apply to this group (comma-separated). A hit recalls the message and skips the reply; combined with bot-level banned words.",
   "词1, 词2（留空跟随默认）": "word1, word2 (leave empty to follow default)",
   "保存后立即生效，无需重启": "Takes effect immediately after saving — no restart needed",
+  // ── 定时任务管理（daily / interval / cron / at × 文本 / AI / 执行命令）──
+  "定时任务管理": "Scheduled task manager",
+  "支持 daily / interval / cron / at 四种触发条件，以及 文本 / AI 生成 / 执行命令 三种执行方式。":
+    "Four triggers — daily / interval / cron / at — and three actions: text / AI-generated / run a command.",
+  "待补算": "TBD",
+  "新增定时任务": "New scheduled task",
+  "正在读取定时任务…": "Loading scheduled tasks…",
+  "还没有定时任务。可在聊天里发 /定时 每天 09:00 内容、让 AI 帮你设置，或点上方「＋ 新增」。":
+    "No scheduled tasks yet. Send /timer daily 09:00 text in chat, ask the AI to set one up, or click “＋ New” above.",
+  "确定删除这条定时任务？删除后立即停止发送。":
+    "Delete this scheduled task? It stops firing immediately.",
+  "保存后立即生效并重新计算下次触发时间":
+    "Takes effect immediately on save; the next run time is recomputed.",
+
+  // 编辑表单 · ① 发送给谁
+  "① 发送给谁": "① Recipient",
+  "决定这条任务往哪个群或哪个用户发。": "Decides which group or user this task sends to.",
+  "群聊或单聊；改动范围后请确认下方 openid 与之匹配。":
+    "Group or direct chat; after changing this, make sure the openid below matches.",
+  "接收消息的群或用户 openid。机器人收到过该群/该用户消息后，可让 AI 用 /session 查到。":
+    "The openid of the group or user that receives the message. Once the bot has seen them, ask the AI to run /session to look it up.",
+
+  // 编辑表单 · ② 什么时候触发
+  "② 什么时候触发": "② When it fires",
+  "选择触发条件并填写对应参数。": "Pick a trigger and fill in its parameters.",
+  "触发条件": "Trigger",
+  "每天=指定时刻；间隔=按分钟循环；cron=标准表达式（可带时区）；一次性 at=绝对时间，到点后自动删除。":
+    "daily = at a set time; interval = every N minutes; cron = a standard expression (with time zone); one-time at = an absolute time, removed after it fires.",
+  "每天": "Daily",
+  "间隔": "Interval",
+  "一次性 at": "One-time at",
+  "按所选时区解释；点击输入框可用时间选择器。":
+    "Interpreted in the selected time zone; click the field to use the time picker.",
+  "时区": "Time zone",
+  "daily 默认按中国标准时间发送；如需按其他时区，请改用 cron。":
+    "daily defaults to China Standard Time; switch to cron if you need another time zone.",
+  "cron 表达式按该时区解释。": "The cron expression is interpreted in this time zone.",
+  "at 时间按该时区解释。": "The one-time time is interpreted in this time zone.",
+  "自定义（手动输入 IANA 时区）": "Custom (enter an IANA time zone)",
+  "自定义时区": "Custom time zone",
+  "两次发送之间的间隔，最小 5 分钟。间隔越小消耗的主动消息配额越多。":
+    "Gap between two sends, minimum 5 minutes. Shorter intervals consume more proactive-message quota.",
+  "分钟": "min",
+  "快捷": "Quick",
+  "5 分": "5m",
+  "10 分": "10m",
+  "15 分": "15m",
+  "30 分": "30m",
+  "1 小时": "1h",
+  "2 小时": "2h",
+  "6 小时": "6h",
+  "12 小时": "12h",
+  "24 小时": "24h",
+  "cron 表达式": "Cron expression",
+  "标准 5 段：分 时 日 月 周（如 0 9 * * 1-5 = 工作日 9 点）。支持 */步长、范围、列表、月份与星期英文名。":
+    "Standard 5 fields: minute hour day month weekday (e.g. 0 9 * * 1-5 = 9am on weekdays). Supports */step, ranges, lists, and month/weekday names.",
+  "at 时间": "One-time run at",
+  "一次性触发时间，到点执行一次后自动删除。":
+    "A one-off time — the task runs once and is then removed automatically.",
+  "星期过滤（可选）": "Weekday filter (optional)",
+  "仅在这些星期触发；不选 = 每天。0=周日。":
+    "Fires only on these weekdays; selecting none means every day. 0 = Sunday.",
+  "星期过滤": "Weekday filter",
+  "工作日": "Weekdays",
+  "周末": "Weekend",
+  "未来 5 年内无匹配，请检查表达式": "No match within the next 5 years — check the expression",
+  "表达式还不完整或非法（应为 5 段：分 时 日 月 周）":
+    "Expression is incomplete or invalid (5 fields expected: minute hour day month weekday)",
+
+  // 编辑表单 · ③ 到点做什么
+  "③ 到点做什么": "③ What it does",
+  "选择执行方式并填写内容。": "Pick an action and fill in its content.",
+  "执行方式": "Action",
+  "文本=到点原样发送；AI 生成=把内容当指令交给 AI 生成后回复；执行命令=到点跑一条命令并把输出推送给用户。":
+    "text = send as-is; AI = treat the content as a prompt and reply with what the AI generates; run command = execute a command and push its output to the user.",
+  "执行命令并推送结果": "Run a command and push its output",
+  "要执行的命令": "Command to run",
+  "到点由服务端执行这条命令行，捕获 stdout/stderr 与退出码后推送给用户。支持 python / powershell -File / .bat / node / vbs(cscript //Nologo) / perl / php / ruby 等。":
+    "The server runs this command line at the scheduled time, captures stdout/stderr plus the exit code, then pushes the result to the user. Supports python / powershell -File / .bat / node / vbs (cscript //Nologo) / perl / php / ruby and more.",
+  "模板": "Templates",
+  "bat 批处理": "Batch file (.bat)",
+  "工作目录（可选）": "Working directory (optional)",
+  "命令的工作目录；留空则使用插件进程目录。脚本里用相对路径时建议填写。":
+    "Working directory for the command; leave empty for the plugin process directory. Recommended when the script uses relative paths.",
+  "例如 C:/scripts": "e.g. C:/scripts",
+  "工作目录": "Working directory",
+  "结果处理": "Result handling",
+  "raw = 直接把命令输出推送给用户；ai = 先把输出交给 AI 整理成简洁播报再推送（输出很长或含噪音时推荐）。":
+    "raw = push the command output as-is; ai = let the AI turn it into a short report first (recommended when output is long or noisy).",
+  "raw：直接推送原始输出": "raw: push raw output",
+  "ai：交给 AI 整理后推送": "ai: summarize with AI, then push",
+  "例如：记得喝水": "e.g. drink some water",
+  "定时任务内容": "Scheduled task content",
+  "命令 → AI 播报": "command → AI report",
+  "命令 → 原始输出": "command → raw output",
+
+  // 校验提示（编辑表单）
+  "请填写接收方 openid（群或用户）": "Enter the recipient openid (group or user)",
+  "时间格式应为 HH:mm（如 09:30）": "Time must look like HH:mm (e.g. 09:30)",
+  "间隔不能小于 5 分钟": "Interval must be at least 5 minutes",
+  "cron 表达式非法（标准 5 段，如 0 9 * * 1-5）": "Invalid cron expression (standard 5 fields, e.g. 0 9 * * 1-5)",
+  "请选择有效的 at 时间": "Pick a valid one-time date and time",
+  "at 时间必须晚于当前时间": "The one-time time must be later than now",
+  "时区格式不正确（应为 IANA 时区，如 Asia/Shanghai）": "Invalid time zone (expected an IANA zone such as Asia/Shanghai)",
+  "请填写要执行的命令（如 python C:/scripts/report.py）": "Enter the command to run (e.g. python C:/scripts/report.py)",
+  "内容不能为空": "Content must not be empty",
+
+  // 时区下拉（常用 IANA 时区）
+  "中国标准时间 · Asia/Shanghai（UTC+8）": "China Standard Time · Asia/Shanghai (UTC+8)",
+  "中国香港 · Asia/Hong_Kong（UTC+8）": "Hong Kong, China · Asia/Hong_Kong (UTC+8)",
+  "中国台湾 · Asia/Taipei（UTC+8）": "Taiwan, China · Asia/Taipei (UTC+8)",
+  "新加坡 · Asia/Singapore（UTC+8）": "Singapore · Asia/Singapore (UTC+8)",
+  "日本 · Asia/Tokyo（UTC+9）": "Japan · Asia/Tokyo (UTC+9)",
+  "韩国 · Asia/Seoul（UTC+9）": "Korea · Asia/Seoul (UTC+9)",
+  "印度 · Asia/Kolkata（UTC+5:30）": "India · Asia/Kolkata (UTC+5:30)",
+  "阿联酋 · Asia/Dubai（UTC+4）": "UAE · Asia/Dubai (UTC+4)",
+  "俄罗斯 · Europe/Moscow（UTC+3）": "Russia · Europe/Moscow (UTC+3)",
+  "中欧 · Europe/Berlin（UTC+1/+2）": "Central Europe · Europe/Berlin (UTC+1/+2)",
+  "英国 · Europe/London（UTC+0/+1）": "United Kingdom · Europe/London (UTC+0/+1)",
+  "巴西 · America/Sao_Paulo（UTC-3）": "Brazil · America/Sao_Paulo (UTC-3)",
+  "美国东部 · America/New_York（UTC-5/-4）": "US Eastern · America/New_York (UTC-5/-4)",
+  "美国中部 · America/Chicago（UTC-6/-5）": "US Central · America/Chicago (UTC-6/-5)",
+  "美国山地 · America/Denver（UTC-7/-6）": "US Mountain · America/Denver (UTC-7/-6)",
+  "美国西部 · America/Los_Angeles（UTC-8/-7）": "US Pacific · America/Los_Angeles (UTC-8/-7)",
+  "澳大利亚 · Australia/Sydney（UTC+10/+11）": "Australia · Australia/Sydney (UTC+10/+11)",
+  "新西兰 · Pacific/Auckland（UTC+12/+13）": "New Zealand · Pacific/Auckland (UTC+12/+13)",
+  "协调世界时 · UTC（UTC+0）": "Coordinated Universal Time · UTC (UTC+0)",
+
+  "请至少设置一个覆盖字段：全部「跟随默认」等同于不添加该群覆盖。":
+    "Set at least one override field: leaving everything at \"Follow default\" is the same as not adding this group override.",
+  "保存失败，请稍后重试": "Save failed; please retry later",
   "保存": "Save",
 });
 
@@ -587,6 +750,13 @@ function translateDynamic(text: string): string {
   if (m) return `${m[1] === "群" ? "Group" : "User"} ${m[2]}`;
   m = /^上次失败：([\s\S]+)$/.exec(text);
   if (m) return `Last failed: ${m[1]}`;
+  // ── 定时任务 AI 脚本生成（动态串） ──
+  m = /^（AI 生成中）([\s\S]+)$/.exec(text);
+  if (m) return `(AI generating) ${m[1]}`;
+  m = /^已生成脚本：(.+?)。修改描述词并保存会重新生成。$/.exec(text);
+  if (m) return `Generated script: ${m[1]}. Edit the prompt and save to regenerate.`;
+  m = /^上次生成失败：(.+)$/.exec(text);
+  if (m) return `Last generation failed: ${m[1]}`;
   m = /^共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
   if (m) return `${m[1]} in total (max 5 per chat)`;
   m = /^所有机器人共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
@@ -602,6 +772,28 @@ function translateDynamic(text: string): string {
   if (m) return `${m[1]} h`;
   m = /^该任务归属机器人 (.+)$/.exec(text);
   if (m) return `This task belongs to bot ${m[1]}`;
+  // ── 定时任务管理（cron / at / 执行命令；动态串） ──
+  m = /^每 (\d+) 小时$/.exec(text);
+  if (m) return `Every ${m[1]} h`;
+  m = /^一次性 (.+)$/.exec(text);
+  if (m) return `Once at ${m[1]}`;
+  // 「下次运行：」须先于通用「下次 」规则，否则会被吞掉「运行：」二字。
+  m = /^下次运行：(.+)$/.exec(text);
+  if (m) return `Next run: ${m[1]}`;
+  m = /^下次 (.+)$/.exec(text);
+  if (m) return `Next: ${localizeText(m[1])}`;
+  m = /^当前：(.+)$/.exec(text);
+  if (m) return `Current: ${localizeText(m[1])}`;
+  m = /^本机时区 · (.+)$/.exec(text);
+  if (m) return `Local time zone · ${m[1]}`;
+  m = /^(\d+) 分$/.exec(text);
+  if (m) return `${m[1]}m`;
+  m = /^(\d+) 条记录$/.exec(text);
+  if (m) return `${m[1]} record(s)`;
+  m = /^删除 (.+) 归档$/.exec(text);
+  if (m) return `Delete the ${m[1]} archive`;
+  m = /^确定删除 (.+) 的归档记录？此机器人该天的记录将被清除，其他机器人的记录保留。$/.exec(text);
+  if (m) return `Delete the ${m[1]} archive records? This bot's records for that day are cleared; other bots' records are kept.`;
   // ── 版本检查 / 自更新（动态串） ──
   m = /^暂无新版本（当前 v(.+) 已是最新）$/.exec(text);
   if (m) return `No new version (v${m[1]} is the latest)`;

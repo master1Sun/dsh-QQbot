@@ -91,6 +91,20 @@ const EN: Readonly<Record<string, string>> = Object.freeze({
   "time 格式应为 HH:mm（上海时间，如 09:30）": "time must be HH:mm (Asia/Shanghai, e.g. 09:30)",
   "间隔不能小于 5 分钟": "Interval must be at least 5 minutes",
   "未找到该定时消息": "Scheduled message not found",
+
+  // ── /perm 对话权限（仅默认，所有用户共用）──
+  "只有权限管理员可以设置默认权限（permissionAdmins 已配置名单，仅名单内可改）。":
+    "Only permission admins can set the default permission (permissionAdmins is configured; only listed members can change it).",
+  "只有权限管理员可以清除默认权限（permissionAdmins 已配置名单，仅名单内可改）。":
+    "Only permission admins can clear the default permission (permissionAdmins is configured; only listed members can change it).",
+  "用法：/perm set <对所有用户生效的权限内容>":
+    "Usage: /perm set <permission text applied to all users>",
+  "已保存所有用户的默认权限，新对话将注入。": "Default permission for all users saved; new conversations will inject it.",
+  "当前默认权限：": "Current default permission:",
+  "尚未设置默认权限。": "No default permission set yet.",
+  "没有可清除的默认权限。": "No default permission to clear.",
+  "用法：/perm set <内容> | /perm view | /perm clear":
+    "Usage: /perm set <text> | /perm view | /perm clear",
 });
 
 /** 动态模板（英文环境）：无法穷举的插值串。 */
@@ -151,6 +165,7 @@ export function helpText(locale: ReplyLocale): string {
       "/撤回            撤回机器人最近一条消息",
       "/广播 <内容>     向机器人所在的已知群广播",
       "/定时 查看 | /定时 每天 HH:mm 内容 | /定时 间隔 分钟 内容 | /定时 取消 序号",
+      "/perm set/view/clear  设置·查看·清除默认对话权限（注入 prompt，对所有人生效）",
     ].join("\n");
   }
   return [
@@ -168,5 +183,6 @@ export function helpText(locale: ReplyLocale): string {
     "/撤回            Recall the bot's latest message",
     "/广播 <text>     Broadcast to all known groups",
     "/定时 list | /定时 daily HH:mm text | /定时 interval minutes text | /定时 cancel index",
+    "/perm set/view/clear  Set · view · clear the default conversation permission (injected into prompt, applies to everyone)",
   ].join("\n");
 }
