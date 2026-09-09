@@ -45,7 +45,7 @@ export const FIELD_HELP: Record<string, string> = {
  *   allowC2c（默认开）· markdownReply（默认开）· proactiveFallback（默认关）
  *   multimodalInbound（默认开）· welcomeEnabled（默认开）· reactionRecall（默认开）
  *   sanitizeReplies（默认开）· typingIndicator（默认开）· ttsReply（默认关）
- *   localPathWhitelist（默认关）· voiceTranscription（默认 off）
+ *   localPathWhitelist（默认关）· voiceTranscription（默认 note，平台转写）
  *   archiveEnabled（默认开）· memoryEnabled（默认开）· fileIngestion（默认开）
  * 另有以下**字段**（非开关）同样不出现在设置页：
  *   secretEnv（默认空，AppSecret 凭据引用）· agentPresetChat（默认空，群聊聊天 Preset，留空跟随 agentPreset）

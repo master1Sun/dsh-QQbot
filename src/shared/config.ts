@@ -321,8 +321,8 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     apiBase: str(pick("apiBase") as string) || "https://api.sgroup.qq.com",
     tokenUrl: str(pick("tokenUrl") as string) || "https://bots.qq.com/app/getAppAccessToken",
     multimodalInbound: boolOr(pick("multimodalInbound"), true),
-    // 默认 off：语音处理策略已从设置页移除（界面不展示），仅 bots.json 可配。
-    voiceTranscription: oneOf(pick("voiceTranscription"), ["off", "note", "download", "asr", "stt"], "off"),
+    // 默认 note：语音优先用平台自带转写文本（asr_refer_text），仅 bots.json 可配（界面不展示）。
+    voiceTranscription: oneOf(pick("voiceTranscription"), ["off", "note", "download", "asr", "stt"], "note"),
     asrEndpoint: str(pick("asrEndpoint") as string),
     sttBaseUrl: str(pick("sttBaseUrl") as string),
     sttApiKey: str(pick("sttApiKey") as string),

@@ -213,7 +213,7 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   groupCooldownMs: 60_000,
   senderCooldownMs: 30_000,
   multimodalInbound: true,
-  voiceTranscription: "off",
+  voiceTranscription: "note",
   asrEndpoint: "",
   sttBaseUrl: "",
   sttApiKey: "",
