@@ -15,8 +15,10 @@ import { createBotState } from "./state.js";
 import { createValueFilterState } from "./value-filter.js";
 import { Archiver } from "./archive.js";
 import { RefIndex } from "./ref-index.js";
+import { SelfOpenidStore } from "./self-id.js";
 import { QqApiClient } from "./qq/api.js";
 import { QqWsSource, type WsStatus } from "./qq/ws.js";
+import { StatsStore, ZERO_COUNTERS } from "./stats.js";
 import { resolveConfig, type QqbotConfig } from "../shared/config.js";
 import { loadBotsFile, type BotsFile, type StoredBot } from "./store-file.js";
 import type { BotState, QqEnvelope } from "../shared/types.js";
@@ -42,6 +44,10 @@ export interface BotRuntime {
   refIndex: RefIndex;
   /** 宿主解析出的真实 Preset id（空串 = 解析失败，禁止创建会话）。 */
   presets: { agentPreset: string; permissionPreset: string };
+  /** 群 openid → 本机器人在该群视角的 openid（AT 事件学习，供全量 @ 精确判定）。 */
+  selfOpenids: Map<string, string>;
+  /** 自身 openid 学习结果的持久化存储。 */
+  selfStore: SelfOpenidStore;
 }
 
 export interface BotRuntimeManagerOptions {
@@ -64,16 +70,26 @@ export interface BotRuntimeManagerOptions {
 const DELIVERY_INDEX_CAP = 2048;
 const SESSION_INDEX_CAP = 2048;
 
+/** 运行统计落盘间隔：值变化才写，重启最多丢最后间隔内的增量。 */
+const STATS_FLUSH_INTERVAL_MS = 10_000;
+
 export class BotRuntimeManager {
   readonly #options: BotRuntimeManagerOptions;
   readonly #bots = new Map<string, BotRuntime>();
   readonly #deliveryOwner = new Map<string, string>();
   readonly #sessionOwner = new Map<string, string>();
+  readonly #stats: StatsStore;
+  /** appId → 最近一次落盘的计数快照（序列化串比较，变化才写盘）。 */
+  readonly #statsSaved = new Map<string, string>();
+  #statsTimer: ReturnType<typeof setInterval> | null = null;
   #syncing: Promise<void> | null = null;
   #primaryAppId = "";
 
   constructor(options: BotRuntimeManagerOptions) {
     this.#options = options;
+    this.#stats = new StatsStore(options.logger);
+    this.#statsTimer = setInterval(() => void this.#flushStats(), STATS_FLUSH_INTERVAL_MS);
+    this.#statsTimer.unref?.();
   }
 
   // ── 查询 ──────────────────────────────────────────────────────────────────
@@ -239,11 +255,13 @@ export class BotRuntimeManager {
       state: createBotState(),
       valueFilterState: createValueFilterState(),
       presets: { agentPreset: "", permissionPreset: "" },
+      selfOpenids: new Map(),
       // 占位：下面立即替换（对象需要自引用闭包）
       client: undefined as unknown as QqApiClient,
       ws: undefined as unknown as QqWsSource,
       archiver: undefined as unknown as Archiver,
       refIndex: undefined as unknown as RefIndex,
+      selfStore: undefined as unknown as SelfOpenidStore,
     };
     bot.client = new QqApiClient({
       getCredentials: () => ({ appId: bot.appId, appSecret: bot.appSecret }),
@@ -256,6 +274,13 @@ export class BotRuntimeManager {
     bot.refIndex = new RefIndex({ logger: this.#options.logger, appId: bot.appId });
     // 历史引用索引异步加载（缓存性质，加载慢不影响建连与收发）。
     void bot.refIndex.load();
+    // 持久化运行统计异步读回：与内存计数取 max 合并（计数单调递增，max 对竞态安全）。
+    void this.#restoreCounters(bot);
+    // 已学习的各群自身 openid 异步读回（判定全量消息 @ 的是不是本 bot）。
+    bot.selfStore = new SelfOpenidStore(this.#options.logger);
+    void bot.selfStore.load(bot.appId).then((map) => {
+      for (const [group, id] of map) bot.selfOpenids.set(group, id);
+    });
     bot.ws = new QqWsSource({
       logger: this.#options.logger,
       onEvent: (eventType, payload, deliveryId) => {
@@ -277,7 +302,47 @@ export class BotRuntimeManager {
     return bot;
   }
 
+  // ── 运行统计持久化 ─────────────────────────────────────────────────────────
+
+  /** 读回持久计数并与内存取 max 合并（启动时调用，异步不阻塞建连）。 */
+  async #restoreCounters(bot: BotRuntime): Promise<void> {
+    const saved = await this.#stats.load(bot.appId);
+    const counters = bot.state.counters;
+    for (const key of Object.keys(ZERO_COUNTERS) as (keyof typeof ZERO_COUNTERS)[]) {
+      if (saved[key] > counters[key]) counters[key] = saved[key];
+    }
+  }
+
+  /** 把所有机器人的当前计数落盘（值无变化跳过）。 */
+  async #flushStats(): Promise<void> {
+    for (const bot of this.#bots.values()) {
+      const json = JSON.stringify(bot.state.counters);
+      if (this.#statsSaved.get(bot.appId) === json) continue;
+      this.#statsSaved.set(bot.appId, json);
+      await this.#stats.save(bot.appId, bot.state.counters);
+    }
+  }
+
+  /**
+   * 复位某机器人的运行统计（设置界面「复位」按钮）：内存清零 + 立即落盘。
+   * 不传 appId 复位主机器人。返回被复位的机器人；不存在返回 undefined。
+   */
+  async resetCounters(appId?: string): Promise<BotRuntime | undefined> {
+    const bot = appId ? this.get(appId) : this.primary();
+    if (!bot) return undefined;
+    bot.state.counters = { received: 0, sessions: 0, replies: 0, proactive: 0, errors: 0 };
+    this.#statsSaved.set(bot.appId, JSON.stringify(bot.state.counters));
+    await this.#stats.save(bot.appId, bot.state.counters);
+    this.#options.logger.info(`[dsh-qqbot] 机器人 ${bot.appId} 的运行统计已复位`);
+    return bot;
+  }
+
   async stopAll(): Promise<void> {
+    await this.#flushStats().catch(() => undefined);
+    if (this.#statsTimer) {
+      clearInterval(this.#statsTimer);
+      this.#statsTimer = null;
+    }
     for (const bot of this.#bots.values()) await bot.ws.stop();
     this.#bots.clear();
     this.#deliveryOwner.clear();

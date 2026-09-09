@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import type { BotRuntime } from "./bots.js";
 import type { QuotaTracker } from "./quota.js";
 import { pluginDataDir, readStoreJson, writeStoreJson } from "./store-file.js";
+import { sanitizeOutgoingText } from "./sanitize.js";
 import { SHANGHAI_OFFSET_MS, shanghaiWallClock, toShanghaiISO, toShanghaiISOOrNull } from "../shared/time.js";
 
 export const MAX_SCHEDULES_PER_CHAT = 5;
@@ -293,9 +294,10 @@ export class Scheduler {
             // AI 模式：把 prompt 当作合成事件注入会话管线，机器人生成并回复。
             await this.#ctx.generateAndSend(entry, bot);
           } else {
+            // text 模式：发送前净化（内容多为 AI 创建时生成，防止隐藏标签块随定时消息发出）。
             await bot.client.sendText(
               { scope: entry.scope, openid: entry.openid },
-              entry.content,
+              sanitizeOutgoingText(entry.content, { enabled: bot.config.sanitizeReplies }),
             );
           }
           bot.state.counters.proactive += 1;

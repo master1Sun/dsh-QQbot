@@ -18,13 +18,12 @@ export interface PassiveReplyRecord {
   target: ReplyTarget;
   /** 聊天键 `${scope}:${openid}`（会话绑定用）。 */
   chatKey: string;
-  /** QQ 消息事件体里的 id（被动回复凭证；出站引用不使用它）。 */
+  /** QQ 消息事件体里的 id（被动回复凭证）。 */
   msgId: string;
   /**
    * 事件 message_scene.ext 里的 msg_idx（REFIDX_*，本条消息的引用索引）。
-   * v2 群聊出站引用卡片（message_reference.message_id）必须用它：官方文档规定
-   * 非机器人消息的引用 id 取自事件 ext 的 msg_idx 字段，传原始 msg id 平台无法解析，
-   * 会引发异常行为（含重复消息）。缺失时回复不带引用卡片。
+   * 出站引用卡片（message_reference.message_id）必须用它：官方文档规定非机器人消息的
+   * 引用 id 取自事件 ext 的 msg_idx 字段，传原始 msg id 平台无法解析。缺失时不带引用卡片。
    */
   selfIdx?: string;
   /** 下一次被动回复使用的 msg_seq（从 1 开始）。 */
@@ -74,6 +73,8 @@ export interface BotState {
   incomingFingerprints: Map<string, number>;
   /** 已处理事件 id 去重（QQ 可能重推），key → 收到时间。 */
   seenEvents: Map<string, number>;
+  /** AI 报错提示限流：chatKey → 上次提示时间（60 秒窗口内同一聊天只提示一次）。 */
+  errorNoticeAt: Map<string, number>;
   /** 机器人自己发出的消息 id（chatKey → 环形缓冲），供表情撤回 / /撤回 命令使用。 */
   sentByChat: Map<string, string[]>;
   counters: BotCounters;

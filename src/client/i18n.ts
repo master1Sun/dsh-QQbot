@@ -133,8 +133,6 @@ const EN = Object.freeze({
     "Choose either way: scanning lets QQ deliver the credentials automatically; manual entry requires copying the AppID / AppSecret from the QQ Open Platform first. Once connected, the credentials take effect immediately and the bot becomes the primary one.",
 
   // ── 详情页骨架 ──
-  "机器人详情": "Bot details",
-  "连接状态 · 行为配置 · 运行统计": "Connection status · Behavior settings · Run statistics",
   "未选择机器人": "No bot selected",
   "连接状态": "Connection status",
   "最近连接": "Last connected",
@@ -144,8 +142,12 @@ const EN = Object.freeze({
 
   // ── 运行统计 ──
   "运行统计": "Run statistics",
-  "本次 Host 启动以来的累计计数；数值不会自动刷新，需要时点「刷新」。":
-    "Cumulative counters since the host started; they do not refresh automatically — click “Refresh” when needed.",
+  "该机器人的持久运行计数（重启不清零）；数值不会自动刷新，需要时点「刷新」。":
+    "Persistent run counters for this bot (kept across restarts); they do not refresh automatically — click “Refresh” when needed.",
+  "复位": "Reset",
+  "复位中…": "Resetting…",
+  "把该机器人的运行计数清零（立即生效并落盘）":
+    "Zero out this bot's run counters (takes effect and persists immediately)",
   "收到消息": "Messages received",
   "创建会话": "Sessions created",
   "被动回复": "Passive replies",
@@ -187,8 +189,8 @@ const EN = Object.freeze({
   "优先以 QQ Markdown 格式发送，排版更好看；若平台拒绝该格式，会自动降级为纯文本重发，不会丢消息。":
     "Send in QQ Markdown format first for nicer layout; if the platform rejects it, the message is resent as plain text automatically — nothing is lost.",
   "回复引用原话": "Quote the user's message",
-  "仅群聊生效，单聊一律不引用：群里回复以 QQ 原生引用卡片回应（message_reference），卡片可点击定位到用户那条原消息。注意：引用卡片与 Markdown 同时携带时，部分场景平台会剥离 Markdown 改为纯文本（卡片保留），这是 QQ 平台限制；若想保住 Markdown 排版请选 off。off=不引用；at=仅群 @ 回复（避免群全量刷屏，推荐）；all=群聊全部回复都引用。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。":
-    "Group chats only — DMs are never quoted. In groups, replies quote the user's message via QQ's native quote card (message_reference), clickable to jump to the original message. Note: when a quote card is sent together with Markdown, the platform may strip the Markdown and fall back to plain text in some cases (the card is kept) — a QQ platform limitation; choose off if you need Markdown formatting. off = no quote; at = group @-mentions only (avoids group flooding, recommended); all = every group reply. Also, when a user quotes another message, the quoted text is always injected into the model context.",
+  "回复以 QQ 原生引用卡片定位到用户那条原消息（message_reference，走主动消息通道发送，不与 msg_id 同传——手机端两者同传会堆叠重复引用）。仅群聊生效，单聊一律不引用：off=不引用；at=仅群 @ 回复（推荐）；all=群聊全部回复。卡片发送失败时自动降级为普通被动回复（无卡片，内容不丢）。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。":
+    "Replies quote the user's original message via QQ's native quote card (message_reference), sent over the proactive-message channel without msg_id — sending both together makes mobile QQ show the same content twice. Group chats only — DMs are never quoted: off = no quote; at = group @-mentions only (recommended); all = every group reply. If the card fails to send, the reply falls back to a plain passive reply (no card, nothing lost). Also, when a user quotes another message, the quoted text is always injected into the model context.",
   "回复引用原话范围": "Quote reply scope",
   "off（不引用）": "off (no quote)",
   "at（仅群 @，推荐）": "at (group @-mentions only, recommended)",
@@ -420,6 +422,71 @@ const EN = Object.freeze({
   "回复": "Reply",
   "主动": "Proactive",
   "会话": "Session",
+
+  // ── 安全开关（回复净化 / SSRF 防护 / 本地路径白名单） ──
+  "回复内容净化": "Reply sanitization",
+  "发送前剥离模型输出里的 system-reminder、<think> 等隐藏标签块，防止内部提示词与推理过程泄漏给聊天对象。仅影响发送内容，归档与模型上下文保留原文。":
+    "Strips hidden tag blocks such as system-reminder and <think> from model output before sending, preventing internal prompts and reasoning from leaking to chat partners. Only affects outgoing content; archives and model context keep the original text.",
+  "媒体链接安全校验（SSRF 防护）": "Media URL safety check (SSRF guard)",
+  "AI 发图/发文件/发语音时，校验 URL 不指向内网或保留地址（127.0.0.1、192.168.x.x、169.254 元数据等），QQ 官方域名直通。防止模型被诱导让本机请求内网服务。关闭后仅要求 http/https 协议。":
+    "When the AI sends images/files/voice, URLs are checked against intranet and reserved addresses (127.0.0.1, 192.168.x.x, 169.254 metadata, etc.); official QQ domains pass through. Prevents the model from being tricked into probing intranet services. When off, only the http/https scheme is enforced.",
+  "本地文件路径白名单": "Local path whitelist",
+  "AI 发图/发文件/发语音时，本机路径必须位于工作区目录或插件数据目录内，防止把任意本机文件（如凭据、密钥）发送给聊天对象。关闭后允许任意本机路径（不推荐）。":
+    "When the AI sends images/files/voice, local paths must reside inside the workspace or plugin data directory, preventing arbitrary local files (credentials, keys, etc.) from being sent to chat partners. When off, any local path is allowed (not recommended).",
+
+  // ── 按群配置（群级覆盖） ──
+  "按群配置": "Per-group config",
+  "为特定群单独覆盖行为配置（阈值/冷却/敏感词/上下文等），其余字段跟随机器人默认。适合把某一个群调得更活跃或更安静，而不影响其他群。":
+    "Override behavior settings (threshold/cooldowns/banned words/context, etc.) for specific groups; everything else follows the bot default. Useful for making one group more or less chatty without affecting others.",
+  "还没有按群覆盖配置，所有群都使用上方机器人默认配置。":
+    "No per-group overrides yet; every group uses the bot defaults above.",
+  "覆盖字段未设置时跟随机器人默认；全部清空并保存即删除该群覆盖。":
+    "Fields left unset follow the bot default; clearing every field and saving removes the override for that group.",
+  "添加群覆盖": "Add group override",
+  "编辑群覆盖": "Edit group override",
+  "删除": "Delete",
+  "群": "Group",
+  "无覆盖字段": "No overridden fields",
+  "请填写群 openid": "Please enter the group openid",
+  "留空/选择「跟随默认」的字段继续使用机器人级配置，仅此群生效":
+    "Fields left empty or set to \"Follow default\" keep using the bot-level config; changes apply to this group only.",
+  "群 openid": "Group openid",
+  "要单独配置的群 openid（o 开头的长串）。可在群里让 AI 用 /session 查看。":
+    "The openid of the group to configure (a long id starting with \"o\"). Ask the AI to run /session in that group to find it.",
+  "群全量回复": "Full group reply",
+  "该群非 @ 消息是否参与价值评分并回复。":
+    "Whether non-@ messages in this group are value-scored and answered.",
+  "跟随默认": "Follow default",
+  "价值阈值": "Value threshold",
+  "仅群全量回复开启时有效：0-10 分，达到阈值才回复。":
+    "Only effective when full group reply is on: score 0-10; the bot replies at or above the threshold.",
+  "@ 上下文条数": "@ context messages",
+  "@ 机器人时附带的本群最近消息条数。":
+    "How many recent group messages are attached when someone @-mentions the bot.",
+  "同群冷却": "Group cooldown",
+  "该群两次全量回复的最小间隔（@ 回复不受限）。":
+    "Minimum interval between two full replies in this group (@ replies are not limited).",
+  "同人冷却": "Per-sender cooldown",
+  "同一人在该群两次被回复的最小间隔。":
+    "Minimum interval between replies to the same sender in this group.",
+  "分片长度": "Chunk length",
+  "单条回复的最大字符数，超过会拆成多条发送。":
+    "Max characters per reply; longer replies are split into multiple messages.",
+  "每条消息回复上限": "Replies per message",
+  "该群每条用户消息最多被动回复几条（平台上限 5）。":
+    "Max passive replies per user message in this group (platform limit: 5).",
+  "该群回复是否优先使用 QQ Markdown。":
+    "Whether replies in this group prefer QQ Markdown.",
+  "该群是否维护跨会话长期记忆。":
+    "Whether this group maintains cross-session long-term memory.",
+  "聊天 Preset": "Chat preset",
+  "该群非 @ 全量消息使用的 Agent Preset（只聊天不执行工具）。留空跟随机器人配置。":
+    "Agent Preset for non-@ full group messages in this group (chat only, no tools). Leave empty to follow the bot config.",
+  "仅该群生效的敏感词（逗号分隔），命中即撤回并跳过回复；与机器人级敏感词叠加。":
+    "Banned words that only apply to this group (comma-separated). A hit recalls the message and skips the reply; combined with bot-level banned words.",
+  "词1, 词2（留空跟随默认）": "word1, word2 (leave empty to follow default)",
+  "保存后立即生效，无需重启": "Takes effect immediately after saving — no restart needed",
+  "保存": "Save",
 });
 
 export const en = EN;
@@ -484,6 +551,38 @@ function translateDynamic(text: string): string {
   if (m) return `Every ${m[1]} min`;
   m = /^下次发送 (.+)$/.exec(text);
   if (m) return `Next send: ${m[1]}`;
+  // ── 按群配置（群级覆盖）（动态串；须先于下方「群/用户」通用规则） ──
+  m = /^群 (.+) 的覆盖配置已保存（立即生效）$/.exec(text);
+  if (m) return `Override for group ${m[1]} saved (takes effect immediately)`;
+  m = /^确定删除群 (.+) 的覆盖配置？删除后该群恢复使用机器人默认配置。$/.exec(text);
+  if (m) return `Delete the override for group ${m[1]}? That group will fall back to the bot's default config.`;
+  // 覆盖摘要（overrideSummary）
+  m = /^全量回复 (开|关)$/.exec(text);
+  if (m) return `Full reply ${m[1] === "开" ? "on" : "off"}`;
+  m = /^阈值 (\d+)$/.exec(text);
+  if (m) return `Threshold ${m[1]}`;
+  m = /^上下文 (\d+) 条$/.exec(text);
+  if (m) return `Context ${m[1]} msgs`;
+  m = /^群冷却 不限制$/.exec(text);
+  if (m) return "Group cooldown: no limit";
+  m = /^群冷却 ([\d.]+) (分钟|秒)$/.exec(text);
+  if (m) return `Group cooldown ${m[1]} ${m[2] === "分钟" ? "min" : "s"}`;
+  m = /^同人冷却 不限制$/.exec(text);
+  if (m) return "Sender cooldown: no limit";
+  m = /^同人冷却 ([\d.]+) (分钟|秒)$/.exec(text);
+  if (m) return `Sender cooldown ${m[1]} ${m[2] === "分钟" ? "min" : "s"}`;
+  m = /^分片 (\d+)$/.exec(text);
+  if (m) return `Chunk ${m[1]}`;
+  m = /^回复上限 (\d+)$/.exec(text);
+  if (m) return `Max ${m[1]} replies`;
+  m = /^Markdown (开|关)$/.exec(text);
+  if (m) return `Markdown ${m[1] === "开" ? "on" : "off"}`;
+  m = /^记忆 (开|关)$/.exec(text);
+  if (m) return `Memory ${m[1] === "开" ? "on" : "off"}`;
+  m = /^敏感词 (\d+) 个$/.exec(text);
+  if (m) return `${m[1]} banned words`;
+  m = /^聊天 Preset (.+)$/.exec(text);
+  if (m) return `Chat preset ${m[1]}`;
   m = /^(群|用户) (.+)$/.exec(text);
   if (m) return `${m[1] === "群" ? "Group" : "User"} ${m[2]}`;
   m = /^上次失败：([\s\S]+)$/.exec(text);

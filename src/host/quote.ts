@@ -2,7 +2,9 @@
  * 引用处理：出站原生引用卡片（message_reference）+ 入站引用上下文。
  *
  * 出站引用：由 reply 泵在 sendReply 时通过 quoteMsgId 携带 `message_reference`，
- * QQ 客户端渲染为可点击定位到用户原消息的引用卡片（原生能力，非文本前缀）。
+ * 且走主动消息通道（不传 msg_id）——实测 msg_id 与 message_reference 同传时，
+ * 手机端同一条内容会出现两次（电脑端正常）；仅 message_reference 是
+ * 「有引用且内容只出现一次」的唯一组合（详见 reply.ts / api.ts 注释）。
  * 入站引用：用户引用了别人的消息时，把本地索引恢复的原文注入模型上下文。
  */
 

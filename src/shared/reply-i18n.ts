@@ -80,6 +80,9 @@ const EN: Readonly<Record<string, string>> = Object.freeze({
   "欢迎 {nick}！@我即可与我对话。": "Welcome {nick}! @me to chat with me.",
   "新朋友": "new friend",
 
+  // ── AI 报错提示（reply.ts，后接平台错误消息）──
+  "⚠️ AI 回复出错：": "⚠️ AI reply failed: ",
+
   // ── ScheduleStore 错误（commands 回显时翻译）──
   "缺少 scope/openid": "Missing scope/openid",
   "消息内容不能为空": "Message content must not be empty",

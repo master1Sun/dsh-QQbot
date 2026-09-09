@@ -13,6 +13,34 @@ export interface QqbotModelSelection {
   maxTokens?: number;
 }
 
+/**
+ * 按群覆盖配置：对特定群 openid 覆盖一部分行为字段，其余字段跟随机器人默认。
+ * 只允许覆盖"聊天行为"子集（阈值/冷却/白名单/敏感词/Preset 等），
+ * 不放行凭据、传输（apiBase/tokenUrl）、工作区等系统级字段。
+ * 所有字段可选：缺省 = 跟随机器人级配置。
+ */
+export interface GroupOverrideConfig {
+  groupFullReply?: boolean;
+  valueThreshold?: number;
+  groupCooldownMs?: number;
+  senderCooldownMs?: number;
+  atContextMessages?: number;
+  replyChunkChars?: number;
+  maxRepliesPerMessage?: number;
+  markdownReply?: boolean;
+  memoryEnabled?: boolean;
+  bannedWords?: string[];
+  /** 该群全量（非 @）消息使用的聊天 Preset。 */
+  agentPresetChat?: string;
+}
+
+/** 群覆盖里允许出现的字段（写入/合并时的白名单，防止夹带系统级字段）。 */
+export const GROUP_OVERRIDE_FIELDS = [
+  "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs",
+  "atContextMessages", "replyChunkChars", "maxRepliesPerMessage",
+  "markdownReply", "memoryEnabled", "bannedWords", "agentPresetChat",
+] as const satisfies ReadonlyArray<keyof GroupOverrideConfig>;
+
 export interface QqbotConfig {
   appId: string;
   appSecret: string;
@@ -43,8 +71,10 @@ export interface QqbotConfig {
   markdownReply: boolean;
   /**
    * 出站引用范围（仅群聊生效，单聊一律不引用）：off=不引用；at=仅群 @ 回复引用（避免群全量刷屏）；
-   * all=群聊全部回复都引用。引用通过 QQ 原生 message_reference 渲染为可点击定位的引用卡片（非文本前缀）。
-   * 注意：message_reference 与 Markdown 同时携带时，部分场景平台会剥离 Markdown 转纯文本（卡片保留）。
+   * all=群聊全部回复都引用。引用通过 QQ 原生 message_reference 渲染为可点击定位的引用卡片。
+   * 带引用的消息走主动消息通道（不传 msg_id）：实测两者同传时手机端同一条内容出现两次
+   * （电脑端正常），仅 message_reference 是「有引用且内容只出现一次」的唯一组合。
+   * 卡片发送失败自动降级为普通被动回复（无卡片，内容不丢）。
    * 入站引用（解析用户引用的上一条消息并注入上下文）不受此开关影响，始终生效。
    */
   quoteReply: "off" | "at" | "all";
@@ -80,6 +110,14 @@ export interface QqbotConfig {
   quotaPerDay: number;
   /** 发给 QQ 用户的回复文案语言：zh=中文（默认）；en=英文。 */
   replyLocale: "zh" | "en";
+  /** 出站回复净化：剥离模型输出中的 system-reminder / <think> 等隐藏标签块（防内部内容泄漏）。 */
+  sanitizeReplies: boolean;
+  /** 媒体 URL SSRF 防护：拒绝请求内网/保留地址（qqbot_send_* 工具的 url 来源）。 */
+  ssrfGuard: boolean;
+  /** 本地路径白名单：qqbot_send_* 工具只能发送工作区/插件数据目录内的文件。 */
+  localPathWhitelist: boolean;
+  /** 按群覆盖配置：群 openid → 覆盖字段（仅聊天行为子集）。 */
+  groupOverrides: Record<string, GroupOverrideConfig>;
 }
 
 function str(value: unknown): string {
@@ -132,6 +170,66 @@ function listOr(value: unknown, fallback: string[]): string[] {
   return Array.isArray(value) && value.every((v) => typeof v === "string") && value.length > 0
     ? value as string[]
     : fallback;
+}
+
+/** 容错解析按群覆盖配置：只保留白名单字段、数值 clamp、丢弃非法群 openid。 */
+export function resolveGroupOverrides(raw: unknown): Record<string, GroupOverrideConfig> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, GroupOverrideConfig> = {};
+  for (const [openid, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = openid.trim();
+    if (!id || !value || typeof value !== "object" || Array.isArray(value)) continue;
+    const src = value as Record<string, unknown>;
+    const ov: GroupOverrideConfig = {};
+    for (const field of GROUP_OVERRIDE_FIELDS) {
+      const v = src[field];
+      if (v === undefined || v === null) continue;
+      switch (field) {
+        case "groupFullReply":
+        case "markdownReply":
+        case "memoryEnabled":
+          if (typeof v === "boolean") ov[field] = v;
+          break;
+        case "valueThreshold":
+          ov.valueThreshold = clampInt(v, 0, 10, 5);
+          break;
+        case "atContextMessages":
+          ov.atContextMessages = clampInt(v, 0, 50, 10);
+          break;
+        case "replyChunkChars":
+          ov.replyChunkChars = clampInt(v, 200, 4000, 1000);
+          break;
+        case "maxRepliesPerMessage":
+          ov.maxRepliesPerMessage = clampInt(v, 1, 5, 5);
+          break;
+        case "groupCooldownMs":
+        case "senderCooldownMs":
+          ov[field] = clampInt(v, 0, 30 * 60_000, 60_000);
+          break;
+        case "bannedWords":
+          if (Array.isArray(v)) {
+            ov.bannedWords = v.filter((w): w is string => typeof w === "string" && w.trim().length > 0)
+              .map((w) => w.trim());
+          }
+          break;
+        case "agentPresetChat":
+          if (typeof v === "string") ov.agentPresetChat = v.trim();
+          break;
+      }
+    }
+    if (Object.keys(ov).length > 0) out[id] = ov;
+  }
+  return out;
+}
+
+/**
+ * 按群取生效配置：该群有覆盖时合并（群覆盖 > 机器人默认），否则原样返回。
+ * 返回浅拷贝（有覆盖时），调用方可安全读取；不会修改传入对象。
+ */
+export function configForGroup(config: QqbotConfig, groupOpenid: string): QqbotConfig {
+  const override = groupOpenid ? config.groupOverrides?.[groupOpenid] : undefined;
+  if (!override) return config;
+  return { ...config, ...override };
 }
 
 export interface ConfigOverrides {
@@ -204,5 +302,9 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     memoryEnabled: boolOr(pick("memoryEnabled"), true),
     quotaPerDay: clampInt(pick("quotaPerDay"), 0, 100000, 50),
     replyLocale: oneOf(pick("replyLocale"), ["zh", "en"], "zh"),
+    sanitizeReplies: boolOr(pick("sanitizeReplies"), true),
+    ssrfGuard: boolOr(pick("ssrfGuard"), true),
+    localPathWhitelist: boolOr(pick("localPathWhitelist"), true),
+    groupOverrides: resolveGroupOverrides(pick("groupOverrides")),
   };
 }

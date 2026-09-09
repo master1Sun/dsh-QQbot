@@ -8,10 +8,11 @@
  *   主动消息省略 msg_id（需开启「机器人主动在群聊内发言」）。
  * - sendReply：优先 Markdown（msg_type=2），单条被平台拒绝（40034090 等）时
  *   该分片回退纯文本（msg_type=0），避免无 Markdown 权限的机器人回复失败。
- * - 原生引用卡片：quoteMsgId 携带时附 message_reference，QQ 客户端渲染为可点击定位到用户原消息的
- *   引用卡片（原生能力，非文本前缀）。官方要求 message_reference.message_id 用事件
- *   message_scene.ext 里的 msg_idx（REFIDX_*），不能用原始 msg id——后者平台无法解析，
- *   会引发重复消息等异常。被动回复的 msg_id + msg_seq 仅是被动凭证，不渲染回复样式。
+ * - 原生引用卡片：quoteMsgId 携带时附 message_reference（可点击定位到用户原消息）。
+ *   message_reference.message_id 必须用事件 message_scene.ext 里的 msg_idx（REFIDX_*），
+ *   不能用原始 msg id——后者平台无法解析。实测组合矩阵（详见 sendReply 注释）：
+ *   与 msg_id 同传时手机端同一条内容出现两次（电脑端正常）；仅 msg_id 两端都不显示引用；
+ *   仅 message_reference（主动消息通道）是唯一「有引用且内容只出现一次」的组合。
  *   注意 message_reference 与 Markdown 在部分场景会被平台剥离 Markdown，此时本条转纯文本但引用卡片保留。
  */
 import type { ReplyTarget } from "../../shared/types.js";
@@ -130,12 +131,22 @@ export class QqApiClient {
       throw err;
     }
     // 成功响应体是创建的消息对象（含 id）；204 或解析失败时无 id。
+    let id: string | undefined;
     try {
       const body = (await res.json()) as { id?: unknown } | null;
-      return typeof body?.id === "string" && body.id ? body.id : undefined;
+      id = typeof body?.id === "string" && body.id ? body.id : undefined;
     } catch {
-      return undefined;
+      // 204 或响应体不是 JSON：无消息 id 可用。
     }
+    // 诊断日志：逐次记录实际发出的 payload 关键字段（msg_id / message_reference / msg_seq），
+    // 用于把「手机端两条重复内容」等平台端表现与实际 API 调用精确关联。
+    const ref = payload.message_reference as { message_id?: unknown } | undefined;
+    this.#options.logger.info(
+      `[dsh-qqbot] QQ API HTTP ${res.status} msg_type=${String(payload.msg_type)}`
+      + ` msg_id=${payload.msg_id ? String(payload.msg_id) : "-"} msg_seq=${payload.msg_seq ?? "-"}`
+      + ` 引用=${ref ? String(ref.message_id ?? "") : "-"} 返回id=${id ?? "-"}`,
+    );
+    return id;
   }
 
   /** 发送一条文本消息。msgId 省略则为主动消息；msgSeq 被动回复序号从 1 开始。quoteMsgId 携带时附 message_reference 引用卡片。 */
@@ -175,10 +186,12 @@ export class QqApiClient {
   /**
    * 回复一条消息：按配置尝试 Markdown，单条被平台拒绝时回退纯文本（引用卡片保留）。
    * 其他错误（网络/限流/凭据）视为结果不确定，直接抛出由上层处理。
-   * 被动回复带 msg_id + msg_seq，QQ 客户端据此渲染「回复了某人」的可定位样式；
-   * quoteMsgId 携带时额外附 message_reference，渲染为可点击定位到用户原消息的引用卡片
-   * （原生引用，非文本前缀）。注意 message_reference 与 Markdown 在某些场景会被平台剥离 Markdown，
-   * 此时本条以纯文本发送但引用卡片仍在。
+   *
+   * ⚠️ 引用（quoteMsgId）与 msg_id 不可同传——实测组合矩阵：
+   *   msg_id + message_reference → 引用显示，但手机端同一条内容出现两次（电脑端正常）；
+   *   仅 msg_id                  → 两端都不显示引用；
+   *   仅 message_reference       → 唯一「有引用且内容只出现一次」的组合（走主动消息通道，不传 msg_id）。
+   * 调用方带 quoteMsgId 时应省略 msgId/msgSeq（由上层 reply.ts 保证）。
    */
   async sendReply(
     target: ReplyTarget,

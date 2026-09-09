@@ -15,6 +15,8 @@ import { MAX_SCHEDULES_PER_CHAT, ScheduleStore, type ScheduleEntry } from "./sch
 import type { BotRuntimeManager } from "./bots.js";
 import type { ChatMemoryStore } from "./memory.js";
 import type { BotState } from "../shared/types.js";
+import { assertLocalMediaPath, assertSafeMediaUrl, defaultAllowedRoots } from "./net-guard.js";
+import { sanitizeOutgoingText } from "./sanitize.js";
 
 export interface QqbotToolsContext {
   /** 多机器人运行时：按会话反查来源机器人（各自独立的状态 / 客户端）。 */
@@ -57,6 +59,29 @@ const OBJECT_OUTPUT: ToolOutputDefinition = {
   schema: { type: "object" } as JsonSchemaNode,
   render: (_args: unknown, value: JsonValue) => textResult(value),
 };
+
+/** 媒体来源安全校验：URL 过 SSRF 防护，本地路径过白名单；不通过返回错误消息。 */
+async function guardMediaSource(
+  source: { url?: string; localPath?: string },
+  bot: { config: { ssrfGuard: boolean; localPathWhitelist: boolean; workspacePath: string } },
+  logger: Pick<Console, "warn">,
+): Promise<string | null> {
+  try {
+    if (source.url) {
+      await assertSafeMediaUrl(source.url, { ssrfGuard: bot.config.ssrfGuard, logger });
+    }
+    if (source.localPath) {
+      await assertLocalMediaPath(source.localPath, {
+        localPathWhitelist: bot.config.localPathWhitelist,
+        allowedRoots: defaultAllowedRoots(bot.config.workspacePath),
+        logger,
+      });
+    }
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
 
 export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsContext): ToolDefinition[] {
   /** 按会话反查来源机器人；未绑定聊天时抛出模型可读的错误。 */
@@ -179,7 +204,7 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
         const { appId, state, scope, openid } = requireBot(exec);
         const bot = bots.get(appId);
         if (!bot) return { ok: false, error: "来源机器人已不可用" };
-        const content = String((args as { content?: unknown }).content ?? "").trim();
+        const content = sanitizeOutgoingText(String((args as { content?: unknown }).content ?? "").trim());
         if (!content) return { ok: false, error: "content 不能为空" };
         await bot.client.sendText({ scope, openid }, content);
         state.counters.proactive += 1;
@@ -191,7 +216,7 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
       name: "qqbot_send_image",
       description: [
         "立即向当前 QQ 聊天（群/单聊）发送一张图片。",
-        "来源三选一：url（公网可访问的图片地址）/ localPath（本机路径）/ buffer 不可用。",
+        "来源三选一：url（公网可访问的图片地址）/ localPath（本机路径，须在工作区目录内）/ buffer 不可用。",
         "注意：走富媒体上传通道，配额有限，仅在用户明确要求发图时使用。",
       ].join(" "),
       parameters: {
@@ -211,6 +236,8 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
         const a = args as { url?: string; localPath?: string; content?: string };
         const source = a.url ? { url: a.url } : a.localPath ? { localPath: a.localPath } : null;
         if (!source) return { ok: false, error: "url 与 localPath 必须提供其一" };
+        const blocked = await guardMediaSource(source, bot, logger);
+        if (blocked) return { ok: false, error: blocked };
         await bot.client.sendImage({ scope, openid }, source, { content: a.content });
         bot.state.counters.proactive += 1;
         logger.info(`[dsh-qqbot] AI 发送图片（机器人 ${appId}）→ ${scope}:${openid}`);
@@ -242,6 +269,8 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
         const a = args as { url?: string; localPath?: string; fileName?: string; content?: string };
         const source = a.url ? { url: a.url } : a.localPath ? { localPath: a.localPath } : null;
         if (!source) return { ok: false, error: "url 与 localPath 必须提供其一" };
+        const blocked = await guardMediaSource(source, bot, logger);
+        if (blocked) return { ok: false, error: blocked };
         await bot.client.sendFile({ scope, openid }, source, { fileName: a.fileName, content: a.content });
         bot.state.counters.proactive += 1;
         logger.info(`[dsh-qqbot] AI 发送文件（机器人 ${appId}）→ ${scope}:${openid}`);
@@ -271,6 +300,8 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
         const a = args as { url?: string; localPath?: string };
         const source = a.url ? { url: a.url } : a.localPath ? { localPath: a.localPath } : null;
         if (!source) return { ok: false, error: "url 与 localPath 必须提供其一" };
+        const blocked = await guardMediaSource(source, bot, logger);
+        if (blocked) return { ok: false, error: blocked };
         await bot.client.sendVoice({ scope, openid }, source);
         bot.state.counters.proactive += 1;
         logger.info(`[dsh-qqbot] AI 发送语音（机器人 ${appId}）→ ${scope}:${openid}`);
@@ -279,11 +310,12 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
     },
     {
       name: "qqbot_memory_add",
-      description: "向当前 QQ 聊天的长期记忆写入一条事实（跨会话保留，如「这个群在准备 10 月的团建」）。用户说「记住…」时调用。",
+      description:
+        "向当前 QQ 聊天的长期记忆写入一条重要事实（跨会话保留）。只记关键对话内容：身份、偏好、约定、进行中的事项；不要闲聊、不要 emoji 或任何符号装饰、不要「【标签】」前缀，直接写内容本身。用户说「记住…」时调用。",
       parameters: {
         type: "object",
         properties: {
-          text: { type: "string", description: "要记住的事实（一句话，200 字内）" },
+          text: { type: "string", description: "要记住的重要内容（一句话，200 字内；纯文本，不带 emoji 和装饰符号）" },
         },
         required: ["text"],
         additionalProperties: false,

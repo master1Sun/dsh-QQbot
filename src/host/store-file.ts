@@ -129,6 +129,14 @@ export interface StoredBotConfig {
   quotaPerDay?: number;
   /** 发给 QQ 用户的回复文案语言（zh/en）。 */
   replyLocale?: "zh" | "en";
+  /** 出站回复净化（剥离 system-reminder / <think> 等隐藏块）。 */
+  sanitizeReplies?: boolean;
+  /** 媒体 URL SSRF 防护（拒绝内网/保留地址）。 */
+  ssrfGuard?: boolean;
+  /** 本地路径白名单（仅工作区/插件数据目录内的文件可发送）。 */
+  localPathWhitelist?: boolean;
+  /** 按群覆盖配置：群 openid → 覆盖字段（聊天行为子集）。 */
+  groupOverrides?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -142,6 +150,7 @@ export const BOT_CONFIG_FIELDS = [
   "multimodalInbound", "voiceTranscription", "asrEndpoint",
   "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords",
   "memoryEnabled", "quotaPerDay", "replyLocale",
+  "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "groupOverrides",
 ] as const;
 
 /**
@@ -184,6 +193,10 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   memoryEnabled: true,
   quotaPerDay: 50,
   replyLocale: "zh",
+  sanitizeReplies: true,
+  ssrfGuard: true,
+  localPathWhitelist: true,
+  groupOverrides: {},
 };
 
 /** 把行为配置补齐到完整结构（只填缺失键），返回是否发生过补齐。 */
@@ -196,7 +209,11 @@ export function ensureCompleteConfig(
   const cur = out as Record<string, unknown>;
   for (const f of BOT_CONFIG_FIELDS) {
     if (!(f in cur) || cur[f] === undefined || cur[f] === null) {
-      cur[f] = defs[f];
+      const def = defs[f];
+      // 对象/数组默认值（bannedWords / groupOverrides）逐 bot 克隆，避免共享可变引用。
+      cur[f] = def !== null && typeof def === "object"
+        ? (Array.isArray(def) ? [...def] : { ...def })
+        : def;
       changed = true;
     }
   }

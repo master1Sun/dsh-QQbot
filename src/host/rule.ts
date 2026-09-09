@@ -22,6 +22,8 @@ import { formatInboundQuoteContext } from "./quote.js";
 import { inboundRefEntry, parseRefIdx } from "./ref-index.js";
 import type { ScheduleStore } from "./schedule.js";
 import type { ChatMemoryStore } from "./memory.js";
+import type { QqbotConfig } from "../shared/config.js";
+import { configForGroup } from "../shared/config.js";
 import {
   addGroupMessage,
   markIncoming,
@@ -50,6 +52,26 @@ export interface QqRuleContext {
   /** 主动消息每日配额（/广播 等命令消耗）。 */
   quota?: import("./quota.js").QuotaTracker;
   logger: Pick<Console, "info" | "warn" | "error">;
+}
+
+/** 群消息 content 里的 @ 提及文本（v2 平台格式 <@openid>；兼容 <@!id> 变体）。 */
+const AT_TEXT_PATTERN = /<@!?[A-Za-z0-9_-]{8,}>/;
+
+/** @ 提及捕获（全局）：提取消息里全部被 @ 者的 id。 */
+const MENTION_CAPTURE = /<@!?([A-Za-z0-9_-]{8,})>/g;
+
+/**
+ * 学习本机器人在某群视角的自身 openid：AT 事件 content 的首个 <@id> 即本 bot
+ * （平台保证 GROUP_AT_MESSAGE_CREATE @ 的是本机器人，且 openid 按群维度哈希，
+ * 因此该 id 只在本群有效）。结果按机器人落盘，供群全量事件精确判定 @ 归属。
+ */
+function learnSelfOpenid(bot: BotRuntime, group: string, content: string, logger: Pick<Console, "info">): void {
+  if (!group) return;
+  const id = [...content.matchAll(MENTION_CAPTURE)][0]?.[1];
+  if (!id || bot.selfOpenids.get(group) === id) return;
+  bot.selfOpenids.set(group, id);
+  logger.info(`[dsh-qqbot] 已学习机器人在群 ${group.slice(0, 8)}… 的自身 openid（${id.slice(0, 8)}…）`);
+  void bot.selfStore.save(bot.appId, bot.selfOpenids);
 }
 
 /** 允许策略：列表含 "*" 或包含该 id。 */
@@ -262,7 +284,16 @@ export function createQqRule({
         logger.warn("[dsh-qqbot] 事件没有可用的机器人运行时，已丢弃");
         return null;
       }
-      const config = bot.config;
+      const parsed = parseMessagePayload(delivery.event);
+      if (!parsed) return null;
+      const { eventType, payload } = parsed;
+      const content = (payload.content ?? "").trim();
+      const sender = senderIdOf(payload);
+      const target = replyTargetOf(eventType, payload);
+      const group = payload.group_openid ?? "";
+      // 生效配置 = 按群覆盖合并（群 > 机器人默认；单聊与未覆盖群直接用机器人配置）。
+      // 之后整条处理链（价值过滤 / 冷却 / 敏感词 / 上下文条数 / Preset / 命令）都读这份。
+      const config = configForGroup(bot.config, group);
       const state = bot.state;
       const valueFilter = {
         enabled: config.groupFullReply,
@@ -271,7 +302,7 @@ export function createQqRule({
         senderCooldownMs: config.senderCooldownMs,
       };
       const commandCtx: CommandContext = {
-        getConfig: () => bot.config,
+        getConfig: () => config,
         state: bot.state,
         client: bot.client,
         agents,
@@ -281,13 +312,6 @@ export function createQqRule({
         logger,
         appId: bot.appId,
       };
-      const parsed = parseMessagePayload(delivery.event);
-      if (!parsed) return null;
-      const { eventType, payload } = parsed;
-      const content = (payload.content ?? "").trim();
-      const sender = senderIdOf(payload);
-      const target = replyTargetOf(eventType, payload);
-      const group = payload.group_openid ?? "";
 
       // ── 群全量消息：入该机器人的缓冲 + 价值过滤 ───────────────────
       if (eventType === "GROUP_MESSAGE_CREATE") {
@@ -325,7 +349,14 @@ export function createQqRule({
         );
         if (command.handled) return null;
         // @ 机器人 → 跳过价值过滤，直接回复（并允许使用工具）。
-        const isAt = atBot(payload);
+        // 判定次序：① mentions 带 bot 标记（最可靠）；② 已学习本 bot 在该群的自身
+        // openid（AT 事件 content 首个 <@id>，见 learnSelfOpenid）→ content 中 @ 该
+        // id 即精确命中，@ 其他成员/机器人不误触发；③ 该群从未发生过 AT（未学习）
+        // → 退回宽匹配（含任意 <@...> 即算 @），宁可多回不可漏回。
+        const mentionIds = [...content.matchAll(MENTION_CAPTURE)].map((m) => m[1]!);
+        const knownSelf = bot.selfOpenids.get(target.openid) ?? "";
+        const isAt = atBot(payload)
+          || (knownSelf ? mentionIds.includes(knownSelf) : AT_TEXT_PATTERN.test(content));
         const verdict = isAt
           ? { reply: true, score: 10, blockedBy: null as string | null }
           : evaluateGroupMessage(payload, valueFilter, bot.valueFilterState);
@@ -355,6 +386,7 @@ export function createQqRule({
           attachmentContext: attachCtx,
           memoryBlock,
           promptBuilder: () => buildGroupFullPrompt(payload, recentGroupMessages(state, group, config.atContextMessages)),
+          config,
         });
       }
 
@@ -370,6 +402,9 @@ export function createQqRule({
 
       // 群内 @ 消息同样受敏感词约束：命中即撤回并跳过回复。
       if (eventType === "GROUP_AT_MESSAGE_CREATE") {
+        // 平台保证 AT 事件 @ 的是本机器人：content 首个 <@id> 即本 bot 在该群的
+        // openid——学习记录（须在双推送去重之前，全量事件先到时 AT 会被去重跳过）。
+        learnSelfOpenid(bot, target.openid, content, logger);
         if (await enforceBannedWords(bot, "GROUP_AT_MESSAGE_CREATE", payload, content, logger)) return null;
       }
 
@@ -421,6 +456,7 @@ export function createQqRule({
         attachmentContext: attachCtx,
         memoryBlock,
         promptBuilder: () => buildAtPrompt(bot, content, group),
+        config,
       });
     },
   };
@@ -445,6 +481,8 @@ interface EnterConversationArgs {
   /** 该回复是否源于 @/单聊（决定 quoteReply=at 时是否带引用）。 */
   quoteMention: boolean;
   promptBuilder: () => string;
+  /** 生效配置（已按群覆盖合并）：工作区 / Preset / 模型从这里取。 */
+  config: QqbotConfig;
 }
 
 /** MessageId 为带标签类型，构造时统一转换。 */
@@ -464,7 +502,7 @@ function enterConversation(args: EnterConversationArgs): WebhookSessionRequest |
     bot, agents, logger, payload, target, msgId, deliveryId,
     allowTools, quoteContext, attachmentContext, memoryBlock, quoteMention, promptBuilder,
   } = args;
-  const config = bot.config;
+  const config = args.config;
   const state = bot.state;
   // Preset 守卫：宿主 Preset 解析失败时禁止创建会话——否则 dsh-webhook 内部抛错只进宿主
   // 日志，这里表现为「收到消息但永不回复」且计数器无异常。
@@ -476,7 +514,7 @@ function enterConversation(args: EnterConversationArgs): WebhookSessionRequest |
   }
   const chatKey = `${target.scope}:${target.openid}`;
   // 出站引用卡片需要本条消息的 REFIDX 索引（官方要求 message_reference.message_id
-  // 用事件 ext 的 msg_idx，不能用原始 msg id——后者平台无法解析，会导致重复消息）。
+  // 用事件 ext 的 msg_idx，不能用原始 msg id——后者平台无法解析）。
   const selfIdx = parseRefIdx(payload).selfIdx;
   const record: PassiveReplyRecord = {
     target,

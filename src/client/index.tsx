@@ -17,6 +17,7 @@
  */
 import * as React from "react";
 import { SHANGHAI_TZ } from "../shared/time.js";
+import { looksLikeMarkdown, renderMarkdown } from "./md.js";
 import { QQBOT_LOCALE_NAMESPACE, en, h, localizeText, setTranslator, zh } from "./i18n.js";
 
 export const name = "qqbot-settings";
@@ -179,6 +180,24 @@ const SWITCH_DEFS: Array<{ key: string; label: string; desc: string; def: boolea
     label: "表情撤回",
     desc: "任何人对机器人发出的消息点 🗑️ 表情回应，机器人就撤回那条消息（需要平台的「消息撤回」权限）。",
     def: false,
+  },
+  {
+    key: "sanitizeReplies",
+    label: "回复内容净化",
+    desc: "发送前剥离模型输出里的 system-reminder、<think> 等隐藏标签块，防止内部提示词与推理过程泄漏给聊天对象。仅影响发送内容，归档与模型上下文保留原文。",
+    def: true,
+  },
+  {
+    key: "ssrfGuard",
+    label: "媒体链接安全校验（SSRF 防护）",
+    desc: "AI 发图/发文件/发语音时，校验 URL 不指向内网或保留地址（127.0.0.1、192.168.x.x、169.254 元数据等），QQ 官方域名直通。防止模型被诱导让本机请求内网服务。关闭后仅要求 http/https 协议。",
+    def: true,
+  },
+  {
+    key: "localPathWhitelist",
+    label: "本地文件路径白名单",
+    desc: "AI 发图/发文件/发语音时，本机路径必须位于工作区目录或插件数据目录内，防止把任意本机文件（如凭据、密钥）发送给聊天对象。关闭后允许任意本机路径（不推荐）。",
+    def: true,
   },
 ];
 
@@ -506,6 +525,18 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     try { await refresh(); } finally { setRefreshing(false); }
   };
 
+  // ── 运行统计复位：清零该机器人的持久计数（stats.reset 后刷新展示） ───────────
+  const [resetting, setResetting] = React.useState(false);
+  const resetStats = async () => {
+    setResetting(true);
+    try {
+      const res = await rpcCall("stats.reset", detailAppId ? { appId: detailAppId } : {});
+      if (res.ok) await refresh();
+    } finally {
+      setResetting(false);
+    }
+  };
+
   // ── 机器人卡片操作 ──────────────────────────────────────────────────────────
   const setPrimaryBot = async (appId: string) => {
     setNotice("");
@@ -584,6 +615,14 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     }
   };
 
+  // 检查更新的提示条不常驻：非进行中的消息（成功/失败/无新版本）8 秒后自动消失；
+  // 进行中（busy）的进度提示保留，busy 结束后重新计时。
+  React.useEffect(() => {
+    if (!update.message || update.busy) return undefined;
+    const timer = setTimeout(() => setUpdate((u) => ({ ...u, message: "" })), 8000);
+    return () => clearTimeout(timer);
+  }, [update.message, update.busy]);
+
   // ── 定时消息管理弹窗（schedule.list / schedule.add(编辑) / schedule.remove） ──
   const [scheduleModal, setScheduleModal] = React.useState<{
     loading: boolean;
@@ -598,6 +637,113 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     saving: boolean;
   } | null>(null);
   const [scheduleRemoving, setScheduleRemoving] = React.useState("");
+
+  // ── 按群配置（群级覆盖）：编辑弹窗草稿。每个字段空 = 跟随机器人默认 ──────────
+  const [overrideModal, setOverrideModal] = React.useState<{
+    /** 编辑中的群 openid；空串表示新增。 */
+    editingOpenid: string;
+    draft: {
+      openid: string;
+      groupFullReply: string;
+      valueThreshold: string;
+      atContextMessages: string;
+      groupCooldownMs: string;
+      senderCooldownMs: string;
+      markdownReply: string;
+      memoryEnabled: string;
+      replyChunkChars: string;
+      maxRepliesPerMessage: string;
+      agentPresetChat: string;
+      bannedWords: string;
+    };
+    error: string;
+  } | null>(null);
+
+  const groupOverrides = (form.groupOverrides && typeof form.groupOverrides === "object" && !Array.isArray(form.groupOverrides))
+    ? form.groupOverrides as Record<string, Record<string, unknown>>
+    : {};
+
+  /** 覆盖字段的简短摘要（列表行展示）。 */
+  const overrideSummary = (ov: Record<string, unknown>): string => {
+    const parts: string[] = [];
+    if (ov.groupFullReply !== undefined) parts.push(`全量回复 ${ov.groupFullReply ? "开" : "关"}`);
+    if (ov.valueThreshold !== undefined) parts.push(`阈值 ${ov.valueThreshold}`);
+    if (ov.atContextMessages !== undefined) parts.push(`上下文 ${ov.atContextMessages} 条`);
+    if (ov.groupCooldownMs !== undefined) parts.push(`群冷却 ${cooldownLabel(Number(ov.groupCooldownMs))}`);
+    if (ov.senderCooldownMs !== undefined) parts.push(`同人冷却 ${cooldownLabel(Number(ov.senderCooldownMs))}`);
+    if (ov.replyChunkChars !== undefined) parts.push(`分片 ${ov.replyChunkChars}`);
+    if (ov.maxRepliesPerMessage !== undefined) parts.push(`回复上限 ${ov.maxRepliesPerMessage}`);
+    if (ov.markdownReply !== undefined) parts.push(`Markdown ${ov.markdownReply ? "开" : "关"}`);
+    if (ov.memoryEnabled !== undefined) parts.push(`记忆 ${ov.memoryEnabled ? "开" : "关"}`);
+    if (Array.isArray(ov.bannedWords) && ov.bannedWords.length > 0) parts.push(`敏感词 ${ov.bannedWords.length} 个`);
+    if (typeof ov.agentPresetChat === "string" && ov.agentPresetChat) parts.push(`聊天 Preset ${ov.agentPresetChat}`);
+    return parts.length > 0 ? parts.join(" · ") : "无覆盖字段";
+  };
+
+  const openOverrideEdit = (openid: string) => {
+    const ov = openid ? groupOverrides[openid] ?? {} : {};
+    const tri = (v: unknown): string => (v === undefined || v === null ? "" : v ? "on" : "off");
+    const num = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
+    setOverrideModal({
+      editingOpenid: openid,
+      error: "",
+      draft: {
+        openid,
+        groupFullReply: tri(ov.groupFullReply),
+        valueThreshold: num(ov.valueThreshold),
+        atContextMessages: num(ov.atContextMessages),
+        groupCooldownMs: num(ov.groupCooldownMs),
+        senderCooldownMs: num(ov.senderCooldownMs),
+        markdownReply: tri(ov.markdownReply),
+        memoryEnabled: tri(ov.memoryEnabled),
+        replyChunkChars: num(ov.replyChunkChars),
+        maxRepliesPerMessage: num(ov.maxRepliesPerMessage),
+        agentPresetChat: typeof ov.agentPresetChat === "string" ? ov.agentPresetChat : "",
+        bannedWords: Array.isArray(ov.bannedWords) ? (ov.bannedWords as string[]).join(", ") : "",
+      },
+    });
+  };
+
+  const setOverrideField = (key: string, value: string) => {
+    setOverrideModal((prev) => (prev ? { ...prev, error: "", draft: { ...prev.draft, [key]: value } } : prev));
+  };
+
+  const saveOverride = async () => {
+    if (!overrideModal) return;
+    const d = overrideModal.draft;
+    const openid = d.openid.trim();
+    if (!openid) {
+      setOverrideModal((prev) => (prev ? { ...prev, error: "请填写群 openid" } : prev));
+      return;
+    }
+    const ov: Record<string, unknown> = {};
+    if (d.groupFullReply) ov.groupFullReply = d.groupFullReply === "on";
+    if (d.valueThreshold !== "") ov.valueThreshold = Number(d.valueThreshold);
+    if (d.atContextMessages !== "") ov.atContextMessages = Number(d.atContextMessages);
+    if (d.groupCooldownMs !== "") ov.groupCooldownMs = Number(d.groupCooldownMs);
+    if (d.senderCooldownMs !== "") ov.senderCooldownMs = Number(d.senderCooldownMs);
+    if (d.markdownReply) ov.markdownReply = d.markdownReply === "on";
+    if (d.memoryEnabled) ov.memoryEnabled = d.memoryEnabled === "on";
+    if (d.replyChunkChars !== "") ov.replyChunkChars = Number(d.replyChunkChars);
+    if (d.maxRepliesPerMessage !== "") ov.maxRepliesPerMessage = Number(d.maxRepliesPerMessage);
+    if (d.agentPresetChat.trim()) ov.agentPresetChat = d.agentPresetChat.trim();
+    if (d.bannedWords.trim()) {
+      ov.bannedWords = d.bannedWords.split(/[,，]/).map((w) => w.trim()).filter(Boolean);
+    }
+    const next: Record<string, Record<string, unknown>> = { ...groupOverrides };
+    if (Object.keys(ov).length === 0) delete next[openid];
+    else next[openid] = ov;
+    setOverrideModal(null);
+    await saveField("groupOverrides", next);
+    setNotice(`群 ${openid.slice(0, 10)}${openid.length > 10 ? "…" : ""} 的覆盖配置已保存（立即生效）`);
+  };
+
+  const removeOverride = async (openid: string) => {
+    if (!window.confirm(localizeText(`确定删除群 ${openid.slice(0, 10)}… 的覆盖配置？删除后该群恢复使用机器人默认配置。`))) return;
+    const next: Record<string, Record<string, unknown>> = { ...groupOverrides };
+    delete next[openid];
+    await saveField("groupOverrides", next);
+  };
 
   const loadSchedules = async (botScope: "current" | "all") => {
     setScheduleModal((prev) => (prev ? { ...prev, loading: true, error: "" } : prev));
@@ -1072,12 +1218,19 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     : [];
 
   const detailView = h("div", { className: "qbot-channelPage" },
-    // ── 顶部导航：返回 + 页面标题 ──
+    // ── 顶部导航：返回 + 机器人身份（QQ 图标 / 编号 / 启用状态 / 连接状态），整条 sticky 吸顶 ──
     h("div", { className: "qbot-detailNav" },
       h("button", { className: "qbot-btn", type: "button", onClick: () => { setPage("list"); setNotice(""); } }, "← 返回列表"),
-      h("div", { className: "qbot-detailNavTitle" },
-        h("h3", null, "机器人详情"),
-        h("span", null, "连接状态 · 行为配置 · 运行统计"))),
+      h("div", { className: "qbot-detailIdentity" },
+        h("span", { className: "qbot-detailAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
+        h("strong", null, detailBot ? detailBot.appIdMasked : "未选择机器人"),
+        detailBot
+          ? h("span", { className: `qbot-chip${detailBot.primary ? " is-active" : ""}` },
+              detailBot.primary ? "主机器人" : (detailBot.enabled ? "已启用" : "已停用"))
+          : null,
+        h("span", { className: "qbot-onlineBadge qbot-detailNavState" },
+          h("span", { className: "qbot-stateDot", "data-tone": connState.tone }),
+          connState.text))),
     loadError ? h("div", { className: "qbot-statusNotice", role: "alert" }, loadError) : null,
 
     // ── 概览：机器人身份 + 连接状态 ──
@@ -1122,16 +1275,24 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           h("div", { className: "qbot-heroStatValue" }, h("strong", null, lastChecked)))),
       cardSummary ? h("div", { className: "qbot-heroFoot", role: "status" }, cardSummary) : null),
 
-    // ── 运行统计 ──
+    // ── 运行统计（持久化：跨重启累计，stats/<appId>.json；可复位清零） ──
     status
-      ? sectionCard("运行统计", "本次 Host 启动以来的累计计数；数值不会自动刷新，需要时点「刷新」。",
+      ? sectionCard("运行统计", "该机器人的持久运行计数（重启不清零）；数值不会自动刷新，需要时点「刷新」。",
           h("div", { className: "qbot-metricGrid" },
             metrics.map((m) => metricCard(m.label, m.value, m.tone))),
-          h("button", {
-            className: "qbot-btn", type: "button",
-            disabled: refreshing,
-            onClick: () => void refreshStats(),
-          }, refreshing ? "刷新中…" : "刷新"), { open: false })
+          h("div", { className: "qbot-sectionActions" },
+            h("button", {
+              className: "qbot-btn", type: "button",
+              disabled: refreshing,
+              onClick: () => void refreshStats(),
+            }, refreshing ? "刷新中…" : "刷新"),
+            h("button", {
+              className: "qbot-btn qbot-btnDanger", type: "button",
+              disabled: resetting || refreshing,
+              title: "把该机器人的运行计数清零（立即生效并落盘）",
+              onClick: () => void resetStats(),
+            }, resetting ? "复位中…" : "复位")),
+          { open: false })
       : null,
 
     // ── 会话与模型 ──
@@ -1220,7 +1381,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         SettingRow({
           rowKey: "quoteReply",
           label: "回复引用原话",
-          desc: "仅群聊生效，单聊一律不引用：群里回复以 QQ 原生引用卡片回应（message_reference），卡片可点击定位到用户那条原消息。注意：引用卡片与 Markdown 同时携带时，部分场景平台会剥离 Markdown 改为纯文本（卡片保留），这是 QQ 平台限制；若想保住 Markdown 排版请选 off。off=不引用；at=仅群 @ 回复（避免群全量刷屏，推荐）；all=群聊全部回复都引用。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。",
+          desc: "回复以 QQ 原生引用卡片定位到用户那条原消息（message_reference，走主动消息通道发送，不与 msg_id 同传——手机端两者同传会堆叠重复引用）。仅群聊生效，单聊一律不引用：off=不引用；at=仅群 @ 回复（推荐）；all=群聊全部回复。卡片发送失败时自动降级为普通被动回复（无卡片，内容不丢）。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。",
           control: h("select", {
             className: "qbot-settingSelect",
             value: String(form.quoteReply ?? "at"),
@@ -1320,6 +1481,27 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5]),
         numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => `${n} 字`),
         numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? "0（不限）" : `${n} 条/天`))),
+      undefined, { open: false }),
+
+    // ── 按群配置（群级覆盖） ──
+    sectionCard("按群配置", "为特定群单独覆盖行为配置（阈值/冷却/敏感词/上下文等），其余字段跟随机器人默认。适合把某一个群调得更活跃或更安静，而不影响其他群。",
+      h("div", { className: "qbot-settingList" },
+        Object.keys(groupOverrides).length === 0
+          ? h("div", { className: "qbot-modalState" }, "还没有按群覆盖配置，所有群都使用上方机器人默认配置。")
+          : Object.entries(groupOverrides).map(([openid, ov]) =>
+              h("div", { key: openid, className: "qbot-schedRow" },
+                h("div", { className: "qbot-schedMain" },
+                  h("div", { className: "qbot-schedTop" },
+                    h("span", { className: "qbot-chip is-active" }, "群"),
+                    h("code", { className: "qbot-mono", title: openid },
+                      `${openid.slice(0, 12)}${openid.length > 12 ? "…" : ""}`)),
+                  h("div", { className: "qbot-schedContent" }, overrideSummary(ov))),
+                h("div", { className: "qbot-schedOps" },
+                  h("button", { className: "qbot-btn qbot-schedEdit", type: "button", onClick: () => openOverrideEdit(openid) }, "编辑"),
+                  h("button", { className: "qbot-btn qbot-btnDanger", type: "button", onClick: () => void removeOverride(openid) }, "删除")))),
+        h("div", { className: "qbot-editActions" },
+          h("span", { className: "qbot-hint" }, "覆盖字段未设置时跟随机器人默认；全部清空并保存即删除该群覆盖。"),
+          h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => openOverrideEdit("") }, "添加群覆盖"))),
       undefined, { open: false }),
 
     // ── 连接与移除 ──
@@ -1578,6 +1760,127 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                 h("button", { className: "qbot-btn", type: "button", disabled: scheduleModal.loading, onClick: () => void loadSchedules(scheduleModal.botScope) }, "刷新"),
                 h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setScheduleModal(null) }, "关闭")))))
       : null,
+    // ── 按群配置（群级覆盖）编辑弹窗 ──
+    overrideModal
+      ? h("div", { className: "qbot-modalOverlay" },
+          h("div", { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": "按群配置" },
+            h("div", { className: "qbot-modalHead" },
+              h("div", null,
+                h("strong", null, overrideModal.editingOpenid ? "编辑群覆盖" : "添加群覆盖"),
+                h("p", null, "留空/选择「跟随默认」的字段继续使用机器人级配置，仅此群生效")),
+              h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: () => setOverrideModal(null) }, "×")),
+            h("div", { className: "qbot-modalList" },
+              h("div", { className: "qbot-editForm" },
+                overrideModal.error
+                  ? h("div", { className: "qbot-modalState qbot-modalError" }, overrideModal.error) : null,
+                scheduleField("群 openid", "要单独配置的群 openid（o 开头的长串）。可在群里让 AI 用 /session 查看。",
+                  TextInput({
+                    className: "qbot-input qbot-mono", value: String(overrideModal.draft.openid ?? ""),
+                    placeholder: "群 openid",
+                    readOnly: Boolean(overrideModal.editingOpenid),
+                    onChange: (ev: any) => setOverrideField("openid", ev.target.value),
+                    "aria-label": "群 openid",
+                  })),
+                scheduleField("群全量回复", "该群非 @ 消息是否参与价值评分并回复。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.groupFullReply),
+                    onChange: (ev: any) => setOverrideField("groupFullReply", ev.target.value),
+                    "aria-label": "群全量回复",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "on" }, "启用"),
+                    h("option", { value: "off" }, "停用"))),
+                scheduleField("价值阈值", "仅群全量回复开启时有效：0-10 分，达到阈值才回复。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.valueThreshold),
+                    onChange: (ev: any) => setOverrideField("valueThreshold", ev.target.value),
+                    "aria-label": "价值阈值",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) =>
+                      h("option", { key: n, value: String(n) }, `${n} 分`)))),
+                scheduleField("@ 上下文条数", "@ 机器人时附带的本群最近消息条数。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.atContextMessages),
+                    onChange: (ev: any) => setOverrideField("atContextMessages", ev.target.value),
+                    "aria-label": "@ 上下文条数",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    [0, 2, 4, 6, 8, 10, 15, 20, 30, 50].map((n) =>
+                      h("option", { key: n, value: String(n) }, n === 0 ? "0（关闭）" : `${n} 条`)))),
+                scheduleField("同群冷却", "该群两次全量回复的最小间隔（@ 回复不受限）。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.groupCooldownMs),
+                    onChange: (ev: any) => setOverrideField("groupCooldownMs", ev.target.value),
+                    "aria-label": "同群冷却",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    COOLDOWN_OPTIONS.map((n) => h("option", { key: n, value: String(n) }, cooldownLabel(n))))),
+                scheduleField("同人冷却", "同一人在该群两次被回复的最小间隔。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.senderCooldownMs),
+                    onChange: (ev: any) => setOverrideField("senderCooldownMs", ev.target.value),
+                    "aria-label": "同人冷却",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    COOLDOWN_OPTIONS.map((n) => h("option", { key: n, value: String(n) }, cooldownLabel(n))))),
+                scheduleField("分片长度", "单条回复的最大字符数，超过会拆成多条发送。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.replyChunkChars),
+                    onChange: (ev: any) => setOverrideField("replyChunkChars", ev.target.value),
+                    "aria-label": "分片长度",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000].map((n) =>
+                      h("option", { key: n, value: String(n) }, `${n}`)))),
+                scheduleField("每条消息回复上限", "该群每条用户消息最多被动回复几条（平台上限 5）。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.maxRepliesPerMessage),
+                    onChange: (ev: any) => setOverrideField("maxRepliesPerMessage", ev.target.value),
+                    "aria-label": "每条消息回复上限",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    [1, 2, 3, 4, 5].map((n) => h("option", { key: n, value: String(n) }, `${n} 条`)))),
+                scheduleField("Markdown 回复", "该群回复是否优先使用 QQ Markdown。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.markdownReply),
+                    onChange: (ev: any) => setOverrideField("markdownReply", ev.target.value),
+                    "aria-label": "Markdown 回复",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "on" }, "启用"),
+                    h("option", { value: "off" }, "停用"))),
+                scheduleField("长期记忆", "该群是否维护跨会话长期记忆。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.memoryEnabled),
+                    onChange: (ev: any) => setOverrideField("memoryEnabled", ev.target.value),
+                    "aria-label": "长期记忆",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "on" }, "启用"),
+                    h("option", { value: "off" }, "停用"))),
+                scheduleField("聊天 Preset", "该群非 @ 全量消息使用的 Agent Preset（只聊天不执行工具）。留空跟随机器人配置。",
+                  h("select", {
+                    className: "qbot-settingSelect", value: String(overrideModal.draft.agentPresetChat),
+                    onChange: (ev: any) => setOverrideField("agentPresetChat", ev.target.value),
+                    "aria-label": "聊天 Preset",
+                  },
+                    h("option", { value: "" }, "跟随默认"),
+                    presetOptions(catalogs.agentPresets).map((o) =>
+                      h("option", { key: o.value, value: o.value }, o.label)))),
+                scheduleField("敏感词列表", "仅该群生效的敏感词（逗号分隔），命中即撤回并跳过回复；与机器人级敏感词叠加。",
+                  TextArea({
+                    rows: 2, value: String(overrideModal.draft.bannedWords ?? ""),
+                    placeholder: "词1, 词2（留空跟随默认）",
+                    onChange: (ev: any) => setOverrideField("bannedWords", ev.target.value),
+                    "aria-label": "敏感词列表",
+                  })))),
+            h("div", { className: "qbot-modalFoot" },
+              h("span", { className: "qbot-hint" }, "保存后立即生效，无需重启"),
+              h("div", { className: "qbot-viewActions" },
+                h("button", { className: "qbot-btn", type: "button", onClick: () => setOverrideModal(null) }, "取消"),
+                h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => void saveOverride() }, "保存")))))
+      : null,
     // ── 消息归档弹窗 ──
     archiveModal
       ? h("div", { className: "qbot-modalOverlay" },
@@ -1603,6 +1906,9 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                               `会话 ${formatTime(r.ts)}${r.content ? ` · ${String(r.content)}` : ""}`);
                           }
                           const isUser = r.kind === "inbound";
+                          const content = String(r.content ?? "");
+                          // 机器人回复/主动消息一律按 Markdown 可视化；用户消息含 Markdown 特征时同样渲染。
+                          const useMd = !isUser || looksLikeMarkdown(content);
                           return h("div", { key, className: `qbot-tlItem ${isUser ? "is-user" : "is-bot"}` },
                             h("span", { className: "qbot-tlDot", "aria-hidden": "true" }),
                             h("div", { className: "qbot-tlBody" },
@@ -1613,7 +1919,13 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                                   : null,
                                 h("span", { className: "qbot-mono" }, String(r.chat ?? "—")),
                                 h("span", null, formatTime(r.ts))),
-                              h("div", { className: "qbot-tlBubble" }, String(r.content ?? "")),
+                              useMd
+                                ? h("div", {
+                                    className: "qbot-tlBubble qbot-md",
+                                    // renderMarkdown 内部先整体 HTML 转义再叠加受控标签，URL 仅放行 http/https。
+                                    dangerouslySetInnerHTML: { __html: renderMarkdown(content) },
+                                  })
+                                : h("div", { className: "qbot-tlBubble" }, content),
                               r.note ? h("div", { className: "qbot-tlNote" }, String(r.note)) : null));
                         }))),
             h("div", { className: "qbot-modalFoot" },
@@ -1697,7 +2009,9 @@ const CSS_TEXT = `
 .qbot-page *, .qbot-page *::before, .qbot-page *::after { box-sizing: border-box; }
 
 /* ── 标题栏（dim-title）────────────────────────────────────────────────── */
-.qbot-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 18px; }
+/* sticky 吸顶：长页面滚动时标题栏（含连接状态）常驻视口顶部；负顶 margin 抵消
+   .qbot-page 的 2px 顶部 padding，使吸附时背景无缝贴合滚动容器顶缘。 */
+.qbot-title { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -2px 0 8px; padding: 8px 2px 10px; background: var(--dsw-alias-bg-layer-1, #fff); }
 .qbot-brand { min-width: 0; width: max-content; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; margin: -2px -6px; padding: 2px 6px; border-radius: 8px; }
 .qbot-brandHeading { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
 .qbot-brandName { color: var(--dsw-alias-label-primary, #1f2329); font-size: 20px; line-height: 24px; font-weight: 800; letter-spacing: .04em; }
@@ -1796,7 +2110,8 @@ const CSS_TEXT = `
 
 /* ── 添加机器人：页面层级（页头）───────────────────────────────────────── */
 .qbot-addView { gap: 14px; }
-.qbot-addNav { display: flex; align-items: center; gap: 10px; }
+/* 返回导航吸顶（添加页 / 详情页）：滚动时返回按钮（详情页含连接状态）常驻顶部 */
+.qbot-addNav { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 10px; margin: -2px 0 0; padding: 8px 2px 6px; background: var(--dsw-alias-bg-layer-1, #fff); }
 .qbot-addHead { display: flex; flex-direction: column; gap: 5px; }
 .qbot-addHead h2 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 19px; line-height: 1.35; font-weight: 700; }
 .qbot-addHead p { max-width: 760px; margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12.5px; line-height: 1.75; }
@@ -1937,6 +2252,22 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-tlRole { font-weight: 650; color: var(--dsw-alias-label-secondary, #646a73); }
 .qbot-tlItem.is-user .qbot-tlRole { color: var(--qbot-blue); }
 .qbot-tlBubble { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--dsw-alias-label-primary, #1f2329); }
+/* Markdown 可视化：块级元素排版（转义后的受控 HTML，非用户可写标签） */
+.qbot-tlBubble.qbot-md { white-space: normal; }
+.qbot-tlBubble.qbot-md > :first-child { margin-top: 0; }
+.qbot-tlBubble.qbot-md > :last-child { margin-bottom: 0; }
+.qbot-tlBubble.qbot-md p { margin: 4px 0; }
+.qbot-tlBubble.qbot-md h3, .qbot-tlBubble.qbot-md h4, .qbot-tlBubble.qbot-md h5, .qbot-tlBubble.qbot-md h6 { margin: 8px 0 4px; font-size: 13.5px; line-height: 1.4; font-weight: 650; }
+.qbot-tlBubble.qbot-md ul, .qbot-tlBubble.qbot-md ol { margin: 4px 0; padding-left: 20px; }
+.qbot-tlBubble.qbot-md li { margin: 2px 0; }
+.qbot-tlBubble.qbot-md blockquote { margin: 4px 0; padding: 2px 10px; border-left: 3px solid var(--dsw-alias-border-l2, #e5e6eb); color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-tlBubble.qbot-md code { padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 8%, transparent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.qbot-tlBubble.qbot-md pre { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); overflow-x: auto; }
+.qbot-tlBubble.qbot-md pre code { padding: 0; background: transparent; font-size: 12px; line-height: 1.5; }
+.qbot-tlBubble.qbot-md a { color: var(--qbot-blue); text-decoration: none; }
+.qbot-tlBubble.qbot-md a:hover { text-decoration: underline; }
+.qbot-tlBubble.qbot-md strong { font-weight: 650; }
+.qbot-tlBubble.qbot-md del { opacity: 0.65; }
 /* 用户：蓝色高亮气泡（左） */
 .qbot-tlItem.is-user .qbot-tlBubble { background: color-mix(in srgb, var(--qbot-blue) 9%, var(--dsw-alias-bg-layer-1, #fff)); border: 1px solid color-mix(in srgb, var(--qbot-blue) 32%, transparent); border-top-left-radius: 4px; }
 /* 机器人：中性灰气泡（右） */
@@ -2007,10 +2338,14 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-cardSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12px; font-weight: 400; line-height: normal; overflow-wrap: anywhere; white-space: normal; }
 
 /* ── 详情页：顶部导航 ─────────────────────────────────────────────────── */
-.qbot-detailNav { display: flex; align-items: center; gap: 14px; }
-.qbot-detailNavTitle { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.qbot-detailNavTitle h3 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 16px; line-height: normal; font-weight: 700; }
-.qbot-detailNavTitle span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; line-height: normal; }
+.qbot-detailNav { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 14px; margin: -2px 0 0; padding: 8px 2px 6px; background: var(--dsw-alias-bg-layer-1, #fff); }
+/* 吸顶导航条（详情页）：返回 + 机器人身份（图标/编号/启用状态/连接状态）常驻顶部 */
+.qbot-detailIdentity { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.qbot-detailAvatar { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: linear-gradient(140deg, #3d8bff, var(--qbot-blue-dark)); }
+.qbot-detailAvatar svg { width: 17px; height: 17px; }
+.qbot-detailIdentity > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; line-height: normal; font-weight: 700; }
+/* 吸顶导航条右侧的连接状态胶囊：推到行尾，滚动时始终可见 */
+.qbot-detailNavState { margin-left: auto; }
 
 /* ── 详情页：概览横幅 ─────────────────────────────────────────────────── */
 .qbot-hero { position: relative; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); }
@@ -2035,6 +2370,8 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-section { border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); overflow: hidden; }
 .qbot-section.is-danger { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 26%, var(--dsw-alias-border-l2, #e5e6eb)); }
 .qbot-section > summary.qbot-sectionHead { cursor: pointer; list-style: none; user-select: none; }
+/* 分区头部操作按钮组（如运行统计的 刷新/复位）：并排靠右 */
+.qbot-sectionActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .qbot-section > summary.qbot-sectionHead::-webkit-details-marker { display: none; }
 .qbot-section:not([open]) > summary.qbot-sectionHead { border-bottom-color: transparent; }
 .qbot-sectionChevron { flex: none; align-self: center; margin-left: auto; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 13px; line-height: 1; transition: transform .18s ease; }

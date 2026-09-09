@@ -17,6 +17,7 @@ export function createBotState(): BotState {
     groupBuffer: new Map(),
     incomingFingerprints: new Map(),
     seenEvents: new Map(),
+    errorNoticeAt: new Map(),
     sentByChat: new Map(),
     counters: { received: 0, sessions: 0, replies: 0, proactive: 0, errors: 0 },
   };

@@ -1,7 +1,17 @@
 /**
  * 每聊天的长期记忆（跨 /new 保留上下文）。
  *
- * 存储于 ~/.dsh/qqbot/memory/<chatKey>.json（chatKey 如 group:ABCDEF）。
+ * 存储于 ~/.dsh/qqbot/memory/<chatKey>.md（chatKey 如 group:ABCDEF），Markdown 格式、
+ * 人类可直接阅读编辑，只存对话内容本身（不带日期与任何装饰）：
+ *
+ *   # QQ 聊天长期记忆
+ *
+ *   - 用户叫涛涛，喜欢简洁回复
+ *   - 群里在准备 10 月团建
+ *
+ * 只存重要的对话内容本身：写入时统一净化——剥离 emoji、装饰符号、markdown 标记、
+ * 行首列表符与【标签】框，仅保留纯文本（旧 .json / 带日期 .md 在读取时自动清洗）。
+ *
  * 记忆条目由 AI 工具（qqbot_memory_add）或 /记忆 命令写入，每次会话开始时
  * 以压缩块形式注入 prompt，让机器人「记住」该群/单聊的长期事实。
  *
@@ -10,14 +20,11 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pluginDataDir } from "./store-file.js";
-import { toShanghaiISO } from "../shared/time.js";
 
 export const MEMORY_MAX_ENTRIES = 50;
 export const MEMORY_MAX_CHARS = 200;
 
 export interface MemoryEntry {
-  /** 写入时间（上海时区 ISO）。 */
-  ts: string;
   text: string;
 }
 
@@ -26,7 +33,23 @@ function safeName(chatKey: string): string {
 }
 
 function memoryPath(chatKey: string): string {
-  return join(pluginDataDir(), "memory", `${safeName(chatKey)}.json`);
+  return join(pluginDataDir(), "memory", `${safeName(chatKey)}.md`);
+}
+
+/**
+ * 净化记忆文本——只留对话内容本身：
+ *  - 剥离 markdown 标记（* _ ~ ` # >）与 emoji/符号图元（\p{Extended_Pictographic}，含 ★ ● ◆ 等）；
+ *  - 剥离装饰性标签框（【】〖〗）与行首列表符/编号（- 1. ① 等）；
+ *  - 折叠连续空白，截断到单条上限。
+ */
+export function sanitizeMemoryText(raw: string, maxChars = MEMORY_MAX_CHARS): string {
+  let text = raw.normalize("NFC");
+  text = text.replace(/[*_~`#>]+/g, "");
+  text = text.replace(/\p{Extended_Pictographic}/gu, "");
+  text = text.replace(/[【〖】〗]/g, "");
+  text = text.replace(/^\s*(?:[-*•·–—]|\d{1,3}[.)、]|[①-⑳])\s*/g, "");
+  text = text.replace(/\s{2,}/g, " ").trim();
+  return text.slice(0, maxChars);
 }
 
 export class ChatMemoryStore {
@@ -41,31 +64,41 @@ export class ChatMemoryStore {
   async load(chatKey: string): Promise<MemoryEntry[]> {
     const cached = this.#cache.get(chatKey);
     if (cached) return cached;
-    let entries: MemoryEntry[] = [];
-    try {
-      const raw = JSON.parse(await readFile(memoryPath(chatKey), "utf8")) as unknown;
-      if (Array.isArray(raw)) {
-        entries = raw
-          .filter((e): e is MemoryEntry => Boolean(e) && typeof (e as MemoryEntry).text === "string")
-          .map((e) => ({ ts: typeof e.ts === "string" ? e.ts : "", text: e.text.slice(0, MEMORY_MAX_CHARS) }))
-          .slice(-MEMORY_MAX_ENTRIES);
-      }
-    } catch {
-      /* 文件缺失或损坏 → 空记忆 */
-    }
+    const entries = (await this.#loadMarkdown(chatKey)) ?? [];
     this.#cache.set(chatKey, entries);
     return entries;
   }
 
-  /** 追加一条记忆（去重：同文本追加时刷新时间戳并前移）。 */
+  /**
+   * 解析 Markdown 记忆文件；文件不存在返回 null。
+   * 行格式「- 内容」；兼容清洗历史行首日期「- YYYY-MM-DD 内容」（日期一并丢弃）。
+   */
+  async #loadMarkdown(chatKey: string): Promise<MemoryEntry[] | null> {
+    let raw: string;
+    try {
+      raw = await readFile(memoryPath(chatKey), "utf8");
+    } catch {
+      return null;
+    }
+    const entries: MemoryEntry[] = [];
+    for (const line of raw.split(/\r?\n/)) {
+      const m = /^[-*]\s+(?:(\d{4}-\d{2}-\d{2})\s+)?(.*)$/.exec(line.trim());
+      if (!m) continue;
+      const text = sanitizeMemoryText(m[2] ?? "");
+      if (!text) continue;
+      entries.push({ text });
+    }
+    return entries.slice(-MEMORY_MAX_ENTRIES);
+  }
+
+  /** 追加一条记忆（净化后写入；去重：同文本追加时前移）。 */
   async add(chatKey: string, text: string): Promise<boolean> {
-    const clean = text.trim().slice(0, MEMORY_MAX_CHARS);
+    const clean = sanitizeMemoryText(text);
     if (!clean) return false;
     const entries = await this.load(chatKey);
     const existing = entries.findIndex((e) => e.text === clean);
-    const entry: MemoryEntry = { ts: toShanghaiISO(), text: clean };
     if (existing >= 0) entries.splice(existing, 1);
-    entries.push(entry);
+    entries.push({ text: clean });
     while (entries.length > MEMORY_MAX_ENTRIES) entries.shift();
     await this.#save(chatKey, entries);
     return true;
@@ -84,10 +117,13 @@ export class ChatMemoryStore {
     return count;
   }
 
+  /** 以 Markdown 落盘：标题 + 空行 + 「- 内容」列表（无日期，人类可读可编辑）。 */
   async #save(chatKey: string, entries: MemoryEntry[]): Promise<void> {
     try {
       await mkdir(join(pluginDataDir(), "memory"), { recursive: true });
-      await writeFile(memoryPath(chatKey), JSON.stringify(entries, null, 2), "utf8");
+      const lines = ["# QQ 聊天长期记忆", ""];
+      for (const e of entries) lines.push(`- ${e.text}`);
+      await writeFile(memoryPath(chatKey), `${lines.join("\n")}\n`, "utf8");
       this.#cache.set(chatKey, entries);
     } catch (error) {
       this.#logger.warn("[dsh-qqbot] 写入记忆失败:", error);

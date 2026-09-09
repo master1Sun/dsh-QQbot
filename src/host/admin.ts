@@ -436,6 +436,13 @@ export function createAdminService(ctx: AdminServiceContext) {
         case "schedule.add": result = await scheduleAdd(payload); break;
         case "schedule.remove": result = await scheduleRemove(payload); break;
         case "archive.list": result = await archiveList(payload); break;
+        case "stats.reset": {
+          const bot = await bots.resetCounters(typeof payload.appId === "string" ? payload.appId : undefined);
+          result = bot
+            ? { ok: true, data: { appId: bot.appId, counters: { ...bot.state.counters } } }
+            : { ok: false, error: "机器人不存在" };
+          break;
+        }
         case "update.check": result = await updateCheck(); break;
         case "update.apply": result = await updateApply(); break;
         default: result = { ok: false, error: `unknown endpoint: ${endpoint}` };
