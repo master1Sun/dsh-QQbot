@@ -91,10 +91,12 @@ export interface StoredBotConfig {
   archiveEnabled?: boolean;
   /** 回复优先用 QQ Markdown。 */
   markdownReply?: boolean;
-  /** 出站引用范围：off=不引用；at=仅 @/单聊；all=全部回复。 */
+  /** 出站引用范围：off=不引用；at=仅群 @；all=群聊全部回复。 */
   quoteReply?: "off" | "at" | "all";
   /** 引用原话的字数上限（20–1000）。 */
   quoteMaxChars?: number;
+  /** 是否响应其他机器人发出的消息（默认忽略）。 */
+  respondToBots?: boolean;
   /** 群全量消息价值回复总开关。 */
   groupFullReply?: boolean;
   /** 价值评分阈值（0–10）。 */
@@ -125,19 +127,21 @@ export interface StoredBotConfig {
   memoryEnabled?: boolean;
   /** 主动消息每日配额（0=不限）。 */
   quotaPerDay?: number;
+  /** 发给 QQ 用户的回复文案语言（zh/en）。 */
+  replyLocale?: "zh" | "en";
   [key: string]: unknown;
 }
 
 /** 行为配置字段（config.get / config.save 序列化时统一引用，不含传输/凭据字段）。 */
 export const BOT_CONFIG_FIELDS = [
-  "workspacePath", "agentPreset", "agentPresetChat", "permissionPreset", "model",
+  "workspacePath", "agentPreset", "agentPresetChat", "permissionPreset", "model", "secretEnv",
   "allowC2c", "allowGroups", "allowUsers", "atContextMessages", "groupBufferMax",
   "replyChunkChars", "maxRepliesPerMessage", "proactiveFallback", "archiveEnabled",
   "markdownReply", "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs",
-  "quoteReply", "quoteMaxChars",
+  "quoteReply", "quoteMaxChars", "respondToBots",
   "multimodalInbound", "voiceTranscription", "asrEndpoint",
   "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords",
-  "memoryEnabled", "quotaPerDay",
+  "memoryEnabled", "quotaPerDay", "replyLocale",
 ] as const;
 
 /**
@@ -152,6 +156,7 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   agentPresetChat: "",
   permissionPreset: "",
   model: "",
+  secretEnv: "",
   allowC2c: true,
   allowGroups: ["*"],
   allowUsers: ["*"],
@@ -164,6 +169,7 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   markdownReply: true,
   quoteReply: "at",
   quoteMaxChars: 120,
+  respondToBots: false,
   groupFullReply: true,
   valueThreshold: 5,
   groupCooldownMs: 60_000,
@@ -177,6 +183,7 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   bannedWords: [],
   memoryEnabled: true,
   quotaPerDay: 50,
+  replyLocale: "zh",
 };
 
 /** 把行为配置补齐到完整结构（只填缺失键），返回是否发生过补齐。 */

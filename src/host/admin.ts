@@ -14,6 +14,8 @@ import path from "node:path";
 import type { ModelOption } from "./catalogs.js";
 import type { QrLoginManager } from "./qr-login.js";
 import type { ScheduleStore, ScheduleEntry } from "./schedule.js";
+import { readArchiveRecords } from "./archive.js";
+import { applyUpdate, checkUpdate } from "./updater.js";
 import { toShanghaiISO } from "../shared/time.js";
 import type { BotRuntimeManager, BotRuntime } from "./bots.js";
 import {
@@ -314,17 +316,26 @@ export function createAdminService(ctx: AdminServiceContext) {
 
   // ── 定时消息（全局 store，按 appId 归属机器人） ────────────────────────────────
 
-  const scheduleList = async (payload: { scope?: unknown; openid?: unknown }) => {
+  const scheduleList = async (payload: { scope?: unknown; openid?: unknown; appId?: unknown; allBots?: unknown }) => {
     const scope = payload.scope === "c2c" ? "c2c" : payload.scope === "group" ? "group" : null;
     const openid = typeof payload.openid === "string" ? payload.openid.trim() : "";
     const all = schedules.list();
-    const mine = scope && openid ? all.filter((e: ScheduleEntry) => e.scope === scope && e.openid === openid) : all;
+    // 机器人过滤：allBots=true 返回全部；否则默认只看「当前机器人」
+    // （条目未写 appId 时归属主机器人，与运行时 resolveBot 的兜底语义一致）。
+    let mine = all;
+    if (payload.allBots !== true) {
+      const appId = typeof payload.appId === "string" && payload.appId ? payload.appId : primaryAppId();
+      mine = mine.filter((e: ScheduleEntry) => (e.appId ?? primaryAppId()) === appId);
+    }
+    if (scope && openid) mine = mine.filter((e: ScheduleEntry) => e.scope === scope && e.openid === openid);
     return { ok: true, data: { schedules: mine, total: all.length, maxPerChat: 5 } };
   };
 
   const scheduleAdd = async (payload: Record<string, unknown>) => {
     const appId = typeof payload.appId === "string" && payload.appId ? payload.appId : primaryAppId();
+    // 传 id 时为编辑（ScheduleStore.add 保留原 id 与创建时间）。
     const added = await schedules.add({
+      ...(typeof payload.id === "string" && payload.id ? { id: payload.id } : {}),
       scope: String(payload.scope ?? ""),
       openid: String(payload.openid ?? ""),
       type: String(payload.type ?? ""),
@@ -333,15 +344,48 @@ export function createAdminService(ctx: AdminServiceContext) {
       content: String(payload.content ?? ""),
       createdBy: "settings",
       appId,
+      ...(payload.mode === "ai" || payload.mode === "text" ? { mode: payload.mode } : {}),
     });
     return added.ok ? { ok: true, data: { schedule: added.entry } } : { ok: false, error: added.error };
   };
 
   const scheduleRemove = async (payload: { scope?: unknown; openid?: unknown; id?: unknown; index?: unknown }) => {
+    // 设置页弹窗只传全局 id；聊天命令路径仍带 scope/openid（支持聊天内序号）。
+    const id = typeof payload.id === "string" ? payload.id.trim() : "";
+    if (id && !(typeof payload.scope === "string" && payload.scope) && !(typeof payload.openid === "string" && payload.openid)) {
+      const removed = await schedules.removeById(id);
+      return removed.ok ? { ok: true, data: { removed: removed.entry } } : { ok: false, error: removed.error };
+    }
     const scope = String(payload.scope ?? "");
     const openid = String(payload.openid ?? "");
     const removed = await schedules.remove(scope, openid, String(payload.id ?? payload.index ?? ""));
     return removed.ok ? { ok: true, data: { removed: removed.entry } } : { ok: false, error: removed.error };
+  };
+
+  // ── 消息归档（设置页「消息归档」弹窗：只读最近记录） ─────────────────────────
+
+  const archiveList = async (payload: { appId?: unknown; limit?: unknown }) => {
+    const appId = typeof payload.appId === "string" && payload.appId ? payload.appId : primaryAppId();
+    const limit = typeof payload.limit === "number" && Number.isSafeInteger(payload.limit) ? payload.limit : undefined;
+    const result = await readArchiveRecords({ bot: appId, limit });
+    return { ok: true, data: { appId, ...result } };
+  };
+
+  // ── 版本检查与自更新（GitHub master1Sun/dsh-QQbot） ──────────────────────────
+
+  const updateCheck = async () => {
+    const data = await checkUpdate();
+    return { ok: true, data };
+  };
+
+  const updateApply = async () => {
+    const check = await checkUpdate();
+    if (!check.hasUpdate) {
+      return { ok: false, error: `暂无新版本（当前 v${check.current || "?"}，远端 v${check.latest}）` };
+    }
+    const data = await applyUpdate();
+    logger.info(`[dsh-qqbot] 已自更新 ${data.updatedFrom} → ${data.updatedTo}，备份于 ${data.backupDir}`);
+    return { ok: true, data };
   };
 
   /**
@@ -391,6 +435,9 @@ export function createAdminService(ctx: AdminServiceContext) {
         case "schedule.list": result = await scheduleList(payload); break;
         case "schedule.add": result = await scheduleAdd(payload); break;
         case "schedule.remove": result = await scheduleRemove(payload); break;
+        case "archive.list": result = await archiveList(payload); break;
+        case "update.check": result = await updateCheck(); break;
+        case "update.apply": result = await updateApply(); break;
         default: result = { ok: false, error: `unknown endpoint: ${endpoint}` };
       }
     } catch (error) {

@@ -13,34 +13,27 @@ export interface ReplyTarget {
   openid: string;
 }
 
-/** 触发这次回复的那条用户消息（出站引用用）。 */
-export interface ReplyQuote {
-  /** 发送者 openid。 */
-  sender: string;
-  /** 发送者昵称（可能为空）。 */
-  senderName: string;
-  /** 消息原文（发送前会折叠截断）。 */
-  content: string;
-  /** 事件里的 RFC3339 时间戳原文。 */
-  timestamp?: string;
-}
-
 /** 被动回复凭据：收到的那条用户消息的 msg_id 与已用回复序号。 */
 export interface PassiveReplyRecord {
   target: ReplyTarget;
   /** 聊天键 `${scope}:${openid}`（会话绑定用）。 */
   chatKey: string;
-  /** QQ 消息事件体里的 id（被动回复凭证）。 */
+  /** QQ 消息事件体里的 id（被动回复凭证；出站引用不使用它）。 */
   msgId: string;
+  /**
+   * 事件 message_scene.ext 里的 msg_idx（REFIDX_*，本条消息的引用索引）。
+   * v2 群聊出站引用卡片（message_reference.message_id）必须用它：官方文档规定
+   * 非机器人消息的引用 id 取自事件 ext 的 msg_idx 字段，传原始 msg id 平台无法解析，
+   * 会引发异常行为（含重复消息）。缺失时回复不带引用卡片。
+   */
+  selfIdx?: string;
   /** 下一次被动回复使用的 msg_seq（从 1 开始）。 */
   nextSeq: number;
   /** 收到时间（epoch ms），用于判断被动回复窗口（群 5 分钟 / 单聊 60 分钟）。 */
   receivedAt: number;
-  /** 触发本轮回复的用户消息（回复顶部引用它；会话复用时更新为最新一条）。 */
-  quote?: ReplyQuote;
   /**
    * 该回复是否源于 @/单聊（而非群全量价值过滤）。
-   * quoteReply=at 时只有这类回复才带引用，避免群全量刷屏。
+   * quoteReply=at 时只有这类回复才带原生引用卡片，避免群全量刷屏。
    */
   quoteMention: boolean;
 }

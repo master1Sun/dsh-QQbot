@@ -8,9 +8,11 @@
  *   主动消息省略 msg_id（需开启「机器人主动在群聊内发言」）。
  * - sendReply：优先 Markdown（msg_type=2），单条被平台拒绝（40034090 等）时
  *   该分片回退纯文本（msg_type=0），避免无 Markdown 权限的机器人回复失败。
- * - 原生引用：被动回复可携带 message_reference（v2 接口透传字段，官方文档未列出但被接受），
- *   QQ 客户端据此把回复渲染为可点击定位的原生引用气泡；平台拒绝时自动去掉该字段重发，
- *   并熔断（本次运行不再尝试），后续回复回退为普通被动回复。
+ * - 原生引用卡片：quoteMsgId 携带时附 message_reference，QQ 客户端渲染为可点击定位到用户原消息的
+ *   引用卡片（原生能力，非文本前缀）。官方要求 message_reference.message_id 用事件
+ *   message_scene.ext 里的 msg_idx（REFIDX_*），不能用原始 msg id——后者平台无法解析，
+ *   会引发重复消息等异常。被动回复的 msg_id + msg_seq 仅是被动凭证，不渲染回复样式。
+ *   注意 message_reference 与 Markdown 在部分场景会被平台剥离 Markdown，此时本条转纯文本但引用卡片保留。
  */
 import type { ReplyTarget } from "../../shared/types.js";
 import { QQBot, type MediaFileType } from "@tencent-connect/qqbot-nodejs";
@@ -31,8 +33,12 @@ export const PASSIVE_REPLY_LIMIT: Record<ReplyTarget["scope"], number> = Object.
   group: 5,
 });
 
-/** 平台明确拒绝 markdown 消息的错误码（回退纯文本；其余错误视为结果不确定，不重试）。 */
-const MARKDOWN_REJECTION_CODES = new Set([40_034_090, 400_340_90, 304_003, 304_024, 304_042, 500]);
+/**
+ * 平台明确拒绝 markdown 消息的错误码（回退纯文本）。
+ * 注意：只收录「确定未发送」的拒绝码。500（消息发送异常）是结果不确定的错误——
+ * 平台可能已创建消息，自动回退重发会造成两条重复消息，因此不收录（抛给上层走投递出箱）。
+ */
+const MARKDOWN_REJECTION_CODES = new Set([40_034_090, 400_340_90, 304_003, 304_024, 304_042]);
 
 interface QqApiErrorShape {
   code?: unknown;
@@ -44,16 +50,9 @@ export class QqApiClient {
   #token = "";
   #tokenExpiresAt = 0;
   #tokenPromise: Promise<string> | null = null;
-  /** 原生引用（message_reference）可用性熔断：平台拒绝一次后本次运行内不再尝试。 */
-  #nativeQuoteEnabled = true;
 
   constructor(options: QqApiClientOptions) {
     this.#options = options;
-  }
-
-  /** 平台是否仍接受原生引用（熔断后为 false，调用方可回退文本引用）。 */
-  get nativeQuoteAvailable(): boolean {
-    return this.#nativeQuoteEnabled;
   }
 
   /** 扫码/配置更新后重置 token 缓存。 */
@@ -139,7 +138,7 @@ export class QqApiClient {
     }
   }
 
-  /** 发送一条文本消息。msgId 省略则为主动消息；msgSeq 被动回复序号从 1 开始；quoteMsgId 传原生引用。 */
+  /** 发送一条文本消息。msgId 省略则为主动消息；msgSeq 被动回复序号从 1 开始。quoteMsgId 携带时附 message_reference 引用卡片。 */
   async sendText(
     target: ReplyTarget,
     content: string,
@@ -156,7 +155,7 @@ export class QqApiClient {
     return await this.#send(target, payload);
   }
 
-  /** 发送一条 Markdown 消息（需机器人有 markdown 权限）。 */
+  /** 发送一条 Markdown 消息（需机器人有 markdown 权限）。quoteMsgId 携带时附 message_reference 引用卡片。 */
   async sendMarkdown(
     target: ReplyTarget,
     content: string,
@@ -174,65 +173,34 @@ export class QqApiClient {
   }
 
   /**
-   * 回复一条消息：按配置尝试 Markdown，单条被平台拒绝时回退纯文本。
+   * 回复一条消息：按配置尝试 Markdown，单条被平台拒绝时回退纯文本（引用卡片保留）。
    * 其他错误（网络/限流/凭据）视为结果不确定，直接抛出由上层处理。
-   * quoteMsgId 存在时携带原生引用（message_reference）；平台拒绝引用则去掉重发并熔断。
+   * 被动回复带 msg_id + msg_seq，QQ 客户端据此渲染「回复了某人」的可定位样式；
+   * quoteMsgId 携带时额外附 message_reference，渲染为可点击定位到用户原消息的引用卡片
+   * （原生引用，非文本前缀）。注意 message_reference 与 Markdown 在某些场景会被平台剥离 Markdown，
+   * 此时本条以纯文本发送但引用卡片仍在。
    */
   async sendReply(
     target: ReplyTarget,
     content: string,
-    {
-      msgId,
-      msgSeq,
-      markdown,
-      quoteMsgId,
-    }: { msgId?: string; msgSeq?: number; markdown: boolean; quoteMsgId?: string },
-  ): Promise<{ mode: "markdown" | "text"; id?: string; nativeQuote: boolean }> {
+    { msgId, msgSeq, markdown, quoteMsgId }: { msgId?: string; msgSeq?: number; markdown: boolean; quoteMsgId?: string },
+  ): Promise<{ mode: "markdown" | "text"; id?: string }> {
     const text = content.trim();
-    if (!text) return { mode: "text", nativeQuote: false };
-    const useRef = Boolean(quoteMsgId) && this.#nativeQuoteEnabled;
-    const quote = useRef ? quoteMsgId : undefined;
+    if (!text) return { mode: "text" };
     if (markdown) {
       try {
-        const id = await this.sendMarkdown(target, text, { msgId, msgSeq, quoteMsgId: quote });
-        return { mode: "markdown", id, nativeQuote: Boolean(quote) };
+        const id = await this.sendMarkdown(target, text, { msgId, msgSeq, quoteMsgId });
+        return { mode: "markdown", id };
       } catch (error) {
         const code = (error as Error & { code?: number }).code;
-        if (!MARKDOWN_REJECTION_CODES.has(Number(code)) && code !== undefined) {
-          // 带 message_reference 被平台拒绝且非 Markdown 原因 → 去掉引用重试一次并熔断。
-          if (quote && code !== undefined) {
-            this.#disableNativeQuote(error);
-            const id = await this.sendMarkdown(target, text, { msgId, msgSeq });
-            return { mode: "markdown", id, nativeQuote: false };
-          }
-          throw error;
-        }
+        if (!MARKDOWN_REJECTION_CODES.has(Number(code)) && code !== undefined) throw error;
         this.#options.logger.warn?.(
-          `[dsh-qqbot] Markdown 回复被平台拒绝（code=${String(code)}），本条回退纯文本`,
+          `[dsh-qqbot] Markdown 回复被平台拒绝（code=${String(code)}），本条回退纯文本（引用卡片保留）`,
         );
       }
     }
-    if (quote) {
-      try {
-        const id = await this.sendText(target, text, { msgId, msgSeq, quoteMsgId: quote });
-        return { mode: "text", id, nativeQuote: true };
-      } catch (error) {
-        const code = (error as Error & { code?: number }).code;
-        if (code === undefined) throw error;
-        this.#disableNativeQuote(error);
-      }
-    }
-    const id = await this.sendText(target, text, { msgId, msgSeq });
-    return { mode: "text", id, nativeQuote: false };
-  }
-
-  /** 原生引用被平台拒绝：熔断 + 记日志（本次运行内不再尝试 message_reference）。 */
-  #disableNativeQuote(error: unknown): void {
-    this.#nativeQuoteEnabled = false;
-    this.#options.logger.warn?.(
-      `[dsh-qqbot] 平台拒绝原生引用（message_reference），已降级并熔断:`,
-      error instanceof Error ? error.message : error,
-    );
+    const id = await this.sendText(target, text, { msgId, msgSeq, quoteMsgId });
+    return { mode: "text", id };
   }
 
   /** 撤回一条消息（机器人自己发的，或有权撤回的群消息）。 */

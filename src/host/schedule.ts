@@ -169,6 +169,16 @@ export class ScheduleStore {
     return { ok: true, entry };
   }
 
+  /** 设置页用：仅凭全局 id 删除（无需 scope/openid）。 */
+  async removeById(id: string): Promise<{ ok: true; entry: ScheduleEntry } | { ok: false; error: string }> {
+    await this.load();
+    const entry = this.#entries.find((e) => e.id === id);
+    if (!entry) return { ok: false, error: "未找到该定时消息" };
+    this.#entries = this.#entries.filter((e) => e.id !== id);
+    await this.save();
+    return { ok: true, entry };
+  }
+
   /** 到达执行时间的条目（now 之前）。 */
   dueEntries(now: Date): ScheduleEntry[] {
     return this.#entries.filter((e) => {

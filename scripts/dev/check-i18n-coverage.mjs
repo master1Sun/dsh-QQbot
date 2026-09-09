@@ -13,6 +13,8 @@ const labels = [...idx.matchAll(/label: "([^"]+)"/g)].map((m) => m[1]).filter(zh
 const descs = [...idx.matchAll(/desc: "([^"]+)"/g)].map((m) => m[1]).filter(zh);
 // 3) FIELD_HELP 值（缩进四格的键行）
 const helps = [...idx.matchAll(/^    "([^"]+)":$/gm)].map((m) => m[1]).filter(zh);
+// 3b) FIELD_HELP 等「key:\n    "值"」多行形式的值（此前是检查盲区）
+const helpVals = [...idx.matchAll(/^\s+\w+:\s*\n\s+"([^"]+)",$/gm)].map((m) => m[1]).filter(zh);
 // 4) FIELD_LABELS 值（单行 "key": "值"）
 const fieldVals = [...idx.matchAll(/^\s+\w+: "([^"]+)",$/gm)].map((m) => m[1]).filter(zh);
 // 5) select 选项文本（h("option", {...}, "文本")）
@@ -23,7 +25,7 @@ const arias = [...idx.matchAll(/"aria-label": "([^"]+)"/g)].map((m) => m[1]).fil
 // 7) numSelect 等格式化回调里的固定中文（如 "0（不限）"）
 const fixed = [...idx.matchAll(/\? "([^"]*[\u4e00-\u9fff][^"]*)" :/g)].map((m) => m[1]);
 
-const all = [...new Set([...labels, ...descs, ...helps, ...fieldVals, ...options, ...placeholders, ...arias, ...fixed])];
+const all = [...new Set([...labels, ...descs, ...helps, ...helpVals, ...fieldVals, ...options, ...placeholders, ...arias, ...fixed])];
 const missing = all.filter((s) => !i18n.includes(`"${s}"`));
 console.log("待检 UI 串:", all.length, "| 未入字典:", missing.length);
 missing.forEach((s) => console.log("  MISS:", s.slice(0, 120)));

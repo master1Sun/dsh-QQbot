@@ -133,6 +133,12 @@ const SWITCH_DEFS: Array<{ key: string; label: string; desc: string; def: boolea
     def: true,
   },
   {
+    key: "respondToBots",
+    label: "响应机器人消息",
+    desc: "开启后，其他机器人发出的消息也会触发本机器人回复。默认关闭：其他机器人的消息一律忽略，防止同群的多个机器人互相触发、循环刷屏。注意 QQ 平台在群聊里通常不向机器人推送其他机器人的消息，此开关只在平台确实推送时才有实际效果。",
+    def: false,
+  },
+  {
     key: "markdownReply",
     label: "Markdown 回复",
     desc: "优先以 QQ Markdown 格式发送，排版更好看；若平台拒绝该格式，会自动降级为纯文本重发，不会丢消息。",
@@ -176,7 +182,7 @@ const SWITCH_DEFS: Array<{ key: string; label: string; desc: string; def: boolea
   },
 ];
 
-/** QQ 企鹅 glyph，路径取自 dsh-im 的 QqLogoGlyph。 */
+/** QQ 企鹅 glyph */
 function QqLogoGlyph() {
   return h("svg", { viewBox: "0 0 24 24", focusable: "false", "aria-hidden": "true" },
     h("path", {
@@ -227,7 +233,7 @@ function QqBotGlyph(props: { className?: string; uid: string }) {
     h("rect", { x: 4.5, y: 6, width: 15, height: 13, rx: 4.5, fill: "currentColor", mask: `url(#qbot-face-${props.uid})` }));
 }
 
-/** 在线状态胶囊：dsh-im 的 dim-onlineBadge + dim-stateDot 组合。 */
+/** 在线状态胶囊 */
 function OnlineBadge(props: { tone: "success" | "warning" | "error" | "neutral"; text: string }) {
   return h("span", { className: "qbot-onlineBadge" },
     h("span", { className: "qbot-stateDot", "data-tone": props.tone }),
@@ -251,6 +257,11 @@ function TextInput(props: any) {
   return h("input", { className: "qbot-input", ...props });
 }
 
+/** 多行文本输入：长文案 / 列表类设置项使用，避免单行 input 截断长文本。 */
+function TextArea(props: any) {
+  return h("textarea", { className: "qbot-textarea", ...props });
+}
+
 interface Option {
   value: string;
   label: string;
@@ -259,13 +270,14 @@ interface Option {
 /**
  * 设置行：标题 + 说明 + 控件 三段式。
  * 说明（desc）必须回答「这项配置影响什么、什么时候生效」，不让用户靠猜。
+ * wide=true 时控件通栏独占一行（置于标题/说明下方），供 textarea 等宽控件使用。
  */
-function SettingRow(props: { label: string; desc: string; control: any; rowKey?: string }) {
-  return h("div", { className: "qbot-settingRow", key: props.rowKey },
+function SettingRow(props: { label: string; desc: string; control: any; rowKey?: string; wide?: boolean }) {
+  return h("div", { className: `qbot-settingRow${props.wide ? " is-wide" : ""}`, key: props.rowKey },
     h("div", { className: "qbot-settingCopy" },
       h("span", { className: "qbot-settingTitle" }, props.label),
       h("span", { className: "qbot-settingDesc" }, props.desc)),
-    h("div", { className: "qbot-settingControl" }, props.control));
+    h("div", { className: `qbot-settingControl${props.wide ? " is-wide" : ""}` }, props.control));
 }
 
 /**
@@ -330,6 +342,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [loadError, setLoadError] = React.useState("");
   const [refreshing, setRefreshing] = React.useState(false);
   const [reconnecting, setReconnecting] = React.useState(false);
+  const [update, setUpdate] = React.useState<{ busy: boolean; message: string; done: boolean }>({
+    busy: false,
+    message: "",
+    done: false,
+  });
   const [now, setNow] = React.useState(Date.now());
   const [picker, setPicker] = React.useState<{
     path: string;
@@ -530,6 +547,198 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       setReconnecting(false);
     }
   };
+
+  // ── 版本检查与自更新（host: update.check / update.apply，源 GitHub master 分支） ──
+  const runUpdateCheck = async () => {
+    setUpdate({ busy: true, message: "正在检查更新…", done: false });
+    try {
+      const res = await rpcCall("update.check");
+      if (!res.ok) {
+        setUpdate({ busy: false, message: `检查失败：${errText(res.error)}`, done: false });
+        return;
+      }
+      const v = (val(res) ?? {}) as { current?: string; latest?: string; hasUpdate?: boolean };
+      if (!v.hasUpdate) {
+        setUpdate({ busy: false, message: `暂无新版本（当前 v${v.current || "?"} 已是最新）`, done: false });
+        return;
+      }
+      // 检查到新版本：自动更新（下载 → 备份旧文件 → 覆盖安装目录）。
+      setUpdate({ busy: true, message: `发现新版本 v${v.latest}，正在自动更新…`, done: false });
+      const applied = await rpcCall("update.apply");
+      if (applied.ok) {
+        const r = (val(applied) ?? {}) as { updatedTo?: string };
+        setUpdate({
+          busy: false,
+          message: `已自动更新到 v${r.updatedTo ?? v.latest}（备份于安装目录 .update-backup/），重启 DSH 后生效`,
+          done: true,
+        });
+      } else {
+        setUpdate({ busy: false, message: `更新失败：${errText(applied.error)}`, done: false });
+      }
+    } catch (error) {
+      setUpdate({
+        busy: false,
+        message: `检查失败：${error instanceof Error ? error.message : String(error)}`,
+        done: false,
+      });
+    }
+  };
+
+  // ── 定时消息管理弹窗（schedule.list / schedule.add(编辑) / schedule.remove） ──
+  const [scheduleModal, setScheduleModal] = React.useState<{
+    loading: boolean;
+    error: string;
+    items: Array<Record<string, any>>;
+    /** 范围 Tab：current=当前机器人（默认）；all=所有机器人。 */
+    botScope: "current" | "all";
+    /** 编辑中的条目草稿（null=列表视图）。 */
+    editing: Record<string, any> | null;
+    /** 编辑表单校验/保存错误。 */
+    editError: string;
+    saving: boolean;
+  } | null>(null);
+  const [scheduleRemoving, setScheduleRemoving] = React.useState("");
+
+  const loadSchedules = async (botScope: "current" | "all") => {
+    setScheduleModal((prev) => (prev ? { ...prev, loading: true, error: "" } : prev));
+    const payload = botScope === "current" && detailAppId ? { appId: detailAppId } : { allBots: true };
+    const res = await rpcCall("schedule.list", payload);
+    if (res.ok) {
+      const v = val(res) ?? {};
+      setScheduleModal((prev) => (prev
+        ? { ...prev, loading: false, error: "", items: Array.isArray(v.schedules) ? v.schedules : [] }
+        : prev));
+    } else {
+      setScheduleModal((prev) => (prev ? { ...prev, loading: false, error: errText(res.error) } : prev));
+    }
+  };
+
+  const openScheduleModal = () => {
+    setScheduleModal({ loading: true, error: "", items: [], botScope: "current", editing: null, editError: "", saving: false });
+    void loadSchedules("current");
+  };
+
+  const switchScheduleScope = (botScope: "current" | "all") => {
+    // 切换 Tab 不清空旧列表：保留内容仅标记 loading（刷新态半透明），
+    // 数据到达后整体替换，避免「清空 → spinner → 列表」的闪烁跳动。
+    setScheduleModal((prev) => (prev && prev.botScope !== botScope ? { ...prev, botScope, loading: true, editing: null, editError: "" } : prev));
+    void loadSchedules(botScope);
+  };
+
+  // ── 定时消息编辑：草稿字段与保存 ──
+  const openScheduleEdit = (entry: Record<string, any>) => {
+    setScheduleModal((prev) => (prev ? {
+      ...prev,
+      editing: {
+        id: String(entry.id ?? ""),
+        appId: typeof entry.appId === "string" ? entry.appId : "",
+        scope: entry.scope === "group" ? "group" : "c2c",
+        openid: String(entry.openid ?? ""),
+        type: entry.type === "interval" ? "interval" : "daily",
+        time: String(entry.time ?? ""),
+        minutes: Number(entry.minutes ?? 30),
+        mode: entry.mode === "ai" ? "ai" : "text",
+        content: String(entry.content ?? ""),
+      },
+      editError: "",
+      saving: false,
+    } : prev));
+  };
+
+  const setEditField = (key: string, value: unknown) => {
+    setScheduleModal((prev) => (prev?.editing ? { ...prev, editError: "", editing: { ...prev.editing, [key]: value } } : prev));
+  };
+
+  const saveScheduleEdit = async () => {
+    const e = scheduleModal?.editing;
+    if (!e) return;
+    // 前端先做一轮与宿主一致的校验，及时给出可读提示。
+    if (!String(e.openid ?? "").trim()) {
+      setScheduleModal((prev) => (prev ? { ...prev, editError: "请填写接收方 openid（群或用户）" } : prev));
+      return;
+    }
+    if (!String(e.content ?? "").trim()) {
+      setScheduleModal((prev) => (prev ? { ...prev, editError: "内容不能为空" } : prev));
+      return;
+    }
+    if (e.type === "daily" && !/^\d{1,2}:\d{2}$/.test(String(e.time ?? ""))) {
+      setScheduleModal((prev) => (prev ? { ...prev, editError: "时间格式应为 HH:mm（如 09:30）" } : prev));
+      return;
+    }
+    if (e.type === "interval" && !(Number(e.minutes) >= 5)) {
+      setScheduleModal((prev) => (prev ? { ...prev, editError: "间隔不能小于 5 分钟" } : prev));
+      return;
+    }
+    setScheduleModal((prev) => (prev ? { ...prev, saving: true, editError: "" } : prev));
+    const payload: Record<string, unknown> = {
+      id: e.id,
+      scope: e.scope,
+      openid: String(e.openid ?? "").trim(),
+      type: e.type,
+      content: String(e.content ?? "").trim(),
+      mode: e.mode,
+      ...(e.type === "daily" ? { time: String(e.time ?? "").trim() } : { minutes: Number(e.minutes) }),
+      ...(e.appId ? { appId: e.appId } : (detailAppId ? { appId: detailAppId } : {})),
+    };
+    const res = await rpcCall("schedule.add", payload);
+    if (res.ok) {
+      setScheduleModal((prev) => (prev ? { ...prev, editing: null, saving: false } : prev));
+      await loadSchedules(scheduleModal?.botScope ?? "current");
+    } else {
+      setScheduleModal((prev) => (prev ? { ...prev, saving: false, editError: errText(res.error) } : prev));
+    }
+  };
+
+  const removeSchedule = async (id: string) => {
+    if (!window.confirm(localizeText("确定删除这条定时消息？删除后立即停止发送。"))) return;
+    setScheduleRemoving(id);
+    const scopeNow = scheduleModal?.botScope ?? "current";
+    try {
+      const res = await rpcCall("schedule.remove", { id });
+      if (res.ok) await loadSchedules(scopeNow);
+      else setScheduleModal((prev) => (prev ? { ...prev, error: errText(res.error) } : prev));
+    } finally {
+      setScheduleRemoving("");
+    }
+  };
+
+  // ── 消息归档弹窗（archive.list，只读最近记录；按当前详情机器人过滤） ──────────
+  const [archiveModal, setArchiveModal] = React.useState<{
+    loading: boolean;
+    error: string;
+    records: Array<Record<string, any>>;
+    moreAvailable: boolean;
+    monthsRead: number;
+  } | null>(null);
+
+  const loadArchive = async () => {
+    setArchiveModal((prev) => (prev ? { ...prev, loading: true, error: "" } : prev));
+    const res = await rpcCall("archive.list", detailAppId ? { appId: detailAppId, limit: 120 } : { limit: 120 });
+    if (res.ok) {
+      const v = val(res) ?? {};
+      setArchiveModal({
+        loading: false,
+        error: "",
+        records: Array.isArray(v.records) ? v.records : [],
+        moreAvailable: Boolean(v.moreAvailable),
+        monthsRead: Number(v.monthsRead ?? 0),
+      });
+    } else {
+      setArchiveModal((prev) => (prev ? { ...prev, loading: false, error: errText(res.error) } : prev));
+    }
+  };
+
+  const openArchiveModal = () => {
+    setArchiveModal({ loading: true, error: "", records: [], moreAvailable: false, monthsRead: 0 });
+    void loadArchive();
+  };
+
+  /** 定时消息编辑表单行：标签 + 控件 + 提示（提示写清「怎么填、影响什么」）。 */
+  const scheduleField = (label: string, hint: string, control: any) =>
+    h("div", { className: "qbot-editRow" },
+      h("span", { className: "qbot-editLabel" }, label),
+      control,
+      h("span", { className: "qbot-editHint" }, hint));
 
   // ── 下拉选项 ────────────────────────────────────────────────────────────────
   /** 模型按供应商分组（group 顺序即服务端返回顺序）；无 id 的脏数据直接过滤。 */
@@ -817,14 +1026,22 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         : wsInfo?.state === "closed" || wsInfo?.state === "error" ? "error"
           : "neutral";
 
-  /** 分区卡片：标题 + 一句说明 + 主体 + 右上角操作，构成页面的第一层层次。 */
-  const sectionCard = (title: string, desc: string, body: any, action?: any) =>
-    h("section", { className: "qbot-section" },
-      h("div", { className: "qbot-sectionHead" },
+  /**
+   * 分区卡片：标题 + 一句说明 + 主体 + 右上角操作，构成页面的第一层层次。
+   * opts.open=false 时默认收起（用原生 details/summary，展开状态由浏览器保持，
+   * 表单保存触发的重渲染不会重置折叠状态）。
+   */
+  const sectionCard = (title: string, desc: string, body: any, action?: any, opts?: { open?: boolean; danger?: boolean }) =>
+    h("details", {
+        className: opts?.danger ? "qbot-section is-danger" : "qbot-section",
+        open: opts?.open ?? true,
+      },
+      h("summary", { className: "qbot-sectionHead" },
         h("div", { className: "qbot-sectionTitle" },
           h("h3", null, title),
           h("p", null, desc)),
-        action ? h("div", { className: "qbot-sectionAction" }, action) : null),
+        action ? h("div", { className: "qbot-sectionAction", onClick: (e: any) => e.stopPropagation() }, action) : null,
+        h("span", { className: "qbot-sectionChevron", "aria-hidden": "true" }, "▸")),
       h("div", { className: "qbot-sectionBody" }, body));
 
   /** 指标卡：用于运行统计，比裸表格更易扫读。 */
@@ -877,7 +1094,18 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           h("div", { className: "qbot-heroMeta" },
             h("span", null, detailBot ? (detailBot.source === "qr" ? "扫码接入" : "手动填写") : "—"),
             h("span", { className: "qbot-metaDot", "aria-hidden": "true" }),
-            h("span", null, detailBot ? `保存于 ${formatTime(detailBot.savedAt)}` : "—")))),
+            h("span", null, detailBot ? `保存于 ${formatTime(detailBot.savedAt)}` : "—"))),
+        h("div", { className: "qbot-heroActions" },
+          h("button", {
+            className: "qbot-btn", type: "button",
+            disabled: !detailBot,
+            onClick: openScheduleModal,
+          }, "定时消息"),
+          h("button", {
+            className: "qbot-btn", type: "button",
+            disabled: !detailBot,
+            onClick: openArchiveModal,
+          }, "消息归档"))),
       h("div", { className: "qbot-heroStats" },
         h("div", { className: "qbot-heroStat" },
           h("span", { className: "qbot-heroStatLabel" }, "连接状态"),
@@ -903,7 +1131,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             className: "qbot-btn", type: "button",
             disabled: refreshing,
             onClick: () => void refreshStats(),
-          }, refreshing ? "刷新中…" : "刷新"))
+          }, refreshing ? "刷新中…" : "刷新"), { open: false })
       : null,
 
     // ── 会话与模型 ──
@@ -942,6 +1170,36 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             "aria-label": "Agent Preset",
           }, presetOptions(catalogs.agentPresets).map((o) =>
             h("option", { key: o.value, value: o.value }, o.label))),
+        }),
+        SettingRow({
+          label: "群聊聊天 Preset",
+          desc: "群内非 @ 的全量消息（只聊天、不执行工具）使用的 Preset；留空则跟随上方 Agent Preset。用于让群全量回复风格与 @/单聊区分开。",
+          control: h("select", {
+            className: "qbot-settingSelect",
+            value: String(form.agentPresetChat ?? ""),
+            onChange: (e: any) => void saveField("agentPresetChat", e.target.value),
+            "aria-label": "群聊聊天 Preset",
+          },
+            h("option", { value: "" }, "跟随 Agent Preset"),
+            presetOptions(catalogs.agentPresets).map((o) =>
+              h("option", { key: o.value, value: o.value }, o.label))),
+        }),
+        SettingRow({
+          rowKey: "secretEnv",
+          wide: true,
+          label: "AppSecret 凭据引用（secretEnv）",
+          desc: "DSH 凭据引用作为 AppSecret 的替代来源（优先级高于明文 AppSecret）。填写后机器人在运行时凭此引用解析出真实密钥，无需在开放平台明文保存。留空则使用扫码/手动填写的 AppSecret。",
+          control: TextArea({
+            rows: 2,
+            className: "qbot-textarea qbot-mono",
+            defaultValue: String(form.secretEnv ?? ""),
+            placeholder: "如 my-qq-app-secret（留空不启用）",
+            onBlur: (e: any) => {
+              const value = String(e?.target?.value ?? "").trim();
+              if (value !== String(form.secretEnv ?? "")) void saveField("secretEnv", value);
+            },
+            "aria-label": "AppSecret 凭据引用",
+          }),
         }))),
 
     // ── 消息与回复策略（开关） ──
@@ -962,7 +1220,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         SettingRow({
           rowKey: "quoteReply",
           label: "回复引用原话",
-          desc: "回复以原生引用气泡指向触发消息（点击可跳转定位到被引用的那句话）；仅主动消息（如定时任务回复）无法原生引用，回退为文本引用（Markdown 引用块 /「昵称：原话」）。off=不引用；at=仅 @/单聊（避免群全量刷屏，推荐）；all=全部回复都引用。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。",
+          desc: "仅群聊生效，单聊一律不引用：群里回复以 QQ 原生引用卡片回应（message_reference），卡片可点击定位到用户那条原消息。注意：引用卡片与 Markdown 同时携带时，部分场景平台会剥离 Markdown 改为纯文本（卡片保留），这是 QQ 平台限制；若想保住 Markdown 排版请选 off。off=不引用；at=仅群 @ 回复（避免群全量刷屏，推荐）；all=群聊全部回复都引用。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。",
           control: h("select", {
             className: "qbot-settingSelect",
             value: String(form.quoteReply ?? "at"),
@@ -970,8 +1228,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             "aria-label": "回复引用原话范围",
           },
             h("option", { value: "off" }, "off（不引用）"),
-            h("option", { value: "at" }, "at（仅 @/单聊，推荐）"),
-            h("option", { value: "all" }, "all（全部回复）")),
+            h("option", { value: "at" }, "at（仅群 @，推荐）"),
+            h("option", { value: "all" }, "all（群聊全部回复）")),
         }),
         SettingRow({
           rowKey: "voiceTranscription",
@@ -990,11 +1248,12 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         }),
         SettingRow({
           rowKey: "asrEndpoint",
+          wide: true,
           label: "自定义转写服务",
           desc: "voiceTranscription=asr 时使用的 HTTP 服务地址：机器人 POST { url: <音频地址> }，服务返回 { text: <转写文本> }。留空则回退为占位说明。",
-          control: h("input", {
-            className: "qbot-input",
-            style: { maxWidth: "260px" },
+          control: TextArea({
+            rows: 2,
+            className: "qbot-textarea qbot-mono",
             defaultValue: String(form.asrEndpoint ?? ""),
             placeholder: "https://…（留空不启用）",
             onBlur: (e: any) => {
@@ -1005,12 +1264,25 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           }),
         }),
         SettingRow({
+          rowKey: "replyLocale",
+          label: "回复语言（replyLocale）",
+          desc: "机器人直接发给 QQ 用户的系统文案（/help、/status、定时消息用法、欢迎语等）使用的语言。中文为源语言；选择 English 时这些文案自动翻译为英文，未命中的内容保持原文不丢信息。AI 对话内容本身不受影响。",
+          control: h("select", {
+            className: "qbot-settingSelect",
+            value: String(form.replyLocale ?? "zh"),
+            onChange: (e: any) => void saveField("replyLocale", e.target.value),
+            "aria-label": "回复语言",
+          },
+            h("option", { value: "zh" }, "中文（默认）"),
+            h("option", { value: "en" }, "English")),
+        }),
+        SettingRow({
           rowKey: "welcomeMessage",
+          wide: true,
           label: "欢迎语文案",
           desc: "开启「欢迎语」后发送的内容；{nick} 会替换为新成员标识。留空使用默认文案「欢迎 {nick}！@我即可与我对话。」。",
-          control: h("input", {
-            className: "qbot-input",
-            style: { maxWidth: "260px" },
+          control: TextArea({
+            rows: 3,
             defaultValue: String(form.welcomeMessage ?? ""),
             placeholder: "欢迎 {nick}！@我即可与我对话。",
             onBlur: (e: any) => {
@@ -1022,11 +1294,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         }),
         SettingRow({
           rowKey: "bannedWords",
+          wide: true,
           label: "敏感词列表",
           desc: "逗号分隔。群消息包含其中任意一词时，机器人撤回该消息并跳过回复（需要消息撤回权限；无权限时仅拦截回复）。",
-          control: h("input", {
-            className: "qbot-input",
-            style: { maxWidth: "260px" },
+          control: TextArea({
+            rows: 3,
             defaultValue: Array.isArray(form.bannedWords) ? (form.bannedWords as string[]).join(", ") : "",
             placeholder: "词1, 词2（留空不启用）",
             onBlur: (e: any) => {
@@ -1047,16 +1319,12 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         numSelect("replyChunkChars", [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000]),
         numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5]),
         numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => `${n} 字`),
-        numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? "0（不限）" : `${n} 条/天`)))),
+        numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? "0（不限）" : `${n} 条/天`))),
+      undefined, { open: false }),
 
     // ── 连接与移除 ──
-    h("section", { className: "qbot-section is-danger" },
-      h("div", { className: "qbot-sectionHead" },
-        h("div", { className: "qbot-sectionTitle" },
-          h("h3", null, "连接与移除"),
-          h("p", null, "管理机器人的启用状态、设为主机器人、重建 QQ 长连接，或删除接入配置。"))),
-      h("div", { className: "qbot-sectionBody" },
-        h("div", { className: "qbot-settingList" },
+    sectionCard("连接与移除", "管理机器人的启用状态、设为主机器人、重建 QQ 长连接，或删除接入配置。",
+      h("div", { className: "qbot-settingList" },
           detailBot
             ? SettingRow({
                 label: detailBot.enabled ? "停用此机器人" : "启用此机器人",
@@ -1096,7 +1364,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                   onClick: () => void removeBot(detailBot),
                 }, "移除接入"),
               })
-            : null))));
+            : null), undefined, { open: false, danger: true }));
 
   // ═══ 页面骨架：标题栏 + 面板（无左侧导航栏，导航由面板内按钮承担） ═══════════
 
@@ -1107,9 +1375,19 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         h("div", { className: "qbot-brandText" },
           h("div", { className: "qbot-brandHeading" },
             h("strong", { className: "qbot-brandName" }, "QQ 机器人"),
-            h("span", { className: "qbot-brandVersion" }, `v${typeof __PLUGIN_VERSION__ === "string" ? __PLUGIN_VERSION__ : "0.0.2"}`)),
+            h("span", { className: "qbot-brandVersion" }, `v${typeof __PLUGIN_VERSION__ === "string" ? __PLUGIN_VERSION__ : "0.0.2"}`),
+            h("button", {
+              className: `qbot-btn qbot-updateBtn${update.done ? " is-done" : ""}`,
+              type: "button",
+              disabled: update.busy,
+              title: "从 GitHub 检查新版本；发现新版本会自动下载并更新，重启 DSH 后生效",
+              onClick: () => void runUpdateCheck(),
+            }, update.busy ? "检查中…" : update.done ? "已更新 ✓" : "检查更新")),
           h("p", null, "把 QQ 机器人接入 DeepSeek Harness"))),
       h("div", { className: "qbot-titleActions" }, globalBadge)),
+    update.message
+      ? h("div", { className: "qbot-infoNotice qbot-updateNotice", role: "status" }, update.message)
+      : null,
       h("div", { className: "qbot-panel", id: "qbot-panel" },
         page === "list" ? listView : page === "add" ? addView : detailView),
     picker
@@ -1124,11 +1402,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
               picker.loading
                 ? "加载中…"
                 : (picker.selected || picker.path || "—")),
-            h("div", { className: "qbot-modalList" },
-              picker.loading
-                ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), "正在读取目录…")
-                : picker.error
-                  ? h("div", { className: "qbot-modalState qbot-modalError" }, picker.error)
+            h("div", { className: `qbot-modalList${picker.loading && picker.dirs.length > 0 ? " is-refreshing" : ""}` },
+              picker.error
+                ? h("div", { className: "qbot-modalState qbot-modalError" }, picker.error)
+                : picker.loading && picker.dirs.length === 0
+                  ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), "正在读取目录…")
                   : [
                       picker.parent
                         ? h("button", { key: "__up", type: "button", className: "qbot-dirRow", onClick: () => void browseTo(picker.parent ?? undefined) },
@@ -1143,7 +1421,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                           onDoubleClick: () => void browseTo(d.path),
                         },
                           h(FolderGlyph), d.name)),
-                      picker.dirs.length === 0
+                      !picker.loading && picker.dirs.length === 0
                         ? h("div", { className: "qbot-modalState" }, "该目录下没有子文件夹")
                         : null,
                     ]),
@@ -1156,6 +1434,196 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                   disabled: picker.loading || !picker.path,
                   onClick: pickDirectory,
                 }, "选定此文件夹")))))
+      : null,
+    // ── 定时消息管理弹窗 ──
+    scheduleModal
+      ? h("div", { className: "qbot-modalOverlay" },
+          h("div", { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": "定时消息管理" },
+            h("div", { className: "qbot-modalHead" },
+              h("div", null,
+                h("strong", null, "定时消息管理"),
+                h("p", null, "这个机器人名下的全部定时发送任务（含聊天命令与 AI 设置的）")),
+              h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: () => setScheduleModal(null) }, "×")),
+            h("div", { className: `qbot-modalList${scheduleModal.loading && scheduleModal.items.length > 0 && !scheduleModal.editing ? " is-refreshing" : ""}` },
+              scheduleModal.editing
+                // ── 编辑视图：所有用户可设置的集中在上方，每项带提示 ──
+                ? h("div", { className: "qbot-editForm" },
+                    scheduleModal.editError
+                      ? h("div", { className: "qbot-modalState qbot-modalError" }, scheduleModal.editError) : null,
+                    scheduleField("发送范围", "发送到群聊还是单聊。改动范围后请确认下方 openid 与之匹配。",
+                      h("select", {
+                        className: "qbot-settingSelect", value: String(scheduleModal.editing.scope),
+                        onChange: (ev: any) => setEditField("scope", ev.target.value),
+                        "aria-label": "发送范围",
+                      },
+                        h("option", { value: "group" }, "群聊"),
+                        h("option", { value: "c2c" }, "单聊"))),
+                    scheduleField("接收方 openid", "接收消息的群或用户 openid（o 开头的长串）。机器人收到过该群/该用户消息后，可让 AI 用 /session 查到。",
+                      TextInput({
+                        className: "qbot-input qbot-mono", value: String(scheduleModal.editing.openid ?? ""),
+                        placeholder: "群或用户的 openid",
+                        onChange: (ev: any) => setEditField("openid", ev.target.value),
+                        "aria-label": "接收方 openid",
+                      })),
+                    scheduleField("发送类型", "每天=到点每日发送一次；间隔=按分钟循环发送。",
+                      h("select", {
+                        className: "qbot-settingSelect", value: String(scheduleModal.editing.type),
+                        onChange: (ev: any) => {
+                          const type = ev.target.value;
+                          setEditField("type", type);
+                          if (type === "interval" && !(Number(scheduleModal?.editing?.minutes) >= 5)) setEditField("minutes", 30);
+                        },
+                        "aria-label": "发送类型",
+                      },
+                        h("option", { value: "daily" }, "每天（指定时刻）"),
+                        h("option", { value: "interval" }, "间隔（循环分钟）"))),
+                    scheduleModal.editing.type === "daily"
+                      ? scheduleField("每天发送时间", "上海时间（UTC+8），24 小时制 HH:mm，例如 09:30。",
+                          TextInput({
+                            className: "qbot-input qbot-mono", value: String(scheduleModal.editing.time ?? ""),
+                            placeholder: "09:30",
+                            onChange: (ev: any) => setEditField("time", ev.target.value),
+                            "aria-label": "每天发送时间",
+                          }))
+                      : scheduleField("间隔分钟", "两次发送之间的间隔分钟数，最小 5 分钟。间隔越小消耗的主动消息配额越多。",
+                          h("select", {
+                            className: "qbot-settingSelect", value: String(scheduleModal.editing.minutes ?? 30),
+                            onChange: (ev: any) => setEditField("minutes", Number(ev.target.value)),
+                            "aria-label": "间隔分钟",
+                          },
+                            [5, 10, 15, 30, 60, 120, 240, 720, 1440].map((n) =>
+                              h("option", { key: n, value: String(n) }, n >= 60 && n % 60 === 0 ? `${n / 60} 小时` : `${n} 分钟`)))),
+                    scheduleField("发送方式", "直接发送=到点原样发送下方内容；AI 生成=把下方内容作为指令交给 AI，生成结果再回复（会创建会话、消耗 token）。",
+                      h("select", {
+                        className: "qbot-settingSelect", value: String(scheduleModal.editing.mode ?? "text"),
+                        onChange: (ev: any) => setEditField("mode", ev.target.value),
+                        "aria-label": "发送方式",
+                      },
+                        h("option", { value: "text" }, "直接发送文本"),
+                        h("option", { value: "ai" }, "AI 生成内容"))),
+                    scheduleField("内容",
+                      scheduleModal.editing.mode === "ai"
+                        ? "给 AI 的生成指令（如「播报今天的天气」），到点由 AI 生成内容后发送。"
+                        : "到点直接发送的文本，上限 2000 字。",
+                      TextArea({
+                        rows: 3, value: String(scheduleModal.editing.content ?? ""),
+                        placeholder: scheduleModal.editing.mode === "ai" ? "例如：总结今天的待办" : "例如：记得喝水",
+                        onChange: (ev: any) => setEditField("content", ev.target.value),
+                        "aria-label": "定时消息内容",
+                      })),
+                    h("div", { className: "qbot-editActions" },
+                      h("span", { className: "qbot-hint" }, scheduleModal.editing.appId && scheduleModal.editing.appId !== detailAppId
+                        ? `该任务归属机器人 ${scheduleModal.editing.appId.slice(0, 4)}••••${scheduleModal.editing.appId.slice(-4)}`
+                        : "保存后立即生效并重新计算下次发送时间"),
+                      h("div", { className: "qbot-viewActions" },
+                        h("button", { className: "qbot-btn", type: "button", disabled: scheduleModal.saving, onClick: () => setScheduleModal((prev) => (prev ? { ...prev, editing: null, editError: "" } : prev)) }, "取消"),
+                        h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", disabled: scheduleModal.saving, onClick: () => void saveScheduleEdit() }, scheduleModal.saving ? "保存中…" : "保存修改"))))
+                // ── 列表视图 ──
+                : [
+                    // 范围 Tab：当前机器人 / 所有机器人
+                    h("div", { key: "tabs", className: "qbot-schedTabs", role: "tablist" },
+                      h("button", {
+                        type: "button", role: "tab", "aria-selected": scheduleModal.botScope === "current",
+                        className: `qbot-schedTab${scheduleModal.botScope === "current" ? " is-active" : ""}`,
+                        onClick: () => switchScheduleScope("current"),
+                      }, "当前机器人"),
+                      h("button", {
+                        type: "button", role: "tab", "aria-selected": scheduleModal.botScope === "all",
+                        className: `qbot-schedTab${scheduleModal.botScope === "all" ? " is-active" : ""}`,
+                        onClick: () => switchScheduleScope("all"),
+                      }, "所有机器人")),
+                    scheduleModal.error
+                      ? h("div", { key: "err", className: "qbot-modalState qbot-modalError" }, scheduleModal.error)
+                      : scheduleModal.items.length === 0
+                        ? (scheduleModal.loading
+                            ? h("div", { key: "loading", className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), "正在读取定时消息…")
+                            : h("div", { key: "empty", className: "qbot-modalState" }, "还没有定时消息。可在聊天里发 /定时 每天 09:00 内容，或直接让 AI 帮你设置。"))
+                        : ([{ scope: "group", title: "群聊任务" }, { scope: "c2c", title: "单聊任务" }] as const).map((g) => {
+                            const rows = scheduleModal.items.filter((e: any) => e.scope === g.scope);
+                            if (rows.length === 0) return null;
+                            return h("div", { key: g.scope, className: "qbot-schedGroup" },
+                              h("div", { className: "qbot-schedGroupTitle", "data-scope": g.scope },
+                                g.title, h("span", { className: "qbot-schedCount" }, `${rows.length}`)),
+                              rows.map((e: any) => h("div", { key: String(e.id), className: "qbot-schedRow" },
+                                h("div", { className: "qbot-schedMain" },
+                                  h("div", { className: "qbot-schedTop" },
+                                    h("span", { className: "qbot-chip is-active" },
+                                      e.type === "daily" ? `每天 ${e.time ?? "--:--"}` : `每 ${Number(e.minutes ?? 0)} 分钟`),
+                                    e.mode === "ai" ? h("span", { className: "qbot-chip" }, "AI 生成") : null,
+                                    e.lastError ? h("span", { className: "qbot-chip qbot-chipWarn" }, "上次失败") : null),
+                                  h("div", { className: "qbot-schedContent" }, String(e.content ?? "")),
+                                  h("div", { className: "qbot-schedMeta" },
+                                    h("span", null, `${e.scope === "group" ? "群" : "用户"} ${String(e.openid ?? "").slice(0, 16)}${String(e.openid ?? "").length > 16 ? "…" : ""}`),
+                                    h("span", null, e.createdBy === "settings" ? "来自设置页" : e.createdBy === "ai" ? "来自 AI" : "来自聊天命令"),
+                                    h("span", null, `下次发送 ${e.nextRunAt ? formatTime(e.nextRunAt) : "待补算"}`),
+                                    e.lastError ? h("span", { className: "qbot-schedError" }, String(e.lastError)) : null)),
+                                h("div", { className: "qbot-schedOps" },
+                                  h("button", {
+                                    className: "qbot-btn qbot-schedEdit", type: "button",
+                                    onClick: () => openScheduleEdit(e),
+                                  }, "编辑"),
+                                  h("button", {
+                                    className: "qbot-btn qbot-btnDanger qbot-schedRemove", type: "button",
+                                    disabled: scheduleRemoving === String(e.id),
+                                    onClick: () => void removeSchedule(String(e.id)),
+                                  }, scheduleRemoving === String(e.id) ? "删除中…" : "删除")))));
+                          }),
+                  ]),
+            h("div", { className: "qbot-modalFoot" },
+              h("span", { className: "qbot-hint" },
+                scheduleModal.botScope === "all"
+                  ? `所有机器人共 ${scheduleModal.items.length} 条（每个群/单聊最多 5 条）`
+                  : `共 ${scheduleModal.items.length} 条（每个群/单聊最多 5 条）`),
+              h("div", { className: "qbot-viewActions" },
+                h("button", { className: "qbot-btn", type: "button", disabled: scheduleModal.loading, onClick: () => void loadSchedules(scheduleModal.botScope) }, "刷新"),
+                h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setScheduleModal(null) }, "关闭")))))
+      : null,
+    // ── 消息归档弹窗 ──
+    archiveModal
+      ? h("div", { className: "qbot-modalOverlay" },
+          h("div", { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": "消息归档" },
+            h("div", { className: "qbot-modalHead" },
+              h("div", null,
+                h("strong", null, "消息归档"),
+                h("p", null, "本地落盘的最近收发记录（只读，最新在前；按当前机器人过滤）")),
+              h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: () => setArchiveModal(null) }, "×")),
+            h("div", { className: `qbot-modalList${archiveModal.loading && archiveModal.records.length > 0 ? " is-refreshing" : ""}` },
+              archiveModal.loading && archiveModal.records.length === 0
+                ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), "正在读取归档…")
+                : archiveModal.error
+                  ? h("div", { className: "qbot-modalState qbot-modalError" }, archiveModal.error)
+                  : archiveModal.records.length === 0
+                    ? h("div", { className: "qbot-modalState" }, "归档为空。开启「消息本地归档」并收到消息后，这里会出现记录。")
+                    : h("div", { className: "qbot-timeline" },
+                        archiveModal.records.map((r: any, i: number) => {
+                          const key = `${r.ts ?? ""}-${i}`;
+                          // 会话事件：不进气泡，作居中系统节点。
+                          if (r.kind === "session") {
+                            return h("div", { key, className: "qbot-tlSystem" },
+                              `会话 ${formatTime(r.ts)}${r.content ? ` · ${String(r.content)}` : ""}`);
+                          }
+                          const isUser = r.kind === "inbound";
+                          return h("div", { key, className: `qbot-tlItem ${isUser ? "is-user" : "is-bot"}` },
+                            h("span", { className: "qbot-tlDot", "aria-hidden": "true" }),
+                            h("div", { className: "qbot-tlBody" },
+                              h("div", { className: "qbot-tlMeta" },
+                                h("span", { className: "qbot-tlRole" }, isUser ? "用户" : "机器人"),
+                                (r.senderName || r.sender)
+                                  ? h("span", { className: "qbot-mono" }, String(r.senderName || r.sender))
+                                  : null,
+                                h("span", { className: "qbot-mono" }, String(r.chat ?? "—")),
+                                h("span", null, formatTime(r.ts))),
+                              h("div", { className: "qbot-tlBubble" }, String(r.content ?? "")),
+                              r.note ? h("div", { className: "qbot-tlNote" }, String(r.note)) : null));
+                        }))),
+            h("div", { className: "qbot-modalFoot" },
+              h("span", { className: "qbot-hint" },
+                archiveModal.moreAvailable
+                  ? `已显示最近 ${archiveModal.records.length} 条（更早记录仍在归档文件里）`
+                  : `共 ${archiveModal.records.length} 条记录`),
+              h("div", { className: "qbot-viewActions" },
+                h("button", { className: "qbot-btn", type: "button", disabled: archiveModal.loading, onClick: () => void loadArchive() }, "刷新"),
+                h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setArchiveModal(null) }, "关闭")))))
       : null);
 }
 
@@ -1234,6 +1702,9 @@ const CSS_TEXT = `
 .qbot-brandHeading { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
 .qbot-brandName { color: var(--dsw-alias-label-primary, #1f2329); font-size: 20px; line-height: 24px; font-weight: 800; letter-spacing: .04em; }
 .qbot-brandVersion { color: var(--dsw-alias-label-tertiary, #8f959e); font: 500 10px/16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0; }
+.qbot-updateBtn { align-self: center; min-height: 20px; padding: 1px 9px; border-radius: 999px; font-size: 11px; line-height: 16px; font-weight: 560; }
+.qbot-updateBtn:disabled { cursor: default; opacity: .65; }
+.qbot-updateBtn.is-done { color: var(--dsw-alias-state-success-primary, #2ea121); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 45%, var(--dsw-alias-border-l2, #dfe1e5)); }
 .qbot-title p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap; }
 .qbot-titleActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
@@ -1272,6 +1743,8 @@ const CSS_TEXT = `
 /* ── 通知（dim-statusNotice / info 变体）──────────────────────────────── */
 .qbot-statusNotice { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 22%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 10px; color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 8%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 13px; line-height: 1.5; }
 .qbot-infoNotice { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--qbot-business) 22%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 10px; color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 7%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 13px; line-height: 1.5; }
+/* 页面级更新提示（qbot-page 是普通块布局，无 channelPage 的 flex gap，需自带下边距与面板隔开） */
+.qbot-updateNotice { margin: 0 0 18px; }
 
 /* ── 机器人卡片（dim-botCard）─────────────────────────────────────────── */
 .qbot-botList { min-width: 0; width: 100%; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -1402,8 +1875,10 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-collapsibleContent { display: flex; flex-direction: column; gap: 14px; padding: 2px 15px 15px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); padding-top: 14px; }
 
 /* ── 目录选择弹窗 ─────────────────────────────────────────────────────── */
-.qbot-modalOverlay { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 24px; background: rgb(31 35 41 / 42%); backdrop-filter: blur(2px); }
-.qbot-modal { width: min(560px, 100%); max-height: min(72vh, 640px); display: flex; flex-direction: column; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 24px 64px rgb(31 35 41 / 24%); overflow: hidden; }
+.qbot-modalOverlay { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 24px; background: rgb(31 35 41 / 42%); backdrop-filter: blur(2px); animation: qbotFadeIn 0.16s ease-out; }
+.qbot-modal { width: min(560px, 100%); height: min(72vh, 640px); display: flex; flex-direction: column; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 24px 64px rgb(31 35 41 / 24%); overflow: hidden; animation: qbotPopIn 0.18s ease-out; }
+@keyframes qbotFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes qbotPopIn { from { opacity: 0; transform: scale(0.97) translateY(6px); } to { opacity: 1; transform: none; } }
 .qbot-modalHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; }
 .qbot-modalHead strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 16px; line-height: 1.4; font-weight: 650; }
 .qbot-modalHead p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
@@ -1418,6 +1893,56 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-modalState { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 96px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; }
 .qbot-modalError { color: var(--dsw-alias-state-error-primary, #d54941); }
 .qbot-modalFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 20px 18px; }
+/* 宽弹窗：定时消息 / 消息归档 列表内容较长，放宽上限 */
+.qbot-modalWide { width: min(760px, 100%); }
+/* ── 概览第一行右侧操作区（定时消息 / 消息归档 入口） ── */
+.qbot-heroActions { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; flex: none; }
+/* ── 定时消息弹窗：范围 Tab + 群聊/单聊分组 ── */
+.qbot-schedTabs { display: flex; align-items: center; gap: 4px; padding: 10px 12px 8px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-schedTab { flex: none; padding: 5px 14px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; cursor: pointer; }
+.qbot-schedTab:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-schedTab.is-active { background: var(--dsw-alias-bg-layer-1, #fff); border-color: var(--dsw-alias-border-l2, #e5e6eb); color: var(--qbot-blue); font-weight: 600; box-shadow: 0 1px 2px rgb(31 35 41 / 6%); }
+.qbot-schedGroup { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 4px; }
+.qbot-schedGroupTitle { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-schedGroupTitle[data-scope="group"] { color: var(--qbot-blue); }
+.qbot-schedGroupTitle::after { content: ""; flex: 1; height: 1px; background: var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-schedCount { flex: none; min-width: 20px; text-align: center; padding: 0 6px; border-radius: 999px; background: var(--dsw-alias-interactive-bg-hover, #eef0f3); color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; font-weight: 600; }
+/* 定时消息行：任务卡片式（类型徽标 + 内容 + 元信息 + 删除） */
+.qbot-schedRow { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-schedMain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.qbot-schedTop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qbot-chipWarn { color: var(--dsw-alias-state-warn-primary, #d97706); }
+.qbot-schedContent { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.qbot-schedMeta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; }
+.qbot-schedError { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-schedRemove { flex: none; }
+/* 行内操作列：编辑 + 删除 纵向排列 */
+.qbot-schedOps { display: flex; flex-direction: column; gap: 6px; flex: none; }
+/* ── 定时消息编辑表单：标签 + 控件 + 提示 三行式 ── */
+.qbot-editForm { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px 18px; }
+.qbot-editRow { display: flex; flex-direction: column; gap: 4px; }
+.qbot-editLabel { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-editHint { font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-editActions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+/* ── 归档时间轴：左竖线 + 节点圆点；用户蓝气泡靠左、机器人灰气泡靠右 ── */
+.qbot-timeline { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 6px 4px 6px 30px; }
+.qbot-timeline::before { content: ""; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; border-radius: 1px; background: var(--dsw-alias-border-l2, #e5e6eb); }
+.qbot-tlItem { position: relative; }
+.qbot-tlDot { position: absolute; left: -25px; top: 26px; width: 10px; height: 10px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, #8f959e); box-shadow: 0 0 0 3px var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-tlItem.is-user .qbot-tlDot { background: var(--qbot-blue); }
+.qbot-tlBody { display: flex; flex-direction: column; gap: 4px; max-width: 84%; }
+.qbot-tlItem.is-user .qbot-tlBody { align-items: flex-start; }
+.qbot-tlItem.is-bot .qbot-tlBody { margin-left: auto; align-items: flex-end; }
+.qbot-tlMeta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-tlRole { font-weight: 650; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-tlItem.is-user .qbot-tlRole { color: var(--qbot-blue); }
+.qbot-tlBubble { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--dsw-alias-label-primary, #1f2329); }
+/* 用户：蓝色高亮气泡（左） */
+.qbot-tlItem.is-user .qbot-tlBubble { background: color-mix(in srgb, var(--qbot-blue) 9%, var(--dsw-alias-bg-layer-1, #fff)); border: 1px solid color-mix(in srgb, var(--qbot-blue) 32%, transparent); border-top-left-radius: 4px; }
+/* 机器人：中性灰气泡（右） */
+.qbot-tlItem.is-bot .qbot-tlBubble { background: var(--dsw-alias-bg-module-platform, #f7f8fa); border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-top-right-radius: 4px; }
+.qbot-tlNote { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-tlSystem { position: relative; text-align: center; font-size: 12px; color: var(--dsw-alias-label-tertiary, #8f959e); padding: 2px 0; }
 
 /* ── 开关行（dim-contextSwitchRow / dim-contextSwitch）────────────────── */
 .qbot-switches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 24px; }
@@ -1506,9 +2031,16 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-heroStatValue { display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 650; line-height: normal; }
 .qbot-heroFoot { margin: 0 20px 18px; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 24%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 9px; color: var(--dsw-alias-label-secondary, #646a73); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 7%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 
-/* ── 详情页：分区卡片（第一层层次）───────────────────────────────────── */
+/* ── 详情页：分区卡片（第一层层次，details/summary 折叠）──────────────── */
 .qbot-section { border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); overflow: hidden; }
 .qbot-section.is-danger { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 26%, var(--dsw-alias-border-l2, #e5e6eb)); }
+.qbot-section > summary.qbot-sectionHead { cursor: pointer; list-style: none; user-select: none; }
+.qbot-section > summary.qbot-sectionHead::-webkit-details-marker { display: none; }
+.qbot-section:not([open]) > summary.qbot-sectionHead { border-bottom-color: transparent; }
+.qbot-sectionChevron { flex: none; align-self: center; margin-left: auto; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 13px; line-height: 1; transition: transform .18s ease; }
+.qbot-sectionAction + .qbot-sectionChevron { margin-left: 0; }
+.qbot-section > summary.qbot-sectionHead:hover .qbot-sectionTitle h3 { color: color-mix(in srgb, var(--dsw-alias-brand-primary, #4e5969) 72%, var(--dsw-alias-label-primary, #1f2329)); }
+.qbot-section[open] > summary.qbot-sectionHead .qbot-sectionChevron { transform: rotate(90deg); }
 .qbot-sectionHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 20px 13px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
 .qbot-sectionTitle { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .qbot-sectionTitle h3 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; line-height: normal; font-weight: 680; }
@@ -1527,6 +2059,14 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-settingControl { flex: none; display: flex; align-items: center; justify-content: flex-end; min-width: 190px; }
 .qbot-settingSelect { width: 100%; min-width: 0; max-width: 260px; height: 34px; padding: 0 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; outline: none; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease; }
 .qbot-settingSelect:focus { border-color: #4e5969; box-shadow: 0 0 0 3px rgb(78 89 105 / 10%); }
+
+/* 文本输入设置行（textarea）：说明在上、输入框通栏在下，长文本不再被窄框截断 */
+.qbot-settingRow.is-wide { grid-template-columns: minmax(0, 1fr); }
+.qbot-settingControl.is-wide { width: 100%; min-width: 0; justify-content: stretch; }
+.qbot-settingControl.is-wide > .qbot-textarea { width: 100%; }
+.qbot-textarea { display: block; width: 100%; min-width: 0; min-height: 56px; max-height: 240px; padding: 8px 11px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; outline: none; resize: vertical; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; line-height: 1.6; transition: border-color .16s ease, box-shadow .16s ease; }
+.qbot-textarea:focus { border-color: #4e5969; box-shadow: 0 0 0 3px rgb(78 89 105 / 10%); }
+.qbot-textarea::placeholder { color: var(--dsw-alias-label-tertiary, #8f959e); font-family: inherit; }
 
 /* ── 详情页：工作区卡片 ───────────────────────────────────────────────── */
 .qbot-workspaceCard { min-width: 0; display: flex; flex-direction: column; gap: 9px; padding: 13px 14px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }

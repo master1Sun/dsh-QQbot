@@ -8,6 +8,7 @@
  * 所有动作走主动消息通道（受每日配额约束），失败只告警不影响主流程。
  */
 import type { BotRuntime } from "./bots.js";
+import { tr, type ReplyLocale } from "../shared/reply-i18n.js";
 import { isOwnSent, rememberSent } from "./state.js";
 
 /** QQ 平台「垃圾桶」表情回应的已知 id（不同端可能用文本名）。 */
@@ -49,8 +50,9 @@ export async function handleRawEvent(bot: BotRuntime, eventType: string, data: u
     const scope: "group" | "c2c" = eventType === "FRIEND_ADD" ? "c2c" : "group";
     const targetOpenid = eventType === "FRIEND_ADD" ? openid : (member.group_openid ?? "");
     if (!targetOpenid) return { handled: false };
-    const nick = openid || "新朋友";
-    const text = (config.welcomeMessage || "欢迎 {nick}！@我即可与我对话。").replaceAll("{nick}", nick);
+    const locale: ReplyLocale = config.replyLocale === "en" ? "en" : "zh";
+    const nick = openid || tr(locale, "新朋友");
+    const text = tr(locale, config.welcomeMessage || "欢迎 {nick}！@我即可与我对话。").replaceAll("{nick}", nick);
     try {
       const id = await bot.client.sendText({ scope, openid: targetOpenid }, text);
       if (id) rememberSent(bot.state, `${scope}:${targetOpenid}`, id);

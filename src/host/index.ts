@@ -266,8 +266,9 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   runtime = await resolveWebhookRuntime(ctx, logger);
 
   // 扫码登录管理器：凭据落盘 + 写入机器人库（多机器人卡片）+ 热同步运行时。
+  // source 会作为「接入平台标识」显示在 QQ 扫码页上，必须用可读文案（勿用内部实例名）。
   const qr = new QrLoginManager({
-    source: "primary-qq",
+    source: "DeepSeek Harness",
     logger,
     onCredentials: async (credentials: StoredCredentials) => {
       const stored: StoredBot = {

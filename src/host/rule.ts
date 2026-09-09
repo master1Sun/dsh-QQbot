@@ -3,7 +3,8 @@
  *
  *  1. 群全量消息（GROUP_MESSAGE_CREATE）：先入该机器人的消息缓冲；价值过滤通过才创建/续写会话回复。
  *  2. 群 AT 消息（GROUP_AT_MESSAGE_CREATE）与单聊（C2C_MESSAGE_CREATE）：直接回复。
- *  3. 命令（/help /new /stop /steer /status /session /定时）最先处理，不进入会话。
+ *  3. 命令（/help /new /stop /steer /status /session /定时）最先处理（含群全量消息），
+ *     命中即直接执行并反馈；未知命令直接提示，均不进入 AI 会话。
  *  4. 会话复用：聊天键已绑定且 Agent 存活时走 agent.followup() 续写同一会话；
  *     否则返回 WebhookSessionRequest 由 dsh-webhook 创建新会话，reply pump 完成绑定。
  *
@@ -36,7 +37,6 @@ import {
   type PassiveReplyRecord,
   type QqAttachment,
   type QqMessagePayload,
-  type ReplyQuote,
 } from "../shared/types.js";
 
 export interface QqRuleContext {
@@ -205,18 +205,19 @@ function bannedHit(config: BotRuntime["config"], content: string): string | null
 /** 敏感词处置：撤回原消息并返回提示文本；撤回失败也照样拦截回复。 */
 async function enforceBannedWords(
   bot: BotRuntime,
+  eventType: "GROUP_MESSAGE_CREATE" | "GROUP_AT_MESSAGE_CREATE",
   payload: QqMessagePayload,
   content: string,
   logger: Pick<Console, "warn" | "error">,
 ): Promise<boolean> {
   const hit = bannedHit(bot.config, content);
   if (!hit) return false;
-  const target = replyTargetOf("GROUP_MESSAGE_CREATE", payload);
+  const target = replyTargetOf(eventType, payload);
   const msgId = payload.id ?? "";
   if (target && msgId) {
     try {
       await bot.client.recall(target, msgId);
-      logger.warn(`[dsh-qqbot] 群消息命中敏感词「${hit}」，已撤回`);
+      logger.warn(`[dsh-qqbot] 群消息命中敏感词「${hit}」，已撤回（${eventType}）`);
     } catch (error) {
       logger.warn(
         `[dsh-qqbot] 群消息命中敏感词「${hit}」，撤回失败（需要消息撤回权限）:`,
@@ -226,22 +227,12 @@ async function enforceBannedWords(
   }
   void bot.archiver.append({
     kind: "inbound",
-    event: "GROUP_MESSAGE_CREATE",
+    event: eventType,
     chat: target ? `group:${target.openid}` : "group:?",
     content: content.slice(0, 500),
     note: `banned-word:${hit}`,
   });
   return true;
-}
-
-/** 触发这次回复的那条用户消息（回复顶部引用它）。 */
-function quoteOf(payload: QqMessagePayload, sender: string, content: string): ReplyQuote {
-  return {
-    sender,
-    senderName: payload.author?.username ?? "",
-    content,
-    ...(payload.timestamp ? { timestamp: payload.timestamp } : {}),
-  };
 }
 
 /** Agent 是否仍然存活可复用（registry get 已过滤 disposed）。 */
@@ -300,11 +291,6 @@ export function createQqRule({
 
       // ── 群全量消息：入该机器人的缓冲 + 价值过滤 ───────────────────
       if (eventType === "GROUP_MESSAGE_CREATE") {
-        logger.info(
-          `[dsh-qqbot] [群消息测试] ${bot.appId} 收到群全量消息 group=${group || "?"} sender=${sender}`
-          + `${payload.author?.username ? `(${payload.author.username})` : ""}`
-          + ` atBot=${atBot(payload) ? "是" : "否"} content="${content.slice(0, 100)}"`,
-        );
         if (group && config.groupBufferMax > 0) {
           addGroupMessage(state, group, {
             senderId: sender,
@@ -313,7 +299,8 @@ export function createQqRule({
             timestamp: payload.timestamp ?? "",
           }, config.groupBufferMax);
         }
-        if (!config.groupFullReply || !content || payload.author?.bot === true) return null;
+        // 其他机器人消息默认忽略（respondToBots 开启时放行，由用户自行承担互相触发风险）。
+        if (!config.groupFullReply || !content || (payload.author?.bot === true && !config.respondToBots)) return null;
         if (!target || !allowed(config.allowGroups, target.openid) || !allowed(config.allowUsers, sender)) return null;
         void bot.archiver.append({
           kind: "inbound",
@@ -325,7 +312,18 @@ export function createQqRule({
           content,
         });
         // 敏感词：命中即撤回原消息并跳过回复。
-        if (await enforceBannedWords(bot, payload, content, logger)) return null;
+        if (await enforceBannedWords(bot, "GROUP_MESSAGE_CREATE", payload, content, logger)) return null;
+        // 去重登记：QQ 对 @ 消息会同时推送 GROUP_MESSAGE_CREATE 与 GROUP_AT_MESSAGE_CREATE
+        // 两个事件，不登记指纹就会回复两条；命令在去重之后立即处理。
+        if (!markSeen(state, delivery.deliveryId)) return null;
+        if (!markIncoming(state, target.openid, sender, content)) return null;
+        // 命令最先处理（/help /new /stop 等）：直接执行并反馈，不进价值过滤、不进 AI 会话。
+        const command = await runCommand(
+          content,
+          { scope: target.scope, openid: target.openid, sender, msgId: payload.id ?? "" },
+          commandCtx,
+        );
+        if (command.handled) return null;
         // @ 机器人 → 跳过价值过滤，直接回复（并允许使用工具）。
         const isAt = atBot(payload);
         const verdict = isAt
@@ -352,9 +350,8 @@ export function createQqRule({
           msgId: payload.id ?? "",
           deliveryId: delivery.deliveryId,
           allowTools: isAt,
-          quote: quoteOf(payload, sender, content),
           quoteContext: quoteContextOf(bot, groupChatKey, payload, sender, content),
-          quoteMention: false,
+          quoteMention: isAt,
           attachmentContext: attachCtx,
           memoryBlock,
           promptBuilder: () => buildGroupFullPrompt(payload, recentGroupMessages(state, group, config.atContextMessages)),
@@ -368,7 +365,13 @@ export function createQqRule({
       } else if (!allowed(config.allowGroups, target.openid) || !allowed(config.allowUsers, sender)) {
         return null;
       }
-      if (!content || payload.author?.bot === true) return null;
+      // 其他机器人消息默认忽略（respondToBots 开启时放行）。
+      if (!content || (payload.author?.bot === true && !config.respondToBots)) return null;
+
+      // 群内 @ 消息同样受敏感词约束：命中即撤回并跳过回复。
+      if (eventType === "GROUP_AT_MESSAGE_CREATE") {
+        if (await enforceBannedWords(bot, "GROUP_AT_MESSAGE_CREATE", payload, content, logger)) return null;
+      }
 
       state.counters.received += 1;
       void bot.archiver.append({
@@ -413,7 +416,6 @@ export function createQqRule({
         msgId,
         deliveryId: delivery.deliveryId,
         allowTools: true,
-        quote: quoteOf(payload, sender, content),
         quoteContext: quoteContextOf(bot, chatKey, payload, sender, content),
         quoteMention: true,
         attachmentContext: attachCtx,
@@ -434,8 +436,6 @@ interface EnterConversationArgs {
   deliveryId: string;
   /** 是否允许执行工具：群全量模式下仅 @ 机器人为 true。 */
   allowTools: boolean;
-  /** 触发本轮回复的用户消息（回复顶部引用它）。 */
-  quote: ReplyQuote;
   /** 用户引用了别人消息时恢复出的上下文（没有引用为 null）。 */
   quoteContext: string | null;
   /** 附件多模态上下文（图片/文件/语音说明，无附件为 null）。 */
@@ -462,7 +462,7 @@ const CHAT_ONLY_HINT = [
 function enterConversation(args: EnterConversationArgs): WebhookSessionRequest | null {
   const {
     bot, agents, logger, payload, target, msgId, deliveryId,
-    allowTools, quote, quoteContext, attachmentContext, memoryBlock, quoteMention, promptBuilder,
+    allowTools, quoteContext, attachmentContext, memoryBlock, quoteMention, promptBuilder,
   } = args;
   const config = bot.config;
   const state = bot.state;
@@ -475,14 +475,17 @@ function enterConversation(args: EnterConversationArgs): WebhookSessionRequest |
     return null;
   }
   const chatKey = `${target.scope}:${target.openid}`;
+  // 出站引用卡片需要本条消息的 REFIDX 索引（官方要求 message_reference.message_id
+  // 用事件 ext 的 msg_idx，不能用原始 msg id——后者平台无法解析，会导致重复消息）。
+  const selfIdx = parseRefIdx(payload).selfIdx;
   const record: PassiveReplyRecord = {
     target,
     chatKey,
     msgId,
     nextSeq: 1,
     receivedAt: Date.now(),
-    quote,
     quoteMention,
+    ...(selfIdx ? { selfIdx } : {}),
   };
   const sender = senderIdOf(payload);
   // 提示词分层：长期记忆 → 附件上下文 → 引用上下文 → 消息本体，

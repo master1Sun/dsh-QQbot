@@ -209,8 +209,6 @@ export class QqWsSource {
       },
     };
     this.#status = { ...this.#status, events: this.#status.events + 1 };
-    // 测试日志：SDK 层每收到一条消息事件都打印（验证 WS 层接收是否完整）。
-    this.#logger.info(`[dsh-qqbot] [事件测试] WS 收到事件 ${eventType} (kind=${message.kind}, events=${this.#status.events})`);
     const deliveryId = `qqws:${message.messageId || `${eventType}:${Date.now()}:${this.#status.events}`}`;
     this.#onEvent(eventType, payload, deliveryId);
   }

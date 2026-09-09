@@ -30,6 +30,8 @@ export interface QqbotConfig {
   allowC2c: boolean;
   allowGroups: string[];
   allowUsers: string[];
+  /** 是否响应其他机器人发出的消息（默认关闭：忽略，防止机器人互相触发刷屏）。 */
+  respondToBots: boolean;
   atContextMessages: number;
   groupBufferMax: number;
   replyChunkChars: number;
@@ -40,15 +42,13 @@ export interface QqbotConfig {
   /** 回复优先用 QQ Markdown（msg_type=2），平台拒绝时逐条回退纯文本。 */
   markdownReply: boolean;
   /**
-   * 回复顶部引用用户原话（v2 群/C2C 无原生引用卡片，用文本引用块表达）。
-   * Markdown 回复为 `> **昵称**：原话`，纯文本为「昵称：原话」。
-   */
-  /**
-   * 出站引用范围：off=不引用；at=仅 @/单聊 回复引用（避免群全量刷屏）；all=全部回复都引用。
+   * 出站引用范围（仅群聊生效，单聊一律不引用）：off=不引用；at=仅群 @ 回复引用（避免群全量刷屏）；
+   * all=群聊全部回复都引用。引用通过 QQ 原生 message_reference 渲染为可点击定位的引用卡片（非文本前缀）。
+   * 注意：message_reference 与 Markdown 同时携带时，部分场景平台会剥离 Markdown 转纯文本（卡片保留）。
    * 入站引用（解析用户引用的上一条消息并注入上下文）不受此开关影响，始终生效。
    */
   quoteReply: "off" | "at" | "all";
-  /** 引用原话的字数上限（超长截断）。 */
+  /** 入站引用上下文注入模型的被引用原文字数上限（超长截断）。 */
   quoteMaxChars: number;
   /** 群全量消息价值回复总开关。 */
   groupFullReply: boolean;
@@ -78,6 +78,8 @@ export interface QqbotConfig {
   memoryEnabled: boolean;
   /** 主动消息每日配额（0=不限制）；超出后停止主动发送并告警。 */
   quotaPerDay: number;
+  /** 发给 QQ 用户的回复文案语言：zh=中文（默认）；en=英文。 */
+  replyLocale: "zh" | "en";
 }
 
 function str(value: unknown): string {
@@ -174,6 +176,7 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     allowC2c: boolOr(pick("allowC2c"), true),
     allowGroups: listOr(pick("allowGroups"), ["*"]),
     allowUsers: listOr(pick("allowUsers"), ["*"]),
+    respondToBots: boolOr(pick("respondToBots"), false),
     atContextMessages: clampInt(pick("atContextMessages"), 0, 50, 10),
     groupBufferMax: clampInt(pick("groupBufferMax"), 0, 200, 50),
     replyChunkChars: clampInt(pick("replyChunkChars"), 200, 4000, 1000),
@@ -200,5 +203,6 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
       : [],
     memoryEnabled: boolOr(pick("memoryEnabled"), true),
     quotaPerDay: clampInt(pick("quotaPerDay"), 0, 100000, 50),
+    replyLocale: oneOf(pick("replyLocale"), ["zh", "en"], "zh"),
   };
 }

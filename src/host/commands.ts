@@ -9,6 +9,7 @@
  *   /session         查看当前绑定的会话 id
  *
  * 命令在 rule 中最先处理：命中即直接被动回复，不进入 DSH 会话。
+ * 以 / 开头但未识别的命令同样直接提示（未知命令），绝不交给 AI 回答。
  */
 import { randomUUID } from "node:crypto";
 import type { Agent } from "@deepseek-ai/dsh-agent";
@@ -16,6 +17,7 @@ import type { MessageId } from "@deepseek-ai/dsh-llm";
 import type { QqApiClient } from "./qq/api.js";
 import { PASSIVE_REPLY_LIMIT } from "./qq/api.js";
 import type { QqbotConfig } from "../shared/config.js";
+import { helpText, tr, type ReplyLocale } from "../shared/reply-i18n.js";
 import { MAX_SCHEDULES_PER_CHAT, type ScheduleEntry, type ScheduleStore } from "./schedule.js";
 import type { ChatMemoryStore, MemoryEntry } from "./memory.js";
 import type { QuotaTracker } from "./quota.js";
@@ -42,22 +44,7 @@ function newMessageId(): MessageId {
   return randomUUID() as unknown as MessageId;
 }
 
-export const HELP_TEXT = [
-  "QQ 机器人已连接 DeepSeek Harness。",
-  "",
-  "直接发消息即可对话（同一群/单聊复用同一会话）。",
-  "/help            显示本帮助",
-  "/status          查看连接与统计",
-  "/new             开启全新会话",
-  "/stop            停止当前任务",
-  "/steer <指令>    给正在运行的任务补充要求",
-  "/session         查看当前绑定的会话 id",
-  "/记忆            查看本聊天的长期记忆",
-  "/清空记忆        清空本聊天的长期记忆",
-  "/撤回            撤回机器人最近一条消息",
-  "/广播 <内容>     向机器人所在的已知群广播",
-  "/定时 查看 | /定时 每天 HH:mm 内容 | /定时 间隔 分钟 内容 | /定时 取消 序号",
-].join("\n");
+export const HELP_TEXT = helpText("zh");
 
 /** 会话当前绑定的被动回复记录（如无则用兜底目标）。 */
 function recordFor(state: BotState, chatKey: string, fallbackTarget: ReplyTarget, fallbackMsgId: string): PassiveReplyRecord {
@@ -86,6 +73,10 @@ export async function runCommand(
   const arg = rest.join(" ").trim();
   const config = ctx.getConfig();
   const chatKey = `${scope}:${openid}`;
+  // 发给 QQ 用户的文案语言（每机器人独立配置 replyLocale，默认中文）。
+  const locale: ReplyLocale = config.replyLocale === "en" ? "en" : "zh";
+  /** 文案翻译助手：zh 原样返回；en 走字典/动态规则，未命中保持原文。 */
+  const T = (text: string): string => tr(locale, text);
 
   const reply = async (content: string): Promise<void> => {
     const record = recordFor(ctx.state, chatKey, { scope, openid }, msgId);
@@ -105,20 +96,24 @@ export async function runCommand(
   switch (cmd) {
     case "/help":
     case "/菜单":
-      await reply(HELP_TEXT);
+      await reply(helpText(locale));
       return { handled: true };
 
     case "/status": {
       const { counters } = ctx.state;
       const configured = Boolean(config.appId && config.appSecret) || Boolean(config.secretEnv);
       const usage = ctx.quota ? await ctx.quota.usage() : null;
+      const quotaText = usage
+        ? (usage.limit > 0 ? T(`今日 ${usage.used}/${usage.limit}`) : T(`今日 ${usage.used}（不限）`))
+        : T("未启用");
+      const buffered = [...ctx.state.groupBuffer.values()].reduce((n, list) => n + list.length, 0);
       await reply([
-        `机器人: AppID ${config.appId}`,
-        `凭据: ${configured ? `已配置（${config.credentialSource}）` : "未配置，请在设置中扫码或填写 AppID/AppSecret"}`,
-        `工作区: ${config.workspacePath}`,
-        `收消息: ${counters.received} · 会话回复: ${counters.replies} · 主动消息: ${counters.proactive} · 错误: ${counters.errors}`,
-        `主动消息配额: ${usage ? (usage.limit > 0 ? `今日 ${usage.used}/${usage.limit}` : `今日 ${usage.used}（不限）`) : "未启用"}`,
-        `群上下文缓冲: ${[...ctx.state.groupBuffer.values()].reduce((n, list) => n + list.length, 0)} 条`,
+        `${T("机器人")}: AppID ${config.appId}`,
+        `${T("凭据")}: ${configured ? `${T("已配置")}（${config.credentialSource}）` : T("未配置，请在设置中扫码或填写 AppID/AppSecret")}`,
+        `${T("工作区")}: ${config.workspacePath}`,
+        `${T("收消息")}: ${counters.received} · ${T("会话回复")}: ${counters.replies} · ${T("主动消息")}: ${counters.proactive} · ${T("错误")}: ${counters.errors}`,
+        `${T("主动消息配额")}: ${quotaText}`,
+        `${T("群上下文缓冲")}: ${buffered} ${T("条")}`,
       ].join("\n"));
       return { handled: true };
     }
@@ -128,25 +123,29 @@ export async function runCommand(
       if (boundId) {
         ctx.state.recordBySession.delete(boundId);
         ctx.state.chatSession.delete(chatKey);
-        await reply(`已解绑会话 ${boundId.slice(0, 8)}…，下一条消息开启全新会话。`);
+        await reply(T(`已解绑会话 ${boundId.slice(0, 8)}…，下一条消息开启全新会话。`));
       } else {
-        await reply("当前聊天还没有绑定会话，下一条消息将创建新会话。");
+        await reply(T("当前聊天还没有绑定会话，下一条消息将创建新会话。"));
       }
       return { handled: true };
     }
 
     case "/session": {
       const boundId = ctx.state.chatSession.get(chatKey);
-      await reply(boundId ? `当前绑定会话：${boundId}` : "当前聊天还没有绑定会话。");
+      await reply(boundId ? T(`当前绑定会话：${boundId}`) : T("当前聊天还没有绑定会话。"));
       return { handled: true };
     }
 
     case "/定时":
     case "/schedule":
     case "/定时消息": {
+      const whenOf = (entry: ScheduleEntry): string =>
+        entry.type === "daily"
+          ? `${T("每天")} ${entry.time}`
+          : `${T("每")} ${entry.minutes} ${T("分钟")}`;
       const describe = (entry: ScheduleEntry, index: number): string => {
-        const when = entry.type === "daily" ? `每天 ${entry.time}` : `每 ${entry.minutes} 分钟`;
-        return `${index}. [${when}] ${entry.content}${entry.lastError ? `（上次失败：${entry.lastError}）` : ""}`;
+        const failed = entry.lastError ? `${T("（上次失败：")}${entry.lastError}${T("）")}` : "";
+        return `${index}. [${whenOf(entry)}] ${entry.content}${failed}`;
       };
       const sub = arg.split(/\s+/)[0] ?? "";
       const rest = arg.slice(sub.length).trim();
@@ -155,8 +154,8 @@ export async function runCommand(
       if (!sub || sub === "查看" || sub === "list") {
         const mine = ctx.schedules.listForChat(scope, openid);
         await reply(mine.length === 0
-          ? `当前聊天还没有定时消息。用法：/定时 每天 09:00 内容 或 /定时 间隔 30 内容（每聊天最多 ${MAX_SCHEDULES_PER_CHAT} 条）。`
-          : ["当前定时消息：", ...mine.map(describe)].join("\n"));
+          ? T(`当前聊天还没有定时消息。用法：/定时 每天 09:00 内容 或 /定时 间隔 30 内容（每聊天最多 ${MAX_SCHEDULES_PER_CHAT} 条）。`)
+          : [T("当前定时消息："), ...mine.map(describe)].join("\n"));
         return { handled: true };
       }
 
@@ -164,11 +163,11 @@ export async function runCommand(
       if (sub === "取消" || sub === "删除" || sub === "remove" || sub === "cancel") {
         const target = rest.trim();
         if (!target) {
-          await reply("用法：/定时 取消 <序号>");
+          await reply(T("用法：/定时 取消 <序号>"));
           return { handled: true };
         }
         const result = await ctx.schedules.remove(scope, openid, target);
-        await reply(result.ok ? `已删除：${describe(result.entry, 0).slice(3)}` : result.error);
+        await reply(result.ok ? T(`已删除：${describe(result.entry, 0).slice(3)}`) : T(result.error));
         return { handled: true };
       }
 
@@ -178,7 +177,9 @@ export async function runCommand(
         const result = await ctx.schedules.add({
           scope, openid, type: "daily", time: daily[1], content: daily[2], createdBy: sender, appId: ctx.appId,
         });
-        await reply(result.ok ? `已设置：每天 ${daily[1]} 发送「${daily[2].slice(0, 50)}」` : result.error);
+        await reply(result.ok
+          ? T(`已设置：每天 ${daily[1]} 发送「${daily[2].slice(0, 50)}」`)
+          : T(result.error));
         return { handled: true };
       }
 
@@ -189,16 +190,18 @@ export async function runCommand(
         const result = await ctx.schedules.add({
           scope, openid, type: "interval", minutes, content: interval[3], createdBy: sender, appId: ctx.appId,
         });
-        await reply(result.ok ? `已设置：每 ${minutes} 分钟发送「${interval[3].slice(0, 50)}」` : result.error);
+        await reply(result.ok
+          ? T(`已设置：每 ${minutes} 分钟发送「${interval[3].slice(0, 50)}」`)
+          : T(result.error));
         return { handled: true };
       }
 
       await reply([
-        "定时消息用法（也可直接用自然语言让 AI 帮你设置）：",
-        "/定时 查看",
-        "/定时 每天 09:00 记得喝水",
-        "/定时 间隔 30 休息一下",
-        `/定时 取消 <序号>（每聊天最多 ${MAX_SCHEDULES_PER_CHAT} 条）`,
+        T("定时消息用法（也可直接用自然语言让 AI 帮你设置）："),
+        T("/定时 查看"),
+        T("/定时 每天 09:00 记得喝水"),
+        T("/定时 间隔 30 休息一下"),
+        T(`/定时 取消 <序号>（每聊天最多 ${MAX_SCHEDULES_PER_CHAT} 条）`),
       ].join("\n"));
       return { handled: true };
     }
@@ -206,24 +209,24 @@ export async function runCommand(
     case "/记忆":
     case "/memory": {
       if (!ctx.memory || !config.memoryEnabled) {
-        await reply("长期记忆未启用（可在设置中开启）。");
+        await reply(T("长期记忆未启用（可在设置中开启）。"));
         return { handled: true };
       }
       const entries: MemoryEntry[] = await ctx.memory.load(chatKey);
       await reply(entries.length === 0
-        ? "本聊天还没有长期记忆。对话中让我「记住某事」即可自动写入。"
-        : ["本聊天的长期记忆：", ...entries.map((e, i) => `${i + 1}. ${e.text}`)].join("\n"));
+        ? T("本聊天还没有长期记忆。对话中让我「记住某事」即可自动写入。")
+        : [T("本聊天的长期记忆："), ...entries.map((e, i) => `${i + 1}. ${e.text}`)].join("\n"));
       return { handled: true };
     }
 
     case "/清空记忆":
     case "/forget": {
       if (!ctx.memory || !config.memoryEnabled) {
-        await reply("长期记忆未启用（可在设置中开启）。");
+        await reply(T("长期记忆未启用（可在设置中开启）。"));
         return { handled: true };
       }
       const removed = await ctx.memory.clear(chatKey);
-      await reply(removed > 0 ? `已清空本聊天的 ${removed} 条长期记忆。` : "本聊天没有可清空的记忆。");
+      await reply(removed > 0 ? T(`已清空本聊天的 ${removed} 条长期记忆。`) : T("本聊天没有可清空的记忆。"));
       return { handled: true };
     }
 
@@ -231,14 +234,14 @@ export async function runCommand(
     case "/recall": {
       const targetId = lastSent(ctx.state, chatKey, 1);
       if (!targetId) {
-        await reply("没有找到本机器人最近发出的消息（仅能撤回本次运行期间发送的）。");
+        await reply(T("没有找到本机器人最近发出的消息（仅能撤回本次运行期间发送的）。"));
         return { handled: true };
       }
       try {
         await ctx.client.recall({ scope, openid }, targetId);
-        await reply("已撤回最近一条消息。");
+        await reply(T("已撤回最近一条消息。"));
       } catch (error) {
-        await reply(`撤回失败：${error instanceof Error ? error.message : String(error)}`);
+        await reply(T(`撤回失败：${error instanceof Error ? error.message : String(error)}`));
       }
       return { handled: true };
     }
@@ -246,12 +249,12 @@ export async function runCommand(
     case "/广播":
     case "/broadcast": {
       if (!arg) {
-        await reply("用法：/广播 <内容>（向本机器人已见过的所有群发送）");
+        await reply(T("用法：/广播 <内容>（向本机器人已见过的所有群发送）"));
         return { handled: true };
       }
       const groups = [...ctx.state.groupBuffer.keys()];
       if (groups.length === 0) {
-        await reply("本机器人还没有记录到任何群（收到群消息后才会加入广播范围）。");
+        await reply(T("本机器人还没有记录到任何群（收到群消息后才会加入广播范围）。"));
         return { handled: true };
       }
       let sent = 0;
@@ -271,7 +274,7 @@ export async function runCommand(
           ctx.logger.warn(`[dsh-qqbot] 广播到群 ${group.slice(0, 12)}… 失败:`, error);
         }
       }
-      await reply(`广播完成：成功 ${sent} 个群${skipped > 0 ? `，跳过/失败 ${skipped} 个` : ""}。`);
+      await reply(T(`广播完成：成功 ${sent} 个群${skipped > 0 ? `，跳过/失败 ${skipped} 个` : ""}。`));
       return { handled: true };
     }
 
@@ -279,27 +282,27 @@ export async function runCommand(
       const boundId = ctx.state.chatSession.get(chatKey);
       const agent = boundId ? ctx.agents.get(boundId) : undefined;
       if (!agent) {
-        await reply("当前会话没有正在运行的任务。");
+        await reply(T("当前会话没有正在运行的任务。"));
         return { handled: true };
       }
       if (agent.status === "running") {
         agent.cancel({ kind: "user" }, { keepInbox: true });
-        await reply("已请求停止当前任务。");
+        await reply(T("已请求停止当前任务。"));
       } else {
-        await reply("当前会话空闲，没有需要停止的任务。");
+        await reply(T("当前会话空闲，没有需要停止的任务。"));
       }
       return { handled: true };
     }
 
     case "/steer": {
       if (!arg) {
-        await reply("用法：/steer <补充指令>");
+        await reply(T("用法：/steer <补充指令>"));
         return { handled: true };
       }
       const boundId = ctx.state.chatSession.get(chatKey);
       const agent = boundId ? ctx.agents.get(boundId) : undefined;
       if (!agent || agent.status !== "running") {
-        await reply("当前没有正在运行的任务；直接发送消息即可。");
+        await reply(T("当前没有正在运行的任务；直接发送消息即可。"));
         return { handled: true };
       }
       agent.steer({
@@ -308,11 +311,13 @@ export async function runCommand(
         content: [{ type: "text", text: arg }],
         source: { kind: "user" },
       });
-      await reply("已向当前任务补充指令。");
+      await reply(T("已向当前任务补充指令。"));
       return { handled: true };
     }
 
     default:
-      return { handled: false };
+      // 以 / 开头视为命令意图：未知命令直接反馈，不进入 AI 会话。
+      await reply(T(`未知命令 ${cmd}，输入 /help 查看可用命令。`));
+      return { handled: true };
   }
 }

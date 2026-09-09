@@ -218,6 +218,66 @@ export function buildQqbotTools({ bots, store, memory, logger }: QqbotToolsConte
       },
     },
     {
+      name: "qqbot_send_file",
+      description: [
+        "立即向当前 QQ 聊天（群/单聊）发送一个文件（图片以外的任意富媒体）。",
+        "来源二选一：url（公网可访问的文件地址）/ localPath（本机路径）。",
+        "注意：走富媒体上传通道，配额有限，仅在用户明确要求发送文件时使用。",
+      ].join(" "),
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "文件 URL（与 localPath 二选一）" },
+          localPath: { type: "string", description: "本机文件路径（与 url 二选一）" },
+          fileName: { type: "string", description: "文件名（平台展示用，可省略）" },
+          content: { type: "string", description: "随文件说明文字（可省略）" },
+        },
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        const { appId, scope, openid } = requireBot(exec);
+        const bot = bots.get(appId);
+        if (!bot) return { ok: false, error: "来源机器人已不可用" };
+        const a = args as { url?: string; localPath?: string; fileName?: string; content?: string };
+        const source = a.url ? { url: a.url } : a.localPath ? { localPath: a.localPath } : null;
+        if (!source) return { ok: false, error: "url 与 localPath 必须提供其一" };
+        await bot.client.sendFile({ scope, openid }, source, { fileName: a.fileName, content: a.content });
+        bot.state.counters.proactive += 1;
+        logger.info(`[dsh-qqbot] AI 发送文件（机器人 ${appId}）→ ${scope}:${openid}`);
+        return { ok: true, sent: true };
+      },
+    },
+    {
+      name: "qqbot_send_voice",
+      description: [
+        "立即向当前 QQ 聊天（群/单聊）发送一条语音消息。",
+        "来源二选一：url（公网可访问的音频地址）/ localPath（本机音频路径）。",
+        "仅在用户明确要求发送语音时使用。",
+      ].join(" "),
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "音频 URL（与 localPath 二选一）" },
+          localPath: { type: "string", description: "本机音频路径（与 url 二选一）" },
+        },
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        const { appId, scope, openid } = requireBot(exec);
+        const bot = bots.get(appId);
+        if (!bot) return { ok: false, error: "来源机器人已不可用" };
+        const a = args as { url?: string; localPath?: string };
+        const source = a.url ? { url: a.url } : a.localPath ? { localPath: a.localPath } : null;
+        if (!source) return { ok: false, error: "url 与 localPath 必须提供其一" };
+        await bot.client.sendVoice({ scope, openid }, source);
+        bot.state.counters.proactive += 1;
+        logger.info(`[dsh-qqbot] AI 发送语音（机器人 ${appId}）→ ${scope}:${openid}`);
+        return { ok: true, sent: true };
+      },
+    },
+    {
       name: "qqbot_memory_add",
       description: "向当前 QQ 聊天的长期记忆写入一条事实（跨会话保留，如「这个群在准备 10 月的团建」）。用户说「记住…」时调用。",
       parameters: {

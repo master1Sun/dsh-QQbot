@@ -10,7 +10,6 @@
  * 被动回复失败时，按该机器人的配置可选改用主动消息重发（配额极少，默认关闭）。
  */
 import type { BotRuntime, BotRuntimeManager } from "./bots.js";
-import { formatOutboundQuote } from "./quote.js";
 import { PASSIVE_REPLY_LIMIT } from "./qq/api.js";
 import type { Outbox } from "./outbox.js";
 import type { QuotaTracker } from "./quota.js";
@@ -48,17 +47,19 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
     const record = bot.state.recordBySession.get(sessionId);
     if (!record) return;
     const limit = Math.min(config.maxRepliesPerMessage, PASSIVE_REPLY_LIMIT[record.target.scope]);
-    // 引用策略：quoteReply=off 不引用；=at 仅 @/单聊 引用（避免群全量刷屏）；=all 全部引用。
-    // 原生引用为主：被动回复在第一片挂 message_reference，QQ 客户端渲染可点击定位的引用气泡（已实测生效）；
-    // 仅主动消息（无 msg_id，如定时任务合成事件）无法原生引用，才回退为第一片顶部的文本引用前缀。
-    const quoteAllowed = config.quoteReply !== "off" && (config.quoteReply === "all" || record.quoteMention);
-    const nativeQuote = quoteAllowed && Boolean(record.msgId) && bot.client.nativeQuoteAvailable;
-    const quotePrefix =
-      quoteAllowed && !nativeQuote
-        ? formatOutboundQuote(record.quote, { markdown: config.markdownReply, maxChars: config.quoteMaxChars })
-        : "";
-    const budget = Math.max(200, config.replyChunkChars - quotePrefix.length);
-    const chunks = chunkReply(text, budget, limit);
+    // 原生引用卡片：仅群聊生效——单聊（C2C）一律不引用；群聊再按 quoteReply 门控
+    // （off=不引用；at=仅群 @ 回复，避免群全量刷屏；all=群聊全部回复都引用）。
+    // 引用卡片由 QQ 的 message_reference 渲染（可点击定位到用户原消息），这是平台原生能力，非文本前缀。
+    // 官方规定 message_reference.message_id 必须用事件 ext 里的 msg_idx（REFIDX_*），
+    // 传原始 msg id 平台无法解析，会导致重复消息等异常——索引缺失时干脆不带引用。
+    // 限制：message_reference 与 Markdown 同时携带时，部分场景下平台会剥离 Markdown 改为纯文本
+    // （引用卡片仍保留）。这是 QQ 平台约束，无法两全；若需保留 Markdown 排版，请将 quoteReply 设为 off。
+    const quoteMsgId = record.target.scope === "group"
+      && config.quoteReply !== "off"
+      && (config.quoteReply === "all" || record.quoteMention)
+      ? record.selfIdx || undefined
+      : undefined;
+    const chunks = chunkReply(text, config.replyChunkChars, limit);
     if (chunks.length === 0) return;
     let usedMarkdown = config.markdownReply;
     // 合成事件（定时任务）没有 msg_id → 整条回复走主动消息，消耗每日配额。
@@ -70,14 +71,12 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
       }
       if (isProactive && quota && !(await quota.tryConsume())) break;
       const seq = record.nextSeq++;
-      const body = index === 0 ? `${quotePrefix}${chunk}` : chunk;
       try {
-        const result = await bot.client.sendReply(record.target, body, {
+        const result = await bot.client.sendReply(record.target, chunk, {
           msgId: record.msgId || undefined,
           msgSeq: seq,
           markdown: usedMarkdown,
-          // 原生引用只挂在第一片（后续分片重复挂引用会显得嘈杂）。
-          quoteMsgId: nativeQuote && index === 0 ? record.msgId : undefined,
+          quoteMsgId,
         });
         // 平台拒绝 Markdown 后，后续分片直接走纯文本（少一次注定失败的请求）。
         if (result.mode === "text") usedMarkdown = false;
@@ -88,7 +87,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
         if (config.proactiveFallback && record.target.scope === "group") {
           try {
             if (quota && !(await quota.tryConsume())) throw new Error("主动消息配额已用尽");
-            const fallback = await bot.client.sendReply(record.target, body, { markdown: false });
+            const fallback = await bot.client.sendReply(record.target, chunk, { markdown: false });
             if (fallback.id) rememberSent(bot.state, record.chatKey, fallback.id);
             bot.state.counters.proactive += 1;
             continue;

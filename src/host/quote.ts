@@ -1,17 +1,10 @@
 /**
- * 引用文本渲染：出站引用前缀 + 入站引用上下文。
+ * 引用处理：出站原生引用卡片（message_reference）+ 入站引用上下文。
  *
- * 关键约束：QQ 官方 v2 群聊 / C2C 接口**不支持原生引用卡片**
- * （`message_reference` 只有 v1 频道消息支持），所以引用只能在文本层表达：
- *
- *   Markdown 回复 → `> **昵称**：原话`   （QQ 原生 Markdown 渲染为引用块）
- *   纯文本回复   → `「昵称：原话」`      （兼容无 Markdown 权限的机器人）
- *
- * 两个方向：
- *  - 出站：机器人回复时把用户那句话放在顶部（只放第一片，后续分片不再重复）；
- *  - 入站：用户引用了别人的消息时，把恢复出的原文注入模型上下文。
+ * 出站引用：由 reply 泵在 sendReply 时通过 quoteMsgId 携带 `message_reference`，
+ * QQ 客户端渲染为可点击定位到用户原消息的引用卡片（原生能力，非文本前缀）。
+ * 入站引用：用户引用了别人的消息时，把本地索引恢复的原文注入模型上下文。
  */
-import type { ReplyQuote } from "../shared/types.js";
 
 /** 引用行里的时间展示（RFC3339 → HH:mm），取不到返回空串。 */
 function hhmm(timestamp: string | undefined): string {
@@ -19,36 +12,11 @@ function hhmm(timestamp: string | undefined): string {
   return /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2})/.exec(t)?.[1] ?? "";
 }
 
-/** 昵称兜底：群名片 → openid 短码 → 「某人」。 */
-function displayName(quote: ReplyQuote): string {
-  if (quote.senderName.trim()) return quote.senderName.trim();
-  if (quote.sender) return quote.sender.slice(-6);
-  return "某人";
-}
-
-/** 折叠为单行并截断（超长加省略号）。 */
+/** 折叠为单行并截断（超长加省略号），供入站引用上下文展示。 */
 export function quoteBody(content: string, maxChars: number): string {
   const flat = content.replace(/\r\n/g, "\n").replace(/\s+/g, " ").trim();
   if (flat.length <= maxChars) return flat;
   return `${flat.slice(0, Math.max(1, maxChars - 1))}…`;
-}
-
-/**
- * 出站引用前缀：机器人回复顶部那一句「引用了谁的什么话」。
- * 返回空串表示不引用（配置关闭 / 没有可引用内容）。
- */
-export function formatOutboundQuote(
-  quote: ReplyQuote | undefined,
-  { markdown, maxChars }: { markdown: boolean; maxChars: number },
-): string {
-  const body = quoteBody(quote?.content ?? "", maxChars);
-  if (!body) return "";
-  const name = displayName(quote!);
-  if (markdown) {
-    // Markdown 引用块：昵称加粗，原话跟在后面；末尾空行才是引用块结束。
-    return `> **${name}**：${body}\n\n`;
-  }
-  return `「${name}：${body}」\n`;
 }
 
 /**

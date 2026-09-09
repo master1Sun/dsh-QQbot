@@ -180,19 +180,33 @@ const EN = Object.freeze({
   "接受单聊消息": "Accept direct messages",
   "是否响应 QQ 私聊（C2C）消息。关闭后机器人只处理群消息，私聊一律忽略。":
     "Whether to respond to QQ direct (C2C) messages. When off, the bot processes group messages only and ignores DMs.",
+  "响应机器人消息": "Respond to bot messages",
+  "开启后，其他机器人发出的消息也会触发本机器人回复。默认关闭：其他机器人的消息一律忽略，防止同群的多个机器人互相触发、循环刷屏。注意 QQ 平台在群聊里通常不向机器人推送其他机器人的消息，此开关只在平台确实推送时才有实际效果。":
+    "When on, messages sent by other bots can also trigger replies from this bot. Off by default: other bots' messages are always ignored, preventing multiple bots in the same group from triggering each other in a loop. Note: the QQ platform usually does not push other bots' messages to a bot in groups, so this switch only takes effect when the platform actually delivers them.",
   "Markdown 回复": "Markdown replies",
   "优先以 QQ Markdown 格式发送，排版更好看；若平台拒绝该格式，会自动降级为纯文本重发，不会丢消息。":
     "Send in QQ Markdown format first for nicer layout; if the platform rejects it, the message is resent as plain text automatically — nothing is lost.",
   "回复引用原话": "Quote the user's message",
-  "回复以原生引用气泡指向触发消息（点击可跳转定位到被引用的那句话）；仅主动消息（如定时任务回复）无法原生引用，回退为文本引用（Markdown 引用块 /「昵称：原话」）。off=不引用；at=仅 @/单聊（避免群全量刷屏，推荐）；all=全部回复都引用。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。":
-    "Replies point at the triggering message with a native quote bubble (click it to jump to the quoted message). Only proactive messages (e.g. scheduled-task replies) cannot carry a native reference and fall back to a text quote (Markdown blockquote / “nickname: message”). off = no quote; at = @-mentions & DMs only (avoids group flooding, recommended); all = every reply. Also, when a user quotes another message in chat, the quoted text is always injected into the model's context so it knows what the user is responding to.",
+  "仅群聊生效，单聊一律不引用：群里回复以 QQ 原生引用卡片回应（message_reference），卡片可点击定位到用户那条原消息。注意：引用卡片与 Markdown 同时携带时，部分场景平台会剥离 Markdown 改为纯文本（卡片保留），这是 QQ 平台限制；若想保住 Markdown 排版请选 off。off=不引用；at=仅群 @ 回复（避免群全量刷屏，推荐）；all=群聊全部回复都引用。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。":
+    "Group chats only — DMs are never quoted. In groups, replies quote the user's message via QQ's native quote card (message_reference), clickable to jump to the original message. Note: when a quote card is sent together with Markdown, the platform may strip the Markdown and fall back to plain text in some cases (the card is kept) — a QQ platform limitation; choose off if you need Markdown formatting. off = no quote; at = group @-mentions only (avoids group flooding, recommended); all = every group reply. Also, when a user quotes another message, the quoted text is always injected into the model context.",
   "回复引用原话范围": "Quote reply scope",
   "off（不引用）": "off (no quote)",
-  "at（仅 @/单聊，推荐）": "at (@ & DMs only, recommended)",
-  "all（全部回复）": "all (every reply)",
+  "at（仅群 @，推荐）": "at (group @-mentions only, recommended)",
+  "all（群聊全部回复）": "all (every group reply)",
   "引用字数上限": "Quote preview length",
   "文本引用最多显示多少字（仅主动消息回退为文本引用时使用；原生引用气泡由 QQ 客户端自行截断），超出部分以省略号结尾。":
-    "How many characters of the quoted text to show at most (used only when a proactive message falls back to a text quote; the native quote bubble is truncated by the QQ client itself). Longer text ends with an ellipsis.",
+    "How many characters of the quoted text to show when a reply falls back to a text quote (proactive messages only; native quote cards are truncated by the QQ client itself); longer text ends with an ellipsis.",
+
+  // ── 群聊聊天 Preset / secretEnv 凭据引用 ──
+  "群聊聊天 Preset": "Group chat preset",
+  "群内非 @ 的全量消息（只聊天、不执行工具）使用的 Preset；留空则跟随上方 Agent Preset。用于让群全量回复风格与 @/单聊区分开。":
+    "Preset used for full group messages that do not @ the bot (chat only, no tools); leave empty to follow the Agent Preset above. Use it to give group-wide replies a style distinct from @-mentions and DMs.",
+  "跟随 Agent Preset": "Follow Agent Preset",
+  "AppSecret 凭据引用（secretEnv）": "AppSecret credential reference (secretEnv)",
+  "AppSecret 凭据引用": "AppSecret credential reference",
+  "DSH 凭据引用作为 AppSecret 的替代来源（优先级高于明文 AppSecret）。填写后机器人在运行时凭此引用解析出真实密钥，无需在开放平台明文保存。留空则使用扫码/手动填写的 AppSecret。":
+    "A DSH credential reference used instead of a plaintext AppSecret (takes priority over it). When set, the bot resolves the real secret from this reference at runtime, so no plaintext secret needs to be kept on the open platform. Leave empty to use the AppSecret from QR login / manual entry.",
+  "如 my-qq-app-secret（留空不启用）": "e.g. my-qq-app-secret (leave empty to disable)",
 
   // ── 新功能开关（多模态 / 记忆 / 欢迎语 / 表情撤回 / 语音 / 敏感词 / 配额）──
   "主动消息日配额": "Daily proactive quota",
@@ -303,6 +317,109 @@ const EN = Object.freeze({
   "在 QQ 里确认绑定": "Confirm in QQ",
   "等待自动跳转": "Wait for auto-redirect",
   "设为主机器人": "Set as primary bot",
+
+  // ── 概览第一行按钮 + 定时/归档弹窗（范围 Tab、分组标题、时间轴角色）──
+  "定时消息": "Scheduled",
+  "消息归档": "Archive",
+  "当前机器人": "Current bot",
+  "所有机器人": "All bots",
+  "群聊任务": "Group tasks",
+  "单聊任务": "Direct chats",
+  "用户": "User",
+  "机器人": "Bot",
+  "上次失败": "Last failed",
+
+  // ── 定时消息编辑表单（字段 + 提示）──
+  "发送范围": "Target chat",
+  "发送到群聊还是单聊。改动范围后请确认下方 openid 与之匹配。":
+    "Send to a group or a direct chat. After changing this, make sure the openid below matches.",
+  "群聊": "Group",
+  "单聊": "Direct chat",
+  "接收方 openid": "Recipient openid",
+  "接收消息的群或用户 openid（o 开头的长串）。机器人收到过该群/该用户消息后，可让 AI 用 /session 查到。":
+    "The openid (long id starting with \"o\") of the group or user receiving the message. Once the bot has seen that group/user, ask the AI to run /session to look it up.",
+  "群或用户的 openid": "group or user openid",
+  "发送类型": "Schedule type",
+  "每天=到点每日发送一次；间隔=按分钟循环发送。":
+    "Daily = sent once at the set time each day; Interval = sent repeatedly every N minutes.",
+  "每天（指定时刻）": "Daily (set time)",
+  "间隔（循环分钟）": "Interval (minutes)",
+  "每天发送时间": "Daily time",
+  "上海时间（UTC+8），24 小时制 HH:mm，例如 09:30。":
+    "Asia/Shanghai time (UTC+8), 24-hour HH:mm, e.g. 09:30.",
+  "09:30": "09:30",
+  "间隔分钟": "Interval minutes",
+  "两次发送之间的间隔分钟数，最小 5 分钟。间隔越小消耗的主动消息配额越多。":
+    "Minutes between sends, minimum 5. Shorter intervals consume more proactive-message quota.",
+  "发送方式": "Send mode",
+  "直接发送=到点原样发送下方内容；AI 生成=把下方内容作为指令交给 AI，生成结果再回复（会创建会话、消耗 token）。":
+    "Direct = send the text below as-is at send time; AI = treat the text below as a prompt for the AI and send its generated reply (creates a session, costs tokens).",
+  "直接发送文本": "Send text directly",
+  "AI 生成内容": "Generate with AI",
+  "内容": "Content",
+  "给 AI 的生成指令（如「播报今天的天气」），到点由 AI 生成内容后发送。":
+    "Prompt for the AI (e.g. \"report today's weather\"); the AI generates and sends the content at send time.",
+  "到点直接发送的文本，上限 2000 字。":
+    "Text sent as-is at send time, up to 2000 characters.",
+  "总结今天的待办": "e.g. summarize today's todos",
+  "记得喝水": "e.g. drink some water",
+  "定时消息内容": "Scheduled message content",
+  "保存后立即生效并重新计算下次发送时间":
+    "Takes effect immediately on save; the next send time is recomputed.",
+  "保存中…": "Saving…",
+  "保存修改": "Save changes",
+  "编辑": "Edit",
+  "从 GitHub 检查新版本；发现新版本会自动下载并更新，重启 DSH 后生效":
+    "Check GitHub for a new version; if found it is downloaded and applied automatically. Restart DSH to take effect.",
+  "已更新 ✓": "Updated ✓",
+  "检查更新": "Check for updates",
+  "正在检查更新…": "Checking for updates…",
+  "例如：总结今天的待办": "e.g. summarize today's todos",
+
+  // ── 定时消息与归档（详情页卡片 + 两个独立弹窗）──
+  "定时消息与归档": "Scheduled messages & archive",
+  "定时消息：查看 / 删除这个机器人已设置的定时发送任务（聊天里的 /定时 命令与 AI 设置的任务都在这里）。消息归档：只读查看本地落盘的最近收发记录，按当前机器人过滤。":
+    "Scheduled messages: view/remove timed tasks set for this bot (both /定时 chat commands and AI-created ones). Archive: read-only view of recent locally archived messages, filtered by the current bot.",
+  "定时消息管理": "Scheduled message manager",
+  "列出这个机器人名下的全部定时消息（每天定时与间隔循环），可单条删除；删除立即生效并落盘。":
+    "Lists all scheduled messages under this bot (daily and interval), each removable; removal takes effect immediately and is persisted.",
+  "查看定时消息": "View scheduled messages",
+  "开启「消息本地归档」后，收发的消息会写入 ~/.dsh/qqbot/archive/（按月分文件）。这里只读展示最近的记录，最新在前。":
+    "With \"message archiving\" on, sent/received messages are written to ~/.dsh/qqbot/archive/ (one file per month). This shows recent records read-only, newest first.",
+  "查看归档": "View archive",
+
+  // ── replyLocale 下拉 ──
+  "回复语言（replyLocale）": "Reply language (replyLocale)",
+  "回复语言": "Reply language",
+  "机器人直接发给 QQ 用户的系统文案（/help、/status、定时消息用法、欢迎语等）使用的语言。中文为源语言；选择 English 时这些文案自动翻译为英文，未命中的内容保持原文不丢信息。AI 对话内容本身不受影响。":
+    "Language for system texts the bot sends directly to QQ users (/help, /status, schedule usage, welcome message, etc.). Chinese is the source language; choosing English translates them, and unmatched texts stay as-is so no information is lost. AI conversation content is unaffected.",
+  "中文（默认）": "Chinese (default)",
+
+  // ── 定时消息弹窗 ──
+  "这个机器人名下的全部定时发送任务（含聊天命令与 AI 设置的）":
+    "All scheduled send tasks under this bot (from chat commands and AI alike)",
+  "正在读取定时消息…": "Loading scheduled messages…",
+  "还没有定时消息。可在聊天里发 /定时 每天 09:00 内容，或直接让 AI 帮你设置。":
+    "No scheduled messages yet. Send /定时 daily 09:00 text in chat, or just ask the AI to set one up.",
+  "AI 生成": "AI-generated",
+  "来自设置页": "From settings",
+  "来自 AI": "From AI",
+  "来自聊天命令": "From chat command",
+  "上次失败：": "Last failed: ",
+  "删除中…": "Removing…",
+  "确定删除这条定时消息？删除后立即停止发送。":
+    "Remove this scheduled message? It stops sending immediately.",
+
+  // ── 归档弹窗 ──
+  "本地落盘的最近收发记录（只读，最新在前；按当前机器人过滤）":
+    "Recent locally archived messages (read-only, newest first; filtered by the current bot)",
+  "正在读取归档…": "Loading archive…",
+  "归档为空。开启「消息本地归档」并收到消息后，这里会出现记录。":
+    "Archive is empty. Records appear here once \"message archiving\" is on and messages arrive.",
+  "收到": "Received",
+  "回复": "Reply",
+  "主动": "Proactive",
+  "会话": "Session",
 });
 
 export const en = EN;
@@ -360,6 +477,43 @@ function translateDynamic(text: string): string {
   if (m) return `${m[1]} chars`;
   m = /^(\d+) 条\/天$/.exec(text);
   if (m) return `${m[1]}/day`;
+  // ── 定时消息 / 归档弹窗（含插值的动态串） ──
+  m = /^每天 (\d{1,2}:\d{2})$/.exec(text);
+  if (m) return `Daily at ${m[1]}`;
+  m = /^每 (\d+) 分钟$/.exec(text);
+  if (m) return `Every ${m[1]} min`;
+  m = /^下次发送 (.+)$/.exec(text);
+  if (m) return `Next send: ${m[1]}`;
+  m = /^(群|用户) (.+)$/.exec(text);
+  if (m) return `${m[1] === "群" ? "Group" : "User"} ${m[2]}`;
+  m = /^上次失败：([\s\S]+)$/.exec(text);
+  if (m) return `Last failed: ${m[1]}`;
+  m = /^共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
+  if (m) return `${m[1]} in total (max 5 per chat)`;
+  m = /^所有机器人共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
+  if (m) return `All bots: ${m[1]} in total (max 5 per chat)`;
+  m = /^已显示最近 (\d+) 条（更早记录仍在归档文件里）$/.exec(text);
+  if (m) return `Showing latest ${m[1]} (older records remain in the archive files)`;
+  m = /^共 (\d+) 条记录$/.exec(text);
+  if (m) return `${m[1]} record(s) in total`;
+  // ── 定时消息编辑表单（动态串） ──
+  m = /^(\d+) 分钟$/.exec(text);
+  if (m) return `${m[1]} min`;
+  m = /^(\d+) 小时$/.exec(text);
+  if (m) return `${m[1]} h`;
+  m = /^该任务归属机器人 (.+)$/.exec(text);
+  if (m) return `This task belongs to bot ${m[1]}`;
+  // ── 版本检查 / 自更新（动态串） ──
+  m = /^暂无新版本（当前 v(.+) 已是最新）$/.exec(text);
+  if (m) return `No new version (v${m[1]} is the latest)`;
+  m = /^发现新版本 v(.+)，正在自动更新…$/.exec(text);
+  if (m) return `New version v${m[1]} found; updating automatically…`;
+  m = /^已自动更新到 v(.+)（备份于安装目录 \.update-backup\/），重启 DSH 后生效$/.exec(text);
+  if (m) return `Updated to v${m[1]} (old files backed up in .update-backup/ inside the install directory). Restart DSH to take effect.`;
+  m = /^检查失败：(.+)$/.exec(text);
+  if (m) return `Check failed: ${m[1]}`;
+  m = /^更新失败：(.+)$/.exec(text);
+  if (m) return `Update failed: ${m[1]}`;
   return text;
 }
 
