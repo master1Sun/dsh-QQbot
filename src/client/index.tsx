@@ -135,11 +135,23 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     return { ok: true, data: val(res) };
   };
 
+  // 弹窗是否打开（ref 供 effect 读取，避免加入依赖导致弹窗关闭时重复触发滚动）。
+  const dialogOpenRef = React.useRef(false);
+  dialogOpenRef.current = Boolean(scheduleOpen || archiveOpen || pickerOpen || overrideEdit !== null);
+
   // 提示条渲染在页面顶部，长页面滚动后可能落在视口外：提示变化时自动滚动到可见区域。
+  // 弹窗打开期间不滚动：弹窗内有内联提示，且弹窗保存成功后不应把主界面拉回顶部。
   React.useEffect(() => {
-    if (!notice) return;
+    if (!notice || dialogOpenRef.current) return;
     const el = document.getElementById("qbot-notice");
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [notice]);
+
+  // 提示条自动消失：8 秒后清空，避免过期提示长期驻留。
+  React.useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 8000);
+    return () => window.clearTimeout(timer);
   }, [notice]);
 
   // ── 运行统计刷新 ─────────────────────────────────────────────────────────────
@@ -570,7 +582,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         }),
         SettingRow({
           label: "Agent Preset",
-          desc: "决定机器人的行事风格与可用工具。@ 机器人和单聊消息都走这个 Preset；群里非 @ 的回复走聊天 Preset，不会执行工具。",
+          desc: "决定机器人的行事风格与可用工具。@ 机器人和单聊消息都走这个 Preset；群里非 @ 的回复走聊天 Preset（默认跟随本 Preset，仅可在 bots.json 配置），不会执行工具。",
           control: h("select", {
             className: "qbot-settingSelect",
             value: String(form.agentPreset ?? ""),
@@ -579,36 +591,9 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           }, presetOptions(catalogs.agentPresets).map((o) =>
             h("option", { key: o.value, value: o.value }, o.label))),
         }),
-        SettingRow({
-          label: "群聊聊天 Preset",
-          desc: "群内非 @ 的全量消息（只聊天、不执行工具）使用的 Preset；留空则跟随上方 Agent Preset。用于让群全量回复风格与 @/单聊区分开。",
-          control: h("select", {
-            className: "qbot-settingSelect",
-            value: String(form.agentPresetChat ?? ""),
-            onChange: (e: any) => void saveField("agentPresetChat", e.target.value),
-            "aria-label": "群聊聊天 Preset",
-          },
-            h("option", { value: "" }, "跟随 Agent Preset"),
-            presetOptions(catalogs.agentPresets).map((o) =>
-              h("option", { key: o.value, value: o.value }, o.label))),
-        }),
-        SettingRow({
-          rowKey: "secretEnv",
-          wide: true,
-          label: "AppSecret 凭据引用（secretEnv）",
-          desc: "DSH 凭据引用作为 AppSecret 的替代来源（优先级高于明文 AppSecret）。填写后机器人在运行时凭此引用解析出真实密钥，无需在开放平台明文保存。留空则使用扫码/手动填写的 AppSecret。",
-          control: TextArea({
-            rows: 2,
-            className: "qbot-textarea qbot-mono",
-            defaultValue: String(form.secretEnv ?? ""),
-            placeholder: "如 my-qq-app-secret（留空不启用）",
-            onBlur: (e: any) => {
-              const value = String(e?.target?.value ?? "").trim();
-              if (value !== String(form.secretEnv ?? "")) void saveField("secretEnv", value);
-            },
-            "aria-label": "AppSecret 凭据引用",
-          }),
-        }))),
+        // 群聊聊天 Preset（agentPresetChat）与 AppSecret 凭据引用（secretEnv）已从界面移除，
+        // 仅通过 bots.json 配置——默认 agentPresetChat 留空即跟随上方 Agent Preset（见 rule.ts）。
+      )),
 
     // ── 消息与回复策略（开关） ──
     sectionCard("消息与回复策略", "控制这个机器人「听哪些消息、怎么回」，每个机器人彼此独立。所有开关改完立即生效，不需要重启。",
@@ -639,38 +624,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             h("option", { value: "at" }, "at（仅群 @，推荐）"),
             h("option", { value: "all" }, "all（群聊全部回复）")),
         }),
-        SettingRow({
-          rowKey: "voiceTranscription",
-          label: "语音消息处理",
-          desc: "收到语音消息时如何处理：off=忽略；note=使用平台自带的转写文本（推荐，无转写时显示占位）；download=把音频地址注入上下文；asr=调用下方自定义转写服务（POST {url} → {text}）。",
-          control: h("select", {
-            className: "qbot-settingSelect",
-            value: String(form.voiceTranscription ?? "note"),
-            onChange: (e: any) => void saveField("voiceTranscription", e.target.value),
-            "aria-label": "语音消息处理方式",
-          },
-            h("option", { value: "off" }, "off（忽略语音）"),
-            h("option", { value: "note" }, "note（平台转写，推荐）"),
-            h("option", { value: "download" }, "download（注入音频地址）"),
-            h("option", { value: "asr" }, "asr（自定义转写服务）")),
-        }),
-        SettingRow({
-          rowKey: "asrEndpoint",
-          wide: true,
-          label: "自定义转写服务",
-          desc: "voiceTranscription=asr 时使用的 HTTP 服务地址：机器人 POST { url: <音频地址> }，服务返回 { text: <转写文本> }。留空则回退为占位说明。",
-          control: TextArea({
-            rows: 2,
-            className: "qbot-textarea qbot-mono",
-            defaultValue: String(form.asrEndpoint ?? ""),
-            placeholder: "https://…（留空不启用）",
-            onBlur: (e: any) => {
-              const value = String(e?.target?.value ?? "").trim();
-              if (value !== String(form.asrEndpoint ?? "")) void saveField("asrEndpoint", value);
-            },
-            "aria-label": "自定义转写服务地址",
-          }),
-        }),
+        // 语音相关配置（语音消息处理 / ASR / STT / TTS）已从界面移除，仅通过 bots.json 配置——
+        // 详见 meta.ts SWITCH_DEFS 顶部注释。
         SettingRow({
           rowKey: "replyLocale",
           label: "回复语言（replyLocale）",
@@ -684,22 +639,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             h("option", { value: "zh" }, "中文（默认）"),
             h("option", { value: "en" }, "English")),
         }),
-        SettingRow({
-          rowKey: "welcomeMessage",
-          wide: true,
-          label: "欢迎语文案",
-          desc: "开启「欢迎语」后发送的内容；{nick} 会替换为新成员标识。留空使用默认文案「欢迎 {nick}！@我即可与我对话。」。",
-          control: TextArea({
-            rows: 3,
-            defaultValue: String(form.welcomeMessage ?? ""),
-            placeholder: "欢迎 {nick}！@我即可与我对话。",
-            onBlur: (e: any) => {
-              const value = String(e?.target?.value ?? "").trim();
-              if (value !== String(form.welcomeMessage ?? "")) void saveField("welcomeMessage", value);
-            },
-            "aria-label": "欢迎语文案",
-          }),
-        }),
+        // 欢迎语开关与文案已从界面移除（默认开启），仅通过 bots.json 配置 welcomeEnabled / welcomeMessage。
         SettingRow({
           rowKey: "bannedWords",
           wide: true,
@@ -854,7 +794,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       ? h(OverrideDialog, {
           overrides: groupOverrides,
           editOpenid: overrideEdit,
-          presets: catalogs.agentPresets,
+          rpcCall,
+          appId: detailAppId,
           onClose: () => setOverrideEdit(null),
           onSave: async (next: Record<string, Record<string, unknown>>, openid: string) => {
             const r = await saveField("groupOverrides", next);

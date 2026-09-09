@@ -18,6 +18,7 @@ import * as React from "react";
 import { h } from "../i18n.js";
 import type { RpcCall } from "../types.js";
 import { TextInput, TextArea, confirmDlg, editRow, errText, formatTime, val } from "../ui.js";
+import { OpenIdPicker, useArchiveChats } from "../id-picker.js";
 import { isEnglish, localizeText } from "../i18n.js";
 import { isValidCron, nextCronRun, tzOffsetMs, wallToEpoch } from "../../shared/cron.js";
 
@@ -185,6 +186,8 @@ export function ScheduleDialog(props: {
   const [scheduleToggling, setScheduleToggling] = React.useState("");
   const [scheduleTesting, setScheduleTesting] = React.useState("");
   const [schedNotice, setSchedNotice] = React.useState<{ ok: boolean; text: string } | null>(null);
+  // 归档会话聚合：为「接收方 openid」提供 id+名称下拉候选（挂载即拉取当前机器人）。
+  const archiveChats = useArchiveChats(rpcCall, detailAppId);
   // cron 预览同时记录 ok：样式判定不能依赖中文前缀（英文下前缀会变成 "Next run:"）。
   const [cronPreview, setCronPreview] = React.useState<{ ok: boolean; text: string } | null>(null);
 
@@ -435,6 +438,15 @@ export function ScheduleDialog(props: {
   };
 
   const ed = scheduleModal.editing;
+
+  /** 归档候选反查展示名：单聊=昵称；群聊平台不下发群名，括号里是「最近发言成员」提示而非 id 归属。 */
+  const chatLabel = (openid: string): string => {
+    const short = `${openid.slice(0, 16)}${openid.length > 16 ? "…" : ""}`;
+    const hit = archiveChats.chats.find((c) => c.openid === openid);
+    const name = hit ? (hit.scope === "c2c" ? hit.name : hit.lastSenderName) : "";
+    if (!name) return short;
+    return hit && hit.scope === "group" ? `${short}（成员 ${name}）` : `${short}（${name}）`;
+  };
 
   const summarizeType = (e: Record<string, any>): string => {
     if (e.type === "cron") return `cron ${e.cron ?? ""}${e.tz && e.tz !== DEFAULT_TZ ? ` · ${e.tz}` : ""}`;
@@ -797,7 +809,12 @@ export function ScheduleDialog(props: {
                         {
                           className: "qbot-settingSelect",
                           value: String(ed.scope),
-                          onChange: (ev: any) => setEditField("scope", ev.target.value),
+                          onChange: (ev: any) => {
+                            // 切换范围后旧 openid 必然与新范围不匹配（群 openid ≠ 用户 openid），
+                            // 直接清空并收起下拉，避免带着错误候选提交。
+                            setEditField("openid", "");
+                            setEditField("scope", ev.target.value);
+                          },
                           "aria-label": "发送范围",
                         },
                         h("option", { value: "group" }, "群聊"),
@@ -806,13 +823,15 @@ export function ScheduleDialog(props: {
                     ),
                     editRow(
                       "接收方 openid",
-                      "接收消息的群或用户 openid。机器人收到过该群/该用户消息后，可让 AI 用 /session 查到。",
-                      TextInput({
-                        className: "qbot-input qbot-mono",
+                      "接收消息的群或用户 openid。点击输入框可从消息归档下拉选择：群聊候选显示群 id，单聊候选显示用户 id 与昵称；也可直接粘贴。",
+                      h(OpenIdPicker, {
+                        chats: archiveChats.chats,
+                        scope: ed.scope === "group" ? "group" : "c2c",
                         value: String(ed.openid ?? ""),
-                        placeholder: "群或用户的 openid",
-                        onChange: (ev: any) => setEditField("openid", ev.target.value),
-                        "aria-label": "接收方 openid",
+                        loading: archiveChats.loading,
+                        error: archiveChats.error,
+                        onChange: (v: string) => setEditField("openid", v),
+                        ariaLabel: "接收方 openid",
                       }),
                     ),
                   ),
@@ -1050,7 +1069,7 @@ export function ScheduleDialog(props: {
                                 h(
                                   "span",
                                   null,
-                                  `${e.scope === "group" ? "群" : "用户"} ${String(e.openid ?? "").slice(0, 16)}${String(e.openid ?? "").length > 16 ? "…" : ""}`,
+                                  `${e.scope === "group" ? "群" : "用户"} ${chatLabel(String(e.openid ?? ""))}`,
                                 ),
                                 h(
                                   "span",

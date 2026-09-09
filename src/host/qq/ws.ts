@@ -29,6 +29,8 @@ export interface QqWsSourceOptions {
   onEvent: (eventType: string, payload: QqEnvelope, deliveryId: string) => void;
   /** 原始网关事件（成员进出、表情、好友等 SDK 未单独封装的事件）出口。 */
   onRawEvent?: (eventType: string, data: unknown) => void;
+  /** 按钮回调（INTERACTION_CREATE，SDK 单独封装为 interaction 事件）出口。 */
+  onInteraction?: (event: unknown) => void;
 }
 
 /** 连接就绪超时（毫秒）：token 换取 + wss 握手 + READY。 */
@@ -38,6 +40,7 @@ export class QqWsSource {
   readonly #logger: QqWsSourceOptions["logger"];
   readonly #onEvent: QqWsSourceOptions["onEvent"];
   readonly #onRawEvent: QqWsSourceOptions["onRawEvent"];
+  readonly #onInteraction: QqWsSourceOptions["onInteraction"];
   #bot: QQBot | null = null;
   #abort: AbortController | null = null;
   #starting: Promise<void> | null = null;
@@ -47,6 +50,7 @@ export class QqWsSource {
     this.#logger = options.logger;
     this.#onEvent = options.onEvent;
     this.#onRawEvent = options.onRawEvent;
+    this.#onInteraction = options.onInteraction;
   }
 
   get status(): WsStatus {
@@ -141,6 +145,14 @@ export class QqWsSource {
         this.#onRawEvent?.(ctx.eventType, ctx.data);
       } catch (error) {
         this.#logger.error("[dsh-qqbot] 原始事件处理失败:", error);
+      }
+    });
+    // 按钮回调：INTERACTION_CREATE 被 SDK 封装成独立的 interaction 事件（不进 rawEvent）。
+    bot.on("interaction", (_ctx: unknown, event: unknown) => {
+      try {
+        this.#onInteraction?.(event);
+      } catch (error) {
+        this.#logger.error("[dsh-qqbot] 按钮回调处理失败:", error);
       }
     });
 

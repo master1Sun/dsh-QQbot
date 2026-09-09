@@ -20,6 +20,7 @@ import type { QuotaTracker } from "../infra/quota.js";
 import { tr } from "../../shared/reply-i18n.js";
 import { configForGroup } from "../../shared/config.js";
 import { sanitizeOutgoingText } from "./sanitize.js";
+import { synthesizeSpeech } from "./voice.js";
 import {
   appendAssistantText,
   assistantTextOf,
@@ -111,6 +112,29 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
       && Boolean(record.msgId);
     const chunks = chunkReply(text, config.replyChunkChars, limit);
     if (chunks.length === 0) return;
+    // 本条回复即将发出：停掉单聊「正在输入」状态（TTS 成功路径同样受益）。
+    bot.typing.stop(record.chatKey);
+    // 语音回复（ttsReply + 单聊）：整条回复合成语音气泡发送（WAV 直传）。
+    // QQ 平台语音消息仅支持单聊，群聊忽略；合成/发送失败回退文字回复（内容不丢）。
+    if (config.ttsReply && record.target.scope === "c2c" && record.nextSeq <= limit
+      && config.ttsBaseUrl && config.ttsApiKey) {
+      try {
+        const audioPath = await synthesizeSpeech(
+          text,
+          { baseUrl: config.ttsBaseUrl, apiKey: config.ttsApiKey, model: config.ttsModel, voice: config.ttsVoice },
+          logger,
+        );
+        if (audioPath) {
+          await bot.client.sendVoice(record.target, { localPath: audioPath }, { msgId: record.msgId || undefined });
+          record.nextSeq += 1;
+          bot.state.counters.replies += 1;
+          logger.info(`[dsh-qqbot] 已发送语音回复 chat=${record.chatKey}（文字转语音）`);
+          return;
+        }
+      } catch (error) {
+        logger.warn("[dsh-qqbot] 语音回复发送失败，回退文字回复:", error instanceof Error ? error.message : error);
+      }
+    }
     let usedMarkdown = config.markdownReply;
     // 合成事件（定时任务）没有 msg_id → 整条回复走主动消息，消耗每日配额。
     const isProactive = !record.msgId;

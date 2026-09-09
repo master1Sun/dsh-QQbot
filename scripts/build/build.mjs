@@ -34,7 +34,7 @@ await esbuildBuild({
   platform: "node",
   target: "node22",
   charset: "utf8",
-  external: [...hostExternal, "@tencent-connect/qqbot-connector", "@tencent-connect/qqbot-nodejs", "qrcode"],
+  external: [...hostExternal, "@tencent-connect/qqbot-connector", "@tencent-connect/qqbot-nodejs", "@tencent-connect/qqbot-nodejs/*", "qrcode"],
   sourcemap: false,
   logLevel: "info",
 });

@@ -34,6 +34,7 @@ import { ChatMemoryStore } from "./infra/memory.js";
 import { Outbox } from "./messaging/outbox.js";
 import { QuotaTracker } from "./infra/quota.js";
 import { handleRawEvent } from "./messaging/events.js";
+import type { ApprovalInteractionEvent } from "./messaging/approval.js";
 import type { QqbotConfig } from "../shared/config.js";
 
 export const name = "qqbot";
@@ -327,6 +328,13 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
         }
       }).catch((error) => {
         logger.error(`[dsh-qqbot] 事件 ${eventType} 处理失败:`, error);
+      });
+    },
+    onInteraction: (bot, event) => {
+      void bot.approvals.handleInteraction(event as ApprovalInteractionEvent).then((consumed) => {
+        if (!consumed) logger.info(`[dsh-qqbot] 按钮回调未命中任何待决审批（机器人 ${bot.appId}）`);
+      }).catch((error) => {
+        logger.error("[dsh-qqbot] 按钮回调处理失败:", error);
       });
     },
   });

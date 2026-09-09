@@ -352,6 +352,9 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 /* 定时消息编辑视图：编辑表单放在无边的 modalBody 里，与带边框的列表容器区分 */
 .qbot-modalBody { flex: 1 1 auto; min-height: 140px; margin: 12px 20px 0; overflow: hidden; display: flex; flex-direction: column; }
 .qbot-modalBody .qbot-editForm { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 2px 10px; overscroll-behavior: contain; }
+/* 群覆盖弹窗：editForm 直接作为 modalList（overflow:hidden）的子元素，内容超高时自身成为滚动层，
+   否则超出部分被裁掉无法查看/编辑（弹窗高度固定 72vh，字段多时必然溢出）。 */
+.qbot-modalList > .qbot-editForm { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .qbot-editGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
 .qbot-editRow { display: flex; flex-direction: column; gap: 4px; }
 .qbot-editLabel { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
@@ -538,6 +541,16 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-metricValue { color: var(--dsw-alias-label-primary, #1f2329); font-size: 19px; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; }
 .qbot-metric[data-tone="error"] .qbot-metricValue { color: var(--dsw-alias-state-error-primary, #d54941); }
 .qbot-metric[data-tone="warning"] .qbot-metricValue { color: var(--dsw-alias-state-warn-primary, #d97706); }
+
+/* ── openid 可搜索下拉（归档会话候选）────────────────────────────────── */
+.qbot-idPicker { position: relative; min-width: 0; }
+.qbot-idPickerMenu { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 8px 24px rgb(31 35 41 / 12%); }
+.qbot-idPickerItem { width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.qbot-idPickerItem:hover { background: var(--dsw-alias-bg-module-platform, #f2f3f5); }
+.qbot-idPickerItem.is-current { background: color-mix(in srgb, var(--qbot-blue, #1677ff) 10%, transparent); }
+.qbot-idPickerName { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; font-weight: 600; line-height: 1.4; }
+.qbot-idPickerId { color: var(--dsw-alias-label-tertiary, #8f959e); font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.qbot-idPickerState { padding: 8px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; line-height: 1.5; text-align: center; }
 
 /* ── 响应式 ───────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {

@@ -41,6 +41,14 @@ export const PASSIVE_REPLY_LIMIT: Record<ReplyTarget["scope"], number> = Object.
  */
 const MARKDOWN_REJECTION_CODES = new Set([40_034_090, 400_340_90, 304_003, 304_024, 304_042]);
 
+/**
+ * 生成一个随机 msg_seq（与 SDK getNextMsgSeq 同思路）：输入状态等辅助消息
+ * 不应占用回复泵 1..5 的被动回复序号，用伪随机值避开冲突。
+ */
+function randomMsgSeq(): number {
+  return ((Date.now() % 100_000_000) ^ Math.floor(Math.random() * 65536)) % 65536;
+}
+
 interface QqApiErrorShape {
   code?: unknown;
   message?: unknown;
@@ -166,11 +174,38 @@ export class QqApiClient {
     return await this.#send(target, payload);
   }
 
-  /** 发送一条 Markdown 消息（需机器人有 markdown 权限）。quoteMsgId 携带时附 message_reference 引用卡片。 */
+  /**
+   * 发送「正在输入」状态（C2C 专用，msg_type=6 input_notify）。
+   * 参考 @tencent-connect/qqbot-nodejs 的 sendInputNotify / oc-src typingIndicator：
+   * input_second 为状态持续秒数（平台窗口约 60s，超过需由调用方周期性重发）。
+   * msgId 携带时为被动输入状态；msg_seq 用伪随机值，不占用回复泵的被动回复序号。
+   * 平台对群聊不支持输入状态：非 c2c 目标直接跳过。
+   */
+  async sendTyping(
+    target: ReplyTarget,
+    { msgId, seconds = 60 }: { msgId?: string; seconds?: number } = {},
+  ): Promise<void> {
+    if (target.scope !== "c2c" || !target.openid) return;
+    const payload: Record<string, unknown> = {
+      msg_type: 6,
+      input_notify: { input_type: 1, input_second: Math.min(60, Math.max(1, Math.round(seconds))) },
+      msg_seq: randomMsgSeq(),
+    };
+    if (msgId) payload.msg_id = msgId;
+    await this.#send(target, payload);
+  }
+
+  /** 发送一条 Markdown 消息（需机器人有 markdown 权限）。quoteMsgId 携带时附 message_reference 引用卡片；
+   *  keyboard 携带时附内嵌按钮（InlineKeyboard，点击触发 INTERACTION_CREATE 回调）。 */
   async sendMarkdown(
     target: ReplyTarget,
     content: string,
-    { msgId, msgSeq, quoteMsgId }: { msgId?: string; msgSeq?: number; quoteMsgId?: string } = {},
+    {
+      msgId, msgSeq, quoteMsgId, keyboard,
+    }: {
+      msgId?: string; msgSeq?: number; quoteMsgId?: string;
+      keyboard?: { content: { rows: Array<{ buttons: Array<Record<string, unknown>> }> } };
+    } = {},
   ): Promise<string | undefined> {
     const text = content.trim();
     if (!text || !target.openid) return undefined;
@@ -180,7 +215,18 @@ export class QqApiClient {
       payload.msg_seq = msgSeq ?? 1;
     }
     if (quoteMsgId) payload.message_reference = { message_id: quoteMsgId };
+    if (keyboard) payload.keyboard = keyboard;
     return await this.#send(target, payload);
+  }
+
+  /**
+   * 回调确认（INTERACTION_CREATE 必答）：平台要求收到按钮点击后在数秒内回 ACK，
+   * 否则客户端按钮转圈超时。code=0 表示成功；data.prompt 作为按钮反馈文案展示。
+   */
+  async acknowledgeInteraction(interactionId: string, prompt?: string): Promise<void> {
+    const sdk = this.#sdk;
+    if (!sdk) throw new Error("QQ SDK 未就绪（机器人未连接），无法确认按钮回调");
+    await sdk.acknowledgeInteraction(interactionId, 0, prompt ? { prompt } : undefined);
   }
 
   /**

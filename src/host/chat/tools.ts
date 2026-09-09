@@ -398,6 +398,49 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
       },
     },
     {
+      name: "qqbot_request_approval",
+      description: [
+        "在执行敏感/不可逆操作（执行命令、删除、对外发送、大额变更等）之前，向当前 QQ 聊天发送一条带「✅允许 / ❌拒绝」按钮的审批消息，并阻塞等待用户点击。",
+        "返回 decision：allow=用户允许；deny=用户拒绝；timeout=超时未点击（视为拒绝）。",
+        "用户点击后你会收到结果，再根据结果决定是否继续执行操作。被拒绝时不要重试同一操作。",
+        "注意：审批消息占用主动消息配额，仅对真正高风险的操作使用；普通回复不需要审批。",
+      ].join(" "),
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "要审批的操作，一句话说清（如「执行命令 rm -rf C:/tmp/cache」）" },
+          description: { type: "string", description: "操作说明/影响范围（可省略）" },
+          timeoutSeconds: { type: "number", description: "等待时长（秒，10-600，默认 120）" },
+        },
+        required: ["title"],
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        const bot = (() => {
+          const sessionId = typeof exec.agent?.id === "string" ? exec.agent.id : "";
+          return sessionId ? bots.findBySession(sessionId) : undefined;
+        })();
+        if (!bot) return { ok: false, error: "当前会话没有绑定 QQ 聊天，无法请求审批" };
+        const chat = resolveChat(bot.state, String(exec.agent?.id ?? ""));
+        if (!chat) return { ok: false, error: "当前会话绑定的 QQ 聊天已失效，无法请求审批" };
+        if (!bot.config.approvalButtons) {
+          return { ok: false, error: "按钮审批未开启（设置页「按钮审批」开关），请直接向用户文字确认" };
+        }
+        const a = args as { title?: string; description?: string; timeoutSeconds?: number };
+        const title = String(a.title ?? "").trim();
+        if (!title) return { ok: false, error: "title 不能为空" };
+        const decision = await bot.approvals.request({ scope: chat.scope, openid: chat.openid }, {
+          title,
+          description: a.description ? String(a.description) : undefined,
+          timeoutSeconds: a.timeoutSeconds,
+        });
+        bot.state.counters.proactive += 1;
+        logger.info(`[dsh-qqbot] AI 审批请求「${title.slice(0, 40)}」→ ${decision}（机器人 ${bot.appId}）`);
+        return { ok: true, decision, approved: decision === "allow" };
+      },
+    },
+    {
       name: "qqbot_memory_add",
       description:
         "向当前 QQ 聊天的长期记忆写入一条重要事实（跨会话保留）。只记关键对话内容：身份、偏好、约定、进行中的事项；不要闲聊、不要 emoji 或任何符号装饰、不要「【标签】」前缀，直接写内容本身。用户说「记住…」时调用。",

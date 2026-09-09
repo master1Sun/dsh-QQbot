@@ -204,6 +204,94 @@ export async function readArchiveRecords(opts: { bot?: string; limit?: number } 
   };
 }
 
+/** 归档中的会话聚合项（供设置页「接收方 openid」下拉候选）。 */
+export interface ArchivedChat {
+  scope: "group" | "c2c";
+  openid: string;
+  /** 最近一次已知的展示名：单聊=用户昵称；群聊平台不下发群名，恒为空。 */
+  name: string;
+  /** 群聊场景：该群最近一次发言者的昵称（帮助辨认是哪个群）。 */
+  lastSenderName: string;
+  /** 该会话最近一次出现的时间（ISO 字符串）。 */
+  lastTs: string;
+  /** 扫描范围内该会话出现的记录条数。 */
+  count: number;
+}
+
+/**
+ * 聚合归档中出现过的群/单聊会话（设置页 openid 下拉候选）：
+ *  - 按天文件从最新往旧读，凑满 limit 条记录即止；
+ *  - 群会话取 chat 前缀 group:，单聊取 c2c:；session 事件与无法解析的键跳过；
+ *  - 名称取该会话最近一次的 senderName（QQ 平台不下发群名，群聊用最近发言者辅助辨认）。
+ */
+export async function listArchiveChats(opts: { bot?: string; limit?: number } = {}): Promise<{
+  chats: ArchivedChat[];
+  moreAvailable: boolean;
+}> {
+  const bot = typeof opts.bot === "string" ? opts.bot : "";
+  const limit = Math.min(5000, Math.max(200, Number(opts.limit) || 2000));
+  const dir = join(pluginDataDir(), "archive");
+  const files = await listDayFiles();
+  const map = new Map<string, ArchivedChat>();
+  let scanned = 0;
+  let daysRead = 0;
+  for (const file of files) {
+    daysRead += 1;
+    let raw = "";
+    try {
+      raw = await readFile(join(dir, file), "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const rec = safeParseRecord(trimmed);
+      if (!rec || rec.kind === "session") continue;
+      if (bot && rec.bot && rec.bot !== bot) continue;
+      scanned += 1;
+      const chat = typeof rec.chat === "string" ? rec.chat : "";
+      let scope: "group" | "c2c" | null = null;
+      let openid = "";
+      if (chat.startsWith("group:")) {
+        scope = "group";
+        openid = chat.slice("group:".length);
+      } else if (chat.startsWith("c2c:")) {
+        scope = "c2c";
+        openid = chat.slice("c2c:".length);
+      }
+      if (!scope || !openid) continue;
+      const key = `${scope}:${openid}`;
+      const ts = typeof rec.ts === "string" ? rec.ts : "";
+      const senderName = typeof rec.senderName === "string" ? rec.senderName : "";
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, {
+          scope,
+          openid,
+          name: scope === "c2c" ? senderName : "",
+          lastSenderName: senderName,
+          lastTs: ts,
+          count: 1,
+        });
+      } else {
+        prev.count += 1;
+        // ts 为 ISO 字符串，字典序即时间序；只让更新的记录覆盖名称。
+        if (ts && ts >= prev.lastTs) {
+          prev.lastTs = ts;
+          if (scope === "c2c" && senderName) prev.name = senderName;
+          if (senderName) prev.lastSenderName = senderName;
+        }
+      }
+    }
+    if (scanned >= limit) break;
+  }
+  const chats = [...map.values()]
+    .sort((a, b) => (a.lastTs < b.lastTs ? 1 : a.lastTs > b.lastTs ? -1 : 0))
+    .slice(0, 300);
+  return { chats, moreAvailable: daysRead < files.length };
+}
+
 /** 天级条数缓存：key = `${bot}:${mtimeMs}:${size}`，文件未变时免重读。 */
 const dayCountCache = new Map<string, { key: string; count: number }>();
 

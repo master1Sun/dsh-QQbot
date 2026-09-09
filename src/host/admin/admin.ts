@@ -15,7 +15,7 @@ import type { ModelOption } from "./catalogs.js";
 import type { QrLoginManager } from "../qq/qr-login.js";
 import type { ScheduleStore, ScheduleEntry, Scheduler } from "../schedule/schedule.js";
 import type { ScriptGenerator } from "../schedule/script-gen.js";
-import { listArchiveDays, readArchiveDay, readArchiveRecords, removeArchiveDay } from "../infra/archive.js";
+import { listArchiveChats, listArchiveDays, readArchiveDay, readArchiveRecords, removeArchiveDay } from "../infra/archive.js";
 import { applyUpdate, checkUpdate } from "./updater.js";
 import { toShanghaiISO } from "../../shared/time.js";
 import type { BotRuntimeManager, BotRuntime } from "../bots.js";
@@ -129,10 +129,18 @@ export function createAdminService(ctx: AdminServiceContext) {
       await saveGlobalConfig(gconf);
     }
     // 行为配置写入该机器人独立 config，仅对该机器人热生效。
-    await patchBotConfig(appId, rest);
+    // patchBotConfig 对 bots.json 中不存在的机器人是静默无操作，必须以返回的
+    // bots.json 为准校验目标机器人确实存在，避免「返回成功却没写入」。
+    const savedFile = await patchBotConfig(appId, rest);
+    const savedBot = savedFile.bots.find((b) => b.appId === appId);
+    if (!savedBot) {
+      return { ok: false, error: `机器人 ${maskAppId(appId)} 不存在，配置未写入` };
+    }
     await bots.sync();
     logger.info(`[dsh-qqbot] 机器人 ${maskAppId(appId)} 的策略/调优/工作区配置已更新并热生效`);
-    return { ok: true, data: { saved: true, appId } };
+    // 回读落盘后的配置（以 bots.json 为准），供客户端做端到端校验
+    // （如确认 groupOverrides 中该群键确实写入）。
+    return { ok: true, data: { saved: true, appId, groupOverrides: savedBot.config.groupOverrides ?? {} } };
   };
 
   const credentialsSave = async (payload: { appId?: unknown; appSecret?: unknown }) => {
@@ -428,6 +436,14 @@ export function createAdminService(ctx: AdminServiceContext) {
     return { ok: true, data: { appId, days } };
   };
 
+  /** 列举归档中出现过的会话（供会话选择器使用）。 */
+  const archiveChats = async (payload: { appId?: unknown; limit?: unknown }) => {
+    const appId = archiveAppId(payload);
+    const limit = typeof payload.limit === "number" && Number.isSafeInteger(payload.limit) ? payload.limit : undefined;
+    const result = await listArchiveChats({ bot: appId, limit });
+    return { ok: true, data: { appId, ...result } };
+  };
+
   /** 删除某天归档中当前机器人的记录（其余机器人的保留）。 */
   const archiveRemoveDay = async (payload: { appId?: unknown; day?: unknown }) => {
     const appId = archiveAppId(payload);
@@ -506,6 +522,7 @@ export function createAdminService(ctx: AdminServiceContext) {
         case "schedule.runOnce": result = await scheduleRunOnce(payload); break;
         case "archive.list": result = await archiveList(payload); break;
         case "archive.days": result = await archiveDays(payload); break;
+        case "archive.chats": result = await archiveChats(payload); break;
         case "archive.removeDay": result = await archiveRemoveDay(payload); break;
         case "stats.reset": {
           const bot = await bots.resetCounters(typeof payload.appId === "string" ? payload.appId : undefined);

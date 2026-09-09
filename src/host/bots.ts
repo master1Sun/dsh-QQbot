@@ -16,6 +16,8 @@ import { createValueFilterState } from "./infra/value-filter.js";
 import { Archiver } from "./infra/archive.js";
 import { RefIndex } from "./messaging/ref-index.js";
 import { SelfOpenidStore } from "./messaging/self-id.js";
+import { TypingKeeper } from "./messaging/typing.js";
+import { ApprovalManager } from "./messaging/approval.js";
 import { QqApiClient } from "./qq/api.js";
 import { QqWsSource, type WsStatus } from "./qq/ws.js";
 import { StatsStore, ZERO_COUNTERS } from "./infra/stats.js";
@@ -36,6 +38,10 @@ export interface BotRuntime {
   valueFilterState: ReturnType<typeof createValueFilterState>;
   client: QqApiClient;
   ws: QqWsSource;
+  /** 单聊「正在输入」状态保持器（typingIndicator 开启时随会话处理启停）。 */
+  typing: TypingKeeper;
+  /** 按钮审批管理器：qqbot_request_approval 工具发按钮消息等点击，INTERACTION_CREATE 回调唤醒。 */
+  approvals: ApprovalManager;
   archiver: Archiver;
   /**
    * 引用索引（REFIDX → 原文）：用户引用别人消息时，平台只给索引键不给原文，
@@ -64,6 +70,8 @@ export interface BotRuntimeManagerOptions {
   onEvent: (bot: BotRuntime, eventType: string, payload: QqEnvelope, deliveryId: string) => void;
   /** 原始网关事件出口（成员进出/表情/好友等），由 index.ts 分派给事件处理器。 */
   onRawEvent?: (bot: BotRuntime, eventType: string, data: unknown) => void;
+  /** 按钮回调（INTERACTION_CREATE）出口，由 index.ts 分派给审批管理器。 */
+  onInteraction?: (bot: BotRuntime, event: unknown) => void;
 }
 
 /** delivery 归属表的容量上限（超出后丢弃最旧的一半，防止长期运行泄漏）。 */
@@ -225,6 +233,8 @@ export class BotRuntimeManager {
     // 已删除的机器人：断开并从表里移除。
     for (const [appId, bot] of [...this.#bots]) {
       if (seen.has(appId)) continue;
+      bot.typing.stopAll();
+      bot.approvals.dispose();
       await bot.ws.stop();
       this.#bots.delete(appId);
       this.#options.logger.info(`[dsh-qqbot] 机器人 ${appId} 已移除，连接已断开`);
@@ -259,6 +269,8 @@ export class BotRuntimeManager {
       // 占位：下面立即替换（对象需要自引用闭包）
       client: undefined as unknown as QqApiClient,
       ws: undefined as unknown as QqWsSource,
+      typing: undefined as unknown as TypingKeeper,
+      approvals: undefined as unknown as ApprovalManager,
       archiver: undefined as unknown as Archiver,
       refIndex: undefined as unknown as RefIndex,
       selfStore: undefined as unknown as SelfOpenidStore,
@@ -270,6 +282,8 @@ export class BotRuntimeManager {
       logger: this.#options.logger,
       getSdk: () => bot.ws.sdk,
     });
+    bot.typing = new TypingKeeper(bot.client, this.#options.logger);
+    bot.approvals = new ApprovalManager(bot.client, this.#options.logger);
     bot.archiver = new Archiver(() => bot.config.archiveEnabled, this.#options.logger, bot.appId);
     bot.refIndex = new RefIndex({ logger: this.#options.logger, appId: bot.appId });
     // 历史引用索引异步加载（缓存性质，加载慢不影响建连与收发）。
@@ -289,6 +303,9 @@ export class BotRuntimeManager {
       },
       onRawEvent: (eventType, data) => {
         this.#options.onRawEvent?.(bot, eventType, data);
+      },
+      onInteraction: (event) => {
+        this.#options.onInteraction?.(bot, event);
       },
     });
     return bot;
@@ -343,7 +360,11 @@ export class BotRuntimeManager {
       clearInterval(this.#statsTimer);
       this.#statsTimer = null;
     }
-    for (const bot of this.#bots.values()) await bot.ws.stop();
+    for (const bot of this.#bots.values()) {
+      bot.typing.stopAll();
+      bot.approvals.dispose();
+      await bot.ws.stop();
+    }
     this.#bots.clear();
     this.#deliveryOwner.clear();
     this.#sessionOwner.clear();

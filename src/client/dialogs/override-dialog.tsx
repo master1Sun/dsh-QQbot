@@ -6,7 +6,9 @@
 import * as React from "react";
 import { h } from "../i18n.js";
 import { COOLDOWN_OPTIONS, cooldownLabel } from "../meta.js";
-import { TextInput, TextArea, editRow, presetOptions } from "../ui.js";
+import { TextArea, editRow } from "../ui.js";
+import { OpenIdPicker, useArchiveChats } from "../id-picker.js";
+import type { RpcCall } from "../types.js";
 
 /** 覆盖编辑草稿：字符串形态（空串=跟随默认；开关用 on/off/空）。 */
 interface OverrideDraft {
@@ -56,16 +58,20 @@ export function OverrideDialog(props: {
   overrides: Record<string, Record<string, unknown>>;
   /** 编辑中的群 openid；空串=新增覆盖。 */
   editOpenid: string;
-  /** Agent Preset 目录（聊天 Preset 下拉）。 */
-  presets: Array<{ id: string; label: string }>;
+  /** RPC（拉取归档会话聚合做 openid 下拉候选）。 */
+  rpcCall: RpcCall;
+  /** 当前详情机器人（归档候选按机器人过滤）。 */
+  appId: string;
   onClose: () => void;
   /** 保存：next 为整份 groupOverrides（空覆盖=删除该群键）；返回结果供弹窗决定是否关闭。 */
   onSave: (next: Record<string, Record<string, unknown>>, openid: string) => Promise<OverrideSaveResult> | OverrideSaveResult;
 }) {
-  const { overrides, editOpenid, presets, onClose, onSave } = props;
+  const { overrides, editOpenid, rpcCall, appId, onClose, onSave } = props;
   const [draft, setDraft] = React.useState<OverrideDraft>(() => buildDraft(overrides, editOpenid));
   const [error, setError] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  // 归档会话聚合：群 openid 下拉候选（id + 最近发言者名称）。
+  const archiveChats = useArchiveChats(rpcCall, appId);
 
   const setOverrideField = (key: string, value: string) => {
     setError("");
@@ -131,13 +137,17 @@ export function OverrideDialog(props: {
               h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: onClose }, "×")),
             h("div", { className: "qbot-modalList" },
               h("div", { className: "qbot-editForm" },
-                editRow("群 openid", "要单独配置的群 openid（o 开头的长串）。可在群里让 AI 用 /session 查看。",
-                  TextInput({
-                    className: "qbot-input qbot-mono", value: String(draft.openid ?? ""),
-                    placeholder: "群 openid",
+                editRow("群 openid", "要单独配置的群 openid（o 开头的长串）。点击输入框可从消息归档下拉选择，候选标注「群 id」；也可直接粘贴。",
+                  h(OpenIdPicker, {
+                    chats: archiveChats.chats,
+                    scope: "group",
+                    value: String(draft.openid ?? ""),
                     readOnly: Boolean(editOpenid),
-                    onChange: (ev: any) => setOverrideField("openid", ev.target.value),
-                    "aria-label": "群 openid",
+                    loading: archiveChats.loading,
+                    error: archiveChats.error,
+                    placeholder: "群 openid",
+                    onChange: (v: string) => setOverrideField("openid", v),
+                    ariaLabel: "群 openid",
                   })),
                 editRow("群全量回复", "该群非 @ 消息是否参与价值评分并回复。",
                   h("select", {
@@ -208,24 +218,9 @@ export function OverrideDialog(props: {
                     h("option", { value: "" }, "跟随默认"),
                     h("option", { value: "on" }, "启用"),
                     h("option", { value: "off" }, "停用"))),
-                editRow("长期记忆", "该群是否维护跨会话长期记忆。",
-                  h("select", {
-                    className: "qbot-settingSelect", value: String(draft.memoryEnabled),
-                    onChange: (ev: any) => setOverrideField("memoryEnabled", ev.target.value),
-                    "aria-label": "长期记忆",
-                  },
-                    h("option", { value: "" }, "跟随默认"),
-                    h("option", { value: "on" }, "启用"),
-                    h("option", { value: "off" }, "停用"))),
-                editRow("聊天 Preset", "该群非 @ 全量消息使用的 Agent Preset（只聊天不执行工具）。留空跟随机器人配置。",
-                  h("select", {
-                    className: "qbot-settingSelect", value: String(draft.agentPresetChat),
-                    onChange: (ev: any) => setOverrideField("agentPresetChat", ev.target.value),
-                    "aria-label": "聊天 Preset",
-                  },
-                    h("option", { value: "" }, "跟随默认"),
-                    presetOptions(presets).map((o) =>
-                      h("option", { key: o.value, value: o.value }, o.label)))),
+                // 长期记忆（memoryEnabled）与聊天 Preset（agentPresetChat）已从界面移除
+                //（默认常开/留空跟随 Agent Preset，仅 bots.json 可配）；
+                // 草稿仍读取/回写这两个字段，避免保存时丢掉配置文件里已设置的值。
                 editRow("敏感词列表", "仅该群生效的敏感词（逗号分隔），命中即撤回并跳过回复；与机器人级敏感词叠加。",
                   TextArea({
                     rows: 2, value: String(draft.bannedWords ?? ""),

@@ -92,10 +92,36 @@ export interface QqbotConfig {
   tokenUrl: string;
   /** 入站图片/文件附件转发进会话（让模型"看"图）。 */
   multimodalInbound: boolean;
-  /** 语音消息处理方式：off=忽略；note=注入说明占位；download=下载并注入 URL；asr=调用 asrEndpoint 转写。 */
-  voiceTranscription: "off" | "note" | "download" | "asr";
+  /**
+   * 语音消息处理方式：off=忽略；note=注入说明占位（优先平台自带转写）；
+   * download=下载并注入 URL；asr=调用 asrEndpoint 转写（POST { url } → { text }）；
+   * stt=下载音频本地转码后调用 OpenAI 兼容 /audio/transcriptions 转写（失败回退平台转写）。
+   */
+  voiceTranscription: "off" | "note" | "download" | "asr" | "stt";
   /** 外部语音转写服务（POST 音频字节/URL → 返回文本），voiceTranscription=asr 时使用。 */
   asrEndpoint: string;
+  /** STT 服务 Base URL（OpenAI 兼容，如 https://api.openai.com/v1），voiceTranscription=stt 时使用。 */
+  sttBaseUrl: string;
+  /** STT 服务 API Key（Bearer），voiceTranscription=stt 时使用。 */
+  sttApiKey: string;
+  /** STT 模型名（如 whisper-1），voiceTranscription=stt 时使用。 */
+  sttModel: string;
+  /** 单聊回复自动转语音（文字 → TTS → 语音气泡）。合成失败自动回退文字回复。 */
+  ttsReply: boolean;
+  /** TTS 服务 Base URL（OpenAI 兼容 /audio/speech）。 */
+  ttsBaseUrl: string;
+  /** TTS 服务 API Key（Bearer）。 */
+  ttsApiKey: string;
+  /** TTS 模型名（如 tts-1 / gpt-4o-mini-tts）。 */
+  ttsModel: string;
+  /** TTS 发音人（OpenAI 兼容接口的 voice 参数）。 */
+  ttsVoice: string;
+  /** 单聊处理消息期间发送「正在输入」状态（QQ 平台能力仅限单聊），回复发出后停止。 */
+  typingIndicator: boolean;
+  /** 按钮审批：AI 请求执行敏感操作时发送「允许/拒绝」按钮消息，点击回调回传决定。 */
+  approvalButtons: boolean;
+  /** 文件内容识别：收到文本类文件（txt/md/json/csv/代码等）时下载并截取内容注入模型上下文。 */
+  fileIngestion: boolean;
   /** 入群/加好友欢迎语开关。 */
   welcomeEnabled: boolean;
   /** 欢迎语模板（{nick} 占位昵称）。 */
@@ -295,11 +321,23 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     apiBase: str(pick("apiBase") as string) || "https://api.sgroup.qq.com",
     tokenUrl: str(pick("tokenUrl") as string) || "https://bots.qq.com/app/getAppAccessToken",
     multimodalInbound: boolOr(pick("multimodalInbound"), true),
-    voiceTranscription: oneOf(pick("voiceTranscription"), ["off", "note", "download", "asr"], "note"),
+    // 默认 off：语音处理策略已从设置页移除（界面不展示），仅 bots.json 可配。
+    voiceTranscription: oneOf(pick("voiceTranscription"), ["off", "note", "download", "asr", "stt"], "off"),
     asrEndpoint: str(pick("asrEndpoint") as string),
-    welcomeEnabled: boolOr(pick("welcomeEnabled"), false),
+    sttBaseUrl: str(pick("sttBaseUrl") as string),
+    sttApiKey: str(pick("sttApiKey") as string),
+    sttModel: str(pick("sttModel") as string) || "whisper-1",
+    ttsReply: boolOr(pick("ttsReply"), false),
+    ttsBaseUrl: str(pick("ttsBaseUrl") as string),
+    ttsApiKey: str(pick("ttsApiKey") as string),
+    ttsModel: str(pick("ttsModel") as string) || "tts-1",
+    ttsVoice: str(pick("ttsVoice") as string) || "alloy",
+    typingIndicator: boolOr(pick("typingIndicator"), true),
+    approvalButtons: boolOr(pick("approvalButtons"), true),
+    fileIngestion: boolOr(pick("fileIngestion"), true),
+    welcomeEnabled: boolOr(pick("welcomeEnabled"), true),
     welcomeMessage: str(pick("welcomeMessage") as string),
-    reactionRecall: boolOr(pick("reactionRecall"), false),
+    reactionRecall: boolOr(pick("reactionRecall"), true),
     bannedWords: Array.isArray(pick("bannedWords"))
       ? (pick("bannedWords") as unknown[]).filter((w): w is string => typeof w === "string" && w.length > 0)
       : [],
@@ -308,7 +346,7 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     replyLocale: oneOf(pick("replyLocale"), ["zh", "en"], "zh"),
     sanitizeReplies: boolOr(pick("sanitizeReplies"), true),
     ssrfGuard: boolOr(pick("ssrfGuard"), true),
-    localPathWhitelist: boolOr(pick("localPathWhitelist"), true),
+    localPathWhitelist: boolOr(pick("localPathWhitelist"), false),
     permissionInjection: boolOr(pick("permissionInjection"), true),
     permissionAdmins: listOr(pick("permissionAdmins"), []),
     groupOverrides: resolveGroupOverrides(pick("groupOverrides")),

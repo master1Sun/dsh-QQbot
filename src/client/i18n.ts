@@ -173,8 +173,8 @@ const EN = Object.freeze({
   "这个机器人会话使用的模型；留空则跟随宿主默认模型。切换后已有会话需要重置才会生效。":
     "The model used by this bot’s sessions; leave empty to follow the host default. Existing sessions need a reset for the change to apply.",
   "跟随默认模型": "Follow default model",
-  "决定机器人的行事风格与可用工具。@ 机器人和单聊消息都走这个 Preset；群里非 @ 的回复走聊天 Preset，不会执行工具。":
-    "Sets the bot’s behavior style and available tools. @-mentions and direct messages use this Preset; non-@ group replies use the chat preset and never run tools.",
+  "决定机器人的行事风格与可用工具。@ 机器人和单聊消息都走这个 Preset；群里非 @ 的回复走聊天 Preset（默认跟随本 Preset，仅可在 bots.json 配置），不会执行工具。":
+    "Sets the bot’s behavior style and available tools. @-mentions and direct messages use this Preset; non-@ group replies use the chat preset (follows this Preset by default, configurable only in bots.json) and never run tools.",
 
   // ── 消息与回复策略（开关）──
   "消息与回复策略": "Message & reply policy",
@@ -231,11 +231,12 @@ const EN = Object.freeze({
   "任何人对机器人发出的消息点 🗑️ 表情回应，机器人就撤回那条消息（需要平台的「消息撤回」权限）。":
     "Anyone reacting 🗑️ to a message the bot sent makes the bot recall that message (requires the platform's “message recall” permission).",
   "语音消息处理": "Voice message handling",
-  "收到语音消息时如何处理：off=忽略；note=使用平台自带的转写文本（推荐，无转写时显示占位）；download=把音频地址注入上下文；asr=调用下方自定义转写服务（POST {url} → {text}）。":
-    "How to handle incoming voice messages: off = ignore; note = use the platform's built-in transcript (recommended; shows a placeholder when none); download = inject the audio URL into context; asr = call the custom transcription service below (POST {url} → {text}).",
+  "收到语音消息时如何处理：off=忽略；note=使用平台自带的转写文本（推荐，无转写时显示占位）；download=把音频地址注入上下文；asr=调用下方自定义转写服务（POST {url} → {text}）；stt=下载语音本地转码后调用 OpenAI 兼容 /audio/transcriptions 转写（失败自动回退平台转写文本）。":
+    "How to handle incoming voice messages: off = ignore; note = use the platform's built-in transcript (recommended; shows a placeholder when none); download = inject the audio URL into context; asr = call the custom transcription service below (POST {url} → {text}); stt = download the audio, convert it locally and call an OpenAI-compatible /audio/transcriptions endpoint (falls back to the platform transcript on failure).",
   "语音消息处理方式": "Voice message handling mode",
   "off（忽略语音）": "off (ignore voice)",
   "note（平台转写，推荐）": "note (platform transcript, recommended)",
+  "stt（STT 服务自动转写）": "stt (auto-transcribe via STT service)",
   "download（注入音频地址）": "download (inject audio URL)",
   "asr（自定义转写服务）": "asr (custom transcription service)",
   "自定义转写服务": "Custom transcription service",
@@ -243,6 +244,41 @@ const EN = Object.freeze({
     "HTTP service used when voiceTranscription=asr: the bot POSTs { url: <audio URL> } and the service returns { text: <transcript> }. Leave empty to fall back to a placeholder note.",
   "https://…（留空不启用）": "https://… (leave empty to disable)",
   "自定义转写服务地址": "Custom transcription service URL",
+  "STT 服务地址（Base URL）": "STT service base URL",
+  "voiceTranscription=stt 时使用，OpenAI 兼容的接口根地址（不含 /audio/transcriptions 后缀）。语音会先下载到本地（SILK 自动转 WAV）再上传转写。":
+    "Used when voiceTranscription=stt: the root URL of an OpenAI-compatible endpoint (without the /audio/transcriptions suffix). Voice files are downloaded locally (SILK auto-converted to WAV) before being uploaded for transcription.",
+  "STT 服务地址": "STT service base URL",
+  "https://api.openai.com/v1（留空不启用）": "https://api.openai.com/v1 (leave empty to disable)",
+  "STT 服务 API Key": "STT service API key",
+  "voiceTranscription=stt 时使用，以 Bearer 方式携带。仅保存在本机 bots.json，不会随消息外发（转写请求除外）。":
+    "Used when voiceTranscription=stt, sent as a Bearer token. Stored only in the local bots.json and never sent with messages (except the transcription request itself).",
+  "sk-…（留空不启用）": "sk-… (leave empty to disable)",
+  "STT 模型": "STT model",
+  "voiceTranscription=stt 时使用的转写模型名，如 whisper-1。": "Transcription model used when voiceTranscription=stt, e.g. whisper-1.",
+  "TTS 服务地址（Base URL）": "TTS service base URL",
+  "开启「语音回复」时使用，OpenAI 兼容的接口根地址（不含 /audio/speech 后缀）。合成的 WAV 语音直接作为 QQ 语音消息发送。":
+    "Used when “Text-to-speech replies” is on: the root URL of an OpenAI-compatible endpoint (without the /audio/speech suffix). The synthesized WAV is sent directly as a QQ voice message.",
+  "TTS 服务地址": "TTS service base URL",
+  "TTS 服务 API Key": "TTS service API key",
+  "开启「语音回复」时使用，以 Bearer 方式携带。仅保存在本机 bots.json。":
+    "Used when “Text-to-speech replies” is on, sent as a Bearer token. Stored only in the local bots.json.",
+  "TTS 模型 / 发音人": "TTS model / voice",
+  "TTS 模型名（如 tts-1）与发音人（voice，如 alloy / nova / shimmer）。":
+    "TTS model name (e.g. tts-1) and voice (e.g. alloy / nova / shimmer).",
+  "正在输入状态": "Typing indicator",
+  "私聊收到消息后，AI 处理期间向对方显示「对方正在输入…」（QQ 平台能力仅限单聊），回复发出后自动停止；处理超过 5 分钟自动关闭以防状态永挂。发送失败不影响正常回复。":
+    "When a DM arrives, shows “typing…” to the other side while the AI is processing (QQ platform capability is DM-only); stops automatically once the reply is sent, or after 5 minutes as a failsafe. Send failures never affect normal replies.",
+  "语音回复（文字转语音）": "Voice replies (text-to-speech)",
+  "私聊回复自动经 TTS 服务合成语音气泡发送（QQ 平台语音消息仅支持单聊，群聊仍发文字）。需配置下方 TTS 服务（OpenAI 兼容 /audio/speech）；合成或发送失败自动回退文字回复，内容不丢。":
+    "DM replies are automatically synthesized into voice bubbles via the TTS service (QQ voice messages are DM-only; groups still get text). Requires the TTS service below (OpenAI-compatible /audio/speech); on synthesis or send failure the bot falls back to the text reply — no content is lost.",
+  "TTS 模型名": "TTS model",
+  "TTS 发音人": "TTS voice",
+  "按钮审批": "Button approvals",
+  "AI 执行敏感操作前可发送「✅允许 / ❌拒绝」按钮消息，点击即回传决定；超时未点击视为拒绝。审批消息占用主动消息配额。":
+    "Before performing sensitive operations the AI can send a “✅ Allow / ❌ Deny” button message; a click returns the decision immediately, and no click within the timeout counts as denial. Approval messages consume the proactive-message quota.",
+  "文件内容识别": "File content ingestion",
+  "收到文本类文件（txt/md/json/csv/代码等，≤1MB）时自动下载并截取正文注入模型上下文，AI 直接读懂文件内容再回复；二进制文件（docx/pdf 等）仅列文件名。需配合「附件转发」开关。":
+    "When a text-like file (txt/md/json/csv/code, ≤1MB) arrives, its content is downloaded and excerpted into the model context so the AI can read it before replying; binary files (docx/pdf etc.) are listed by name only. Requires the “Attachment forwarding” switch.",
   "欢迎语文案": "Welcome text",
   "开启「欢迎语」后发送的内容；{nick} 会替换为新成员标识。留空使用默认文案「欢迎 {nick}！@我即可与我对话。」。":
     "Content sent when “Welcome message” is on; {nick} is replaced with the new member's identifier. Leave empty to use the default “Welcome {nick}! @me to chat with me.”.",
@@ -511,9 +547,7 @@ const EN = Object.freeze({
     "Whether replies in this group prefer QQ Markdown.",
   "该群是否维护跨会话长期记忆。":
     "Whether this group maintains cross-session long-term memory.",
-  "聊天 Preset": "Chat preset",
-  "该群非 @ 全量消息使用的 Agent Preset（只聊天不执行工具）。留空跟随机器人配置。":
-    "Agent Preset for non-@ full group messages in this group (chat only, no tools). Leave empty to follow the bot config.",
+  // 聊天 Preset（agentPresetChat）已从群覆盖弹窗移除，仅 bots.json 可配；词条保留备用。
   "仅该群生效的敏感词（逗号分隔），命中即撤回并跳过回复；与机器人级敏感词叠加。":
     "Banned words that only apply to this group (comma-separated). A hit recalls the message and skips the reply; combined with bot-level banned words.",
   "词1, 词2（留空跟随默认）": "word1, word2 (leave empty to follow default)",
@@ -650,6 +684,70 @@ const EN = Object.freeze({
     "Set at least one override field: leaving everything at \"Follow default\" is the same as not adding this group override.",
   "保存失败，请稍后重试": "Save failed; please retry later",
   "保存": "Save",
+
+  // ── openid 归档下拉（id-picker + 两个弹窗的新提示）──
+  "接收消息的群或用户 openid。点击输入框可从消息归档下拉选择：群聊候选显示群 id，单聊候选显示用户 id 与昵称；也可直接粘贴。":
+    "The openid of the group or user receiving messages. Click the field to pick from archived chats: group candidates show the group id, DM candidates show the user id and nickname; pasting one in works too.",
+  "要单独配置的群 openid（o 开头的长串）。点击输入框可从消息归档下拉选择，候选标注「群 id」；也可直接粘贴。":
+    "The openid of the group to configure (a long id starting with \"o\"). Click the field to pick from archived chats — candidates are labelled \"Group id\"; pasting one in works too.",
+  "归档会话候选": "Archived chat candidates",
+  "正在读取归档会话…": "Loading archived chats…",
+  "归档里还没有该类型的会话记录，可直接粘贴 openid":
+    "No chats of this type in the archive yet — you can paste an openid directly",
+  "没有匹配的候选，可直接粘贴 openid": "No matching candidates — you can paste an openid directly",
+
+  // ── 宿主（host）返回的错误/提示文案（经 errText 嵌入设置页提示条，2026-09-10 补齐） ──
+  "没有可用的机器人（请先添加机器人）": "No bot available (add a bot first)",
+  "appId 与 appSecret 必填": "appId and appSecret are required",
+  "缺少 appId": "Missing appId",
+  "缺少 id": "Missing id",
+  "缺少 scope/openid": "Missing scope/openid",
+  "scope/openid/content 必填": "scope/openid/content are required",
+  "enabled 必须是布尔值": "enabled must be a boolean",
+  "调度器不可用": "Scheduler unavailable",
+  "机器人不存在": "Bot does not exist",
+  "扫码结果缺少凭据": "QR scan result is missing credentials",
+  "空响应": "Empty response",
+  "type 必须是 daily / interval / cron / at 之一": "type must be one of daily / interval / cron / at",
+  "内容过长（上限 2000 字）": "Content too long (limit: 2000 characters)",
+  "工具模式必须填写要执行的命令（如 python C:/scripts/report.py），或填写 AI 脚本描述词":
+    "Command mode requires a command to run (e.g. python C:/scripts/report.py), or an AI script prompt",
+  "AI 脚本描述词过长（上限 2000 字）": "AI script prompt too long (limit: 2000 characters)",
+  "工作目录（cwd）必须是字符串": "Working directory (cwd) must be a string",
+  "结果处理（resultMode）必须是 raw 或 ai": "Result handling (resultMode) must be raw or ai",
+  "weekdays 必须是非空数字数组": "weekdays must be a non-empty numeric array",
+  "weekdays 元素必须是 0-6（0=周日）": "weekdays entries must be 0-6 (0 = Sunday)",
+  "at 必须是合法 ISO 时间": "at must be a valid ISO time",
+  "time 格式应为 HH:mm（上海时间，如 09:30）": "time must look like HH:mm (Shanghai time, e.g. 09:30)",
+  "未找到该定时任务": "Scheduled task not found",
+  "未找到该定时消息": "Scheduled message not found",
+  "定时任务不存在（可能已被删除）": "Scheduled task not found (it may have been removed)",
+  "已测试发送一次（不计入主动消息配额）": "Test sent once (not counted against the proactive-message quota)",
+  "已派发（环境无会话总线，无法确认投递，请稍后查看聊天）":
+    "Dispatched (no session bus in this environment; delivery cannot be confirmed — check the chat later)",
+  "已派发（无 deliveryId，无法确认投递，请稍后查看聊天）":
+    "Dispatched (no deliveryId; delivery cannot be confirmed — check the chat later)",
+
+  // ── 定时任务弹窗（2026-09-10 覆盖检查补齐） ──
+  "一": "Mon",
+  "二": "Tue",
+  "三": "Wed",
+  "四": "Thu",
+  "五": "Fri",
+  "六": "Sat",
+  "日": "Sun",
+  "开": "on",
+  "关": "off",
+  "本机时区": "Local time zone",
+  "测试": "Test",
+  "测试中…": "Testing…",
+  "执行失败": "Run failed",
+  "已测试发送一次": "Test sent once",
+  "测试发送一次（不计入主动消息配额）": "Send a test once (not counted against the proactive-message quota)",
+  "请填写 AI 脚本描述词（如：抓取某网页今日价格并输出）":
+    "Enter the AI script prompt (e.g. fetch today's price from a webpage and print it)",
+  "例如：访问 https://example.com/price 抓取今日价格，输出一行「今日价格：xx 元」":
+    "e.g. fetch today's price from https://example.com/price and print one line like “Today's price: xx yuan”",
 });
 
 export const en = EN;
@@ -671,14 +769,27 @@ export function isEnglish() {
 /** 含插值的中文模板串 → 英文（仅英文环境下走到这里）。 */
 function translateDynamic(text: string): string {
   let m: RegExpExecArray | null;
-  m = /^保存失败：(.+)$/.exec(text);
-  if (m) return `Save failed: ${m[1]}`;
-  m = /^操作失败：(.+)$/.exec(text);
-  if (m) return `Operation failed: ${m[1]}`;
-  m = /^删除失败：(.+)$/.exec(text);
-  if (m) return `Removal failed: ${m[1]}`;
-  m = /^重试失败：(.+)$/.exec(text);
-  if (m) return `Retry failed: ${m[1]}`;
+  // ── 前缀 + 宿主错误文案：捕获组递归 localizeText，让嵌入的宿主错误也被翻译 ──
+  m = /^保存失败：([\s\S]+)$/.exec(text);
+  if (m) return `Save failed: ${localizeText(m[1])}`;
+  m = /^操作失败：([\s\S]+)$/.exec(text);
+  if (m) return `Operation failed: ${localizeText(m[1])}`;
+  m = /^删除失败：([\s\S]+)$/.exec(text);
+  if (m) return `Removal failed: ${localizeText(m[1])}`;
+  m = /^重试失败：([\s\S]+)$/.exec(text);
+  if (m) return `Retry failed: ${localizeText(m[1])}`;
+  m = /^检查失败：([\s\S]+)$/.exec(text);
+  if (m) return `Check failed: ${localizeText(m[1])}`;
+  m = /^更新失败：([\s\S]+)$/.exec(text);
+  if (m) return `Update failed: ${localizeText(m[1])}`;
+  m = /^测试发送失败：([\s\S]+)$/.exec(text);
+  if (m) return `Test send failed: ${localizeText(m[1])}`;
+  m = /^上次生成失败：([\s\S]+)$/.exec(text);
+  if (m) return `Last generation failed: ${localizeText(m[1])}`;
+  m = /^归档读取失败：(.+)（可直接粘贴 openid）$/.exec(text);
+  if (m) return `Archive read failed: ${localizeText(m[1])} (you can paste an openid directly)`;
+  m = /^上次失败：([\s\S]+)$/.exec(text);
+  if (m) return `Last failed: ${localizeText(m[1])}`;
   m = /^已配置机器人（(\d+)）$/.exec(text);
   if (m) return `Configured bots (${m[1]})`;
   m = /^扫码成功，AppID (.+) 已启用$/.exec(text);
@@ -746,17 +857,25 @@ function translateDynamic(text: string): string {
   if (m) return `${m[1]} banned words`;
   m = /^聊天 Preset (.+)$/.exec(text);
   if (m) return `Chat preset ${m[1]}`;
+  // ── openid 归档下拉（id-picker；动态串。「（成员 …）」须先于下方「群/用户」通用规则） ──
+  // （归档读取失败 / 上次失败 / 上次生成失败 已上移到文件头部的前缀规则区，带嵌入错误翻译）
+  m = /^共 (\d+) 个候选，输入关键词继续过滤$/.exec(text);
+  if (m) return `${m[1]} candidates — type to filter more`;
+  m = /^群聊 · 最近发言成员：(.+)$/.exec(text);
+  if (m) return `Group · recent speaker: ${m[1]}`;
+  m = /^群 id：(.+)$/.exec(text);
+  if (m) return `Group id: ${m[1]}`;
+  m = /^用户 id：(.+)$/.exec(text);
+  if (m) return `User id: ${m[1]}`;
+  m = /^(.+?)（成员 (.+?)）$/.exec(text);
+  if (m) return `${localizeText(m[1])} (member: ${m[2]})`;
   m = /^(群|用户) (.+)$/.exec(text);
   if (m) return `${m[1] === "群" ? "Group" : "User"} ${m[2]}`;
-  m = /^上次失败：([\s\S]+)$/.exec(text);
-  if (m) return `Last failed: ${m[1]}`;
   // ── 定时任务 AI 脚本生成（动态串） ──
   m = /^（AI 生成中）([\s\S]+)$/.exec(text);
   if (m) return `(AI generating) ${m[1]}`;
   m = /^已生成脚本：(.+?)。修改描述词并保存会重新生成。$/.exec(text);
   if (m) return `Generated script: ${m[1]}. Edit the prompt and save to regenerate.`;
-  m = /^上次生成失败：(.+)$/.exec(text);
-  if (m) return `Last generation failed: ${m[1]}`;
   m = /^共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
   if (m) return `${m[1]} in total (max 5 per chat)`;
   m = /^所有机器人共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
@@ -801,10 +920,32 @@ function translateDynamic(text: string): string {
   if (m) return `New version v${m[1]} found; updating automatically…`;
   m = /^已自动更新到 v(.+)（备份于安装目录 \.update-backup\/），重启 DSH 后生效$/.exec(text);
   if (m) return `Updated to v${m[1]} (old files backed up in .update-backup/ inside the install directory). Restart DSH to take effect.`;
-  m = /^检查失败：(.+)$/.exec(text);
-  if (m) return `Check failed: ${m[1]}`;
-  m = /^更新失败：(.+)$/.exec(text);
-  if (m) return `Update failed: ${m[1]}`;
+  // ── 宿主（host）返回的含参数错误/提示（经 errText 进入提示条） ──
+  m = /^未找到机器人 (.+)$/.exec(text);
+  if (m) return `Bot not found: ${m[1]}`;
+  m = /^目录不存在: (.+)$/.exec(text);
+  if (m) return `Directory does not exist: ${m[1]}`;
+  m = /^不是目录: (.+)$/.exec(text);
+  if (m) return `Not a directory: ${m[1]}`;
+  m = /^无法读取目录: (.+)$/.exec(text);
+  if (m) return `Cannot read directory: ${localizeText(m[1])}`;
+  m = /^未找到该定时消息（序号 1-(\d+)）$/.exec(text);
+  if (m) return `Scheduled message not found (index 1-${m[1]})`;
+  m = /^每个群\/单聊最多 (\d+) 条定时任务$/.exec(text);
+  if (m) return `Max ${m[1]} scheduled tasks per group/DM`;
+  m = /^机器人 (.+) 不可用（已删除或未启用）$/.exec(text);
+  if (m) return `Bot ${m[1]} is unavailable (removed or disabled)`;
+  m = /^保存未生效：群 (.+) 的覆盖未写入配置，请重试$/.exec(text);
+  if (m) return `Save did not take effect: the override for group ${m[1]} was not written; please retry`;
+  // ── 归档时间轴「会话 …」行（内容为用户消息原文，无法翻译，保持原样） ──
+  m = /^会话 (.+)$/.exec(text);
+  if (m) return `Session ${m[1]}`;
+  // ── 定时任务星期过滤标签（周一、周三 → Mon, Wed） ──
+  m = /^周([一二三四五六日\d、]+)$/.exec(text);
+  if (m) {
+    const wd: Record<string, string> = { "一": "Mon", "二": "Tue", "三": "Wed", "四": "Thu", "五": "Fri", "六": "Sat", "日": "Sun", "、": ", " };
+    return `Week ${[...m[1]].map((c) => wd[c] ?? c).join("")}`;
+  }
   return text;
 }
 

@@ -111,10 +111,32 @@ export interface StoredBotConfig {
   tokenUrl?: string;
   /** 入站图片/文件附件转发进会话（多模态）。 */
   multimodalInbound?: boolean;
-  /** 语音消息处理方式：off / note / download / asr。 */
-  voiceTranscription?: "off" | "note" | "download" | "asr";
+  /** 语音消息处理方式：off / note / download / asr / stt。 */
+  voiceTranscription?: "off" | "note" | "download" | "asr" | "stt";
   /** 外部语音转写服务地址（voiceTranscription=asr 时使用）。 */
   asrEndpoint?: string;
+  /** STT 服务 Base URL（OpenAI 兼容 /audio/transcriptions，voiceTranscription=stt 时使用）。 */
+  sttBaseUrl?: string;
+  /** STT 服务 API Key（Bearer）。 */
+  sttApiKey?: string;
+  /** STT 模型名（默认 whisper-1）。 */
+  sttModel?: string;
+  /** 单聊回复自动转语音（文字 → TTS → 语音气泡）。 */
+  ttsReply?: boolean;
+  /** TTS 服务 Base URL（OpenAI 兼容 /audio/speech）。 */
+  ttsBaseUrl?: string;
+  /** TTS 服务 API Key（Bearer）。 */
+  ttsApiKey?: string;
+  /** TTS 模型名（默认 tts-1）。 */
+  ttsModel?: string;
+  /** TTS 发音人（voice 参数，默认 alloy）。 */
+  ttsVoice?: string;
+  /** 单聊「正在输入」状态（回复发出后停止）。 */
+  typingIndicator?: boolean;
+  /** 按钮审批开关（AI 敏感操作前发按钮消息等待点击）。 */
+  approvalButtons?: boolean;
+  /** 文件内容识别（文本类文件下载并注入上下文）。 */
+  fileIngestion?: boolean;
   /** 入群/加好友欢迎语开关。 */
   welcomeEnabled?: boolean;
   /** 欢迎语模板（{nick} 占位昵称）。 */
@@ -152,6 +174,9 @@ export const BOT_CONFIG_FIELDS = [
   "markdownReply", "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs",
   "quoteReply", "quoteMaxChars", "respondToBots",
   "multimodalInbound", "voiceTranscription", "asrEndpoint",
+  "sttBaseUrl", "sttApiKey", "sttModel",
+  "ttsReply", "ttsBaseUrl", "ttsApiKey", "ttsModel", "ttsVoice", "typingIndicator",
+  "approvalButtons", "fileIngestion",
   "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords",
   "memoryEnabled", "quotaPerDay", "replyLocale",
   "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "permissionInjection", "permissionAdmins", "groupOverrides",
@@ -188,18 +213,29 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   groupCooldownMs: 60_000,
   senderCooldownMs: 30_000,
   multimodalInbound: true,
-  voiceTranscription: "note",
+  voiceTranscription: "off",
   asrEndpoint: "",
-  welcomeEnabled: false,
+  sttBaseUrl: "",
+  sttApiKey: "",
+  sttModel: "whisper-1",
+  ttsReply: false,
+  ttsBaseUrl: "",
+  ttsApiKey: "",
+  ttsModel: "tts-1",
+  ttsVoice: "alloy",
+  typingIndicator: true,
+  approvalButtons: true,
+  fileIngestion: true,
+  welcomeEnabled: true,
   welcomeMessage: "",
-  reactionRecall: false,
+  reactionRecall: true,
   bannedWords: [],
   memoryEnabled: true,
   quotaPerDay: 50,
   replyLocale: "zh",
   sanitizeReplies: true,
   ssrfGuard: true,
-  localPathWhitelist: true,
+  localPathWhitelist: false,
   permissionInjection: true,
   permissionAdmins: [],
   groupOverrides: {},
