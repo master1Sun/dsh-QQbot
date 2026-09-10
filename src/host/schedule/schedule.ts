@@ -6,10 +6,15 @@
  * 执行模式：text（直发）/ ai（prompt 注入会话管线生成回复）/ tool（确定性命令执行，
  * 命令可由 AI 脚本生成器回填）。
  *
+ * tool 模式是一条「取数 → 加工 → 门控 → 投递」的确定性流水线：
+ *   parsePrompt  加工指令（resultMode=ai 时替代内置的「整理成简洁播报」默认指令）；
+ *   gate         发送门控（always / nonempty / changed），未通过则不投递、不占配额；
+ * ai 模式则由模型在会话里自主取数加工，并可输出静默标记放弃本次发送（见 SILENT_MARKER）。
+ *
  * 说明：不用宿主 dsh-schedule（session-local 提醒，无法无人时主动外发），
  * 这里自建 nextRunAt 落盘 + tick 扫描，触发时按归属机器人把消息推到目标聊天。
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { BotRuntime } from "../bots.js";
 import type { QuotaTracker } from "../infra/quota.js";
 import { pluginDataDir, readStoreJson, writeStoreJson } from "../infra/store-file.js";
@@ -64,6 +69,42 @@ export interface ScheduleEntry {
   cwd?: string;
   /** tool 模式：命令输出处理——raw 原始输出播报 / ai 交给 AI 总结播报。 */
   resultMode?: "raw" | "ai";
+  /**
+   * 数据加工指令：把取到的数据整理成什么样再发送。
+   * tool + resultMode=ai 时替代内置的「整理成简洁播报」默认指令；
+   * 留空则用内置默认（见 composeParsePrompt）。
+   */
+  parsePrompt?: string;
+  /**
+   * 【任务契约】目标：这条任务服务于什么判断/决策。
+   * 供 AI 分诊时理解「为什么发、发给谁看」，ai / tool 模式可用。
+   */
+  goal?: string;
+  /**
+   * 【任务契约】通知条件（自然语言）：满足什么才值得发送；不满足则本次静默跳过。
+   * 例：「只有涨幅超过 5%、或出现异常时才提醒」。ai / tool 模式可用。
+   */
+  notifyWhen?: string;
+  /**
+   * 【任务契约】发送前自校验：
+   * tool 模式由**独立模型二次复核**草稿是否满足契约，不达标则不发；
+   * ai 模式因内容在会话内生成，降级为**强化的自查指令**。
+   */
+  verify?: boolean;
+  /**
+   * 发送门控：投递到 QQ 之前判定「这次值不值得发」。
+   * - always（默认）：总是发送；
+   * - nonempty：取数结果为空/无实质内容时跳过；
+   * - changed：与上次成功发送的内容一致时跳过（适合「有变化才播报」）。
+   * 跳过不投递、不消耗主动消息配额，并把原因记入 lastSkipReason。
+   */
+  gate?: "always" | "nonempty" | "changed";
+  /** gate=changed：上次成功发送内容的指纹（sha1 前 16 位），避免明文驻留。 */
+  lastDigest?: string;
+  /** 最近一次「跳过发送」的时刻（上海时间 ISO）。 */
+  lastSkipAt?: string;
+  /** 最近一次跳过发送的原因（供界面与排障展示）。 */
+  lastSkipReason?: string;
   /** false = 已禁用（调度器跳过、不占配额）。 */
   enabled?: boolean;
   /** 创建来源：chat 命令 / ai 工具 / settings 设置页。 */
@@ -93,6 +134,11 @@ export interface ScheduleAddInput {
   genPrompt?: string;
   cwd?: string;
   resultMode?: string;
+  parsePrompt?: string;
+  goal?: string;
+  notifyWhen?: string;
+  verify?: unknown;
+  gate?: string;
   weekdays?: unknown;
   time?: string;
   minutes?: unknown;
@@ -181,6 +227,12 @@ export class ScheduleStore {
     let content = input.content?.toString() ?? "";
     const legacyTool = typeof input.tool === "string" && input.tool.trim() ? input.tool.trim() : "";
     const genPrompt = input.genPrompt?.toString().trim() ?? "";
+    const parsePrompt = input.parsePrompt?.toString().trim() ?? "";
+    // 任务契约：对 ai / tool 两种「由模型判断」的模式生效，长度做上限保护。
+    const goal = input.goal?.toString().trim() ?? "";
+    const notifyWhen = input.notifyWhen?.toString().trim() ?? "";
+    if (goal.length > 2e2) return { ok: false, error: "任务目标过长（上限 200 字）" };
+    if (notifyWhen.length > 5e2) return { ok: false, error: "通知条件过长（上限 500 字）" };
     if (mode !== "tool") {
       content = content.trim();
       if (!content) return { ok: false, error: "内容不能为空" };
@@ -196,6 +248,10 @@ export class ScheduleStore {
       }
       if (input.resultMode !== void 0 && input.resultMode !== "raw" && input.resultMode !== "ai") {
         return { ok: false, error: "结果处理（resultMode）必须是 raw 或 ai" };
+      }
+      if (parsePrompt.length > 2e3) return { ok: false, error: "数据加工指令过长（上限 2000 字）" };
+      if (input.gate !== void 0 && input.gate !== "always" && input.gate !== "nonempty" && input.gate !== "changed") {
+        return { ok: false, error: "发送门控（gate）必须是 always / nonempty / changed" };
       }
     }
     let weekdays: number[] | undefined;
@@ -269,6 +325,16 @@ export class ScheduleStore {
       genDoneAt: genStatus === "done" ? existing?.genDoneAt : void 0,
       cwd: mode === "tool" && input.cwd ? String(input.cwd).trim() || void 0 : void 0,
       resultMode: mode === "tool" ? (input.resultMode === "ai" ? "ai" : "raw") : void 0,
+      // 加工指令与发送门控仅对 tool 模式生效：text 内容固定、ai 由模型现场生成，
+      // 都不存在「取数 → 加工 → 门控」这一段确定性流水线。
+      parsePrompt: mode === "tool" && parsePrompt ? parsePrompt : void 0,
+      // 任务契约：ai 与 tool 两种模式都生效（text 是固定句子直发，无分诊/校验）。
+      goal: mode !== "text" && goal ? goal : void 0,
+      notifyWhen: mode !== "text" && notifyWhen ? notifyWhen : void 0,
+      verify: mode !== "text" ? input.verify === true || input.verify === "true" : void 0,
+      gate: mode === "tool"
+        ? input.gate === "nonempty" ? "nonempty" : input.gate === "changed" ? "changed" : "always"
+        : void 0,
       // 编辑已禁用的任务时保留禁用态，避免「改一下内容就被重新启用」。
       enabled: input.enabled === void 0 ? existing?.enabled ?? true : Boolean(input.enabled),
       ...(input.createdBy ? { createdBy: input.createdBy } : {}),
@@ -338,6 +404,20 @@ export class ScheduleStore {
     return { ok: true, entry };
   }
 
+  /**
+   * 记录一次「跳过发送」：门控未通过或 AI 判定静默。
+   * 不投递、不消耗主动消息配额，仅留下时间与原因供界面/排障查看
+   * （`lastError` 同时清空——跳过不是失败）。
+   */
+  async markSkipped(id: string, reason: string): Promise<void> {
+    const entry = this.#entries.find((e) => e.id === id);
+    if (!entry) return;
+    entry.lastSkipAt = toShanghaiISO();
+    entry.lastSkipReason = reason;
+    entry.lastError = void 0;
+    await this.save();
+  }
+
   /** 到达执行时间的条目（now 之前）。AI 脚本生成中/失败的任务不执行（等生成完成后按计划继续）。 */
   dueEntries(now: Date): ScheduleEntry[] {
     return this.#entries.filter((e) => {
@@ -349,8 +429,37 @@ export class ScheduleStore {
   }
 }
 
-/** daily（HH:mm 上海时间 + 可选 weekdays）的下一次触发时刻。 */
-export function nextDailyRun(time: string, now: Date, weekdays?: number[]): Date | null {
+/**
+ * 内容指纹（gate=changed 用）：归一化空白后取 sha1 前 16 位。
+ * 存指纹而非明文，避免脚本输出里的敏感内容长期驻留在 schedules.json。
+ */
+export function contentDigest(text: string): string {
+  return createHash("sha1").update((text ?? "").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
+}
+
+/**
+ * 发送门控判定：返回 null 表示照常投递，否则返回「跳过原因」。
+ * 只在 tool 模式（有确定性取数结果）下调用；always 直接放行。
+ * 注意：`changed` 命中新内容时会**就地更新** entry.lastDigest，
+ * 调用方负责落盘（调度器 tick / 测试执行结束时都会 save）。
+ */
+export function gateSkipReason(entry: ScheduleEntry, text: string): string | null {
+  const gate = entry.gate ?? "always";
+  if (gate === "always") return null;
+  const body = (text ?? "").trim();
+  if (gate === "nonempty") {
+    return !body || body === "（无输出）" ? "本次取数没有实质输出，已跳过发送" : null;
+  }
+  if (gate === "changed") {
+    const digest = contentDigest(body);
+    if (entry.lastDigest && entry.lastDigest === digest) return "内容与上次一致，已跳过发送";
+    entry.lastDigest = digest;
+    return null;
+  }
+  return null;
+}
+
+/** daily（HH:mm 上海时间 + 可选 weekdays）的下一次触发时刻。 */export function nextDailyRun(time: string, now: Date, weekdays?: number[]): Date | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(time);
   if (!m) return null;
   const hour = Number(m[1]);
@@ -394,6 +503,17 @@ export interface ScheduleBus {
   off(event: "session/event", listener: (session: unknown, event: { type: string; data?: unknown }) => void): unknown;
 }
 
+/**
+ * tool 模式的一次执行结果。
+ * `skipped=true` 表示本次**没有投递**（发送门控未通过），
+ * 调度层据此归还预扣的主动消息配额、且不计入发送计数。
+ * （AI 加工 / AI 静默的跳过发生在回复投递阶段，由回复泵归还配额，不在这里返回。）
+ */
+export interface ScheduleSkipResult {
+  skipped?: boolean;
+  reason?: string;
+}
+
 export interface SchedulerContext {
   store: ScheduleStore;
   /** 按 appId 取运行时机器人；缺省回落主机器人。 */
@@ -406,10 +526,10 @@ export interface SchedulerContext {
    */
   generateAndSend?: (entry: ScheduleEntry, bot: BotRuntime) => Promise<string | void>;
   /**
-   * tool 模式执行回调：查动作注册表并确定性调用（不开 LLM），
-   * 动作自行把结果发送到目标聊天。
+   * tool 模式执行回调：执行命令 / 动作，并按发送门控决定是否投递。
+   * 返回 `{ skipped: true }` 表示门控拦下、本次未投递（调度层会归还预扣配额）。
    */
-  executeTool?: (entry: ScheduleEntry, bot: BotRuntime) => Promise<void>;
+  executeTool?: (entry: ScheduleEntry, bot: BotRuntime) => Promise<ScheduleSkipResult | void>;
   /** 宿主会话总线（测试执行时等待投递结果）。 */
   bus?: ScheduleBus;
   logger: Pick<Console, "info" | "warn" | "error">;
@@ -479,10 +599,11 @@ export class Scheduler {
           }
         }
         try {
+          let skip: ScheduleSkipResult | void = undefined;
           if (entry.mode === "ai" && this.#ctx.generateAndSend) {
             await this.#ctx.generateAndSend(entry, bot);
           } else if (entry.mode === "tool" && this.#ctx.executeTool) {
-            await this.#ctx.executeTool(entry, bot);
+            skip = await this.#ctx.executeTool(entry, bot);
           } else if (entry.mode === "tool") {
             throw new Error("tool 执行器未配置，无法运行该定时任务");
           } else {
@@ -491,11 +612,24 @@ export class Scheduler {
               sanitizeOutgoingText(entry.content, { enabled: bot.config.sanitizeReplies })
             );
           }
-          bot.state.counters.proactive += 1;
-          entry.lastSentAt = toShanghaiISO(now);
-          entry.lastError = void 0;
+          if (skip?.skipped) {
+            // 发送门控拦下：本次没有投递 → 归还预扣配额、不计发送数，只留跳过原因。
+            const reason = skip.reason || "本次无需发送，已跳过";
+            entry.lastSkipAt = toShanghaiISO(now);
+            entry.lastSkipReason = reason;
+            entry.lastError = void 0;
+            await this.#ctx.quota?.refund();
+            this.#ctx.logger.info(
+              `[dsh-qqbot] 定时任务跳过发送（机器人 ${bot.appId}，mode=tool，gate=${entry.gate ?? "always"}）：${reason}`
+            );
+          } else {
+            bot.state.counters.proactive += 1;
+            entry.lastSentAt = toShanghaiISO(now);
+            entry.lastError = void 0;
+            entry.lastSkipReason = void 0;
+          }
           if (entry.type === "at") {
-            // 一次性任务发完即删。
+            // 一次性任务发完即删（跳过也算已触发，避免遗留一条永不生效的任务）。
             await this.#ctx.store.removeById(entry.id);
             this.#ctx.logger.info(`[dsh-qqbot] 一次性定时任务已完成并删除 → ${entry.id}`);
             continue;
@@ -542,7 +676,16 @@ export class Scheduler {
         const res = await this.#awaitDelivery(bot, deliveryId, 6e4);
         if (!res.ok) return { ok: false, message: `测试发送失败：${res.message}` };
       } else if (entry.mode === "tool" && this.#ctx.executeTool) {
-        await this.#ctx.executeTool(entry, bot);
+        const skip = await this.#ctx.executeTool(entry, bot);
+        // 测试执行同样走门控：拦下时如实告知，便于用户调参（测试本就不占配额）。
+        if (skip?.skipped) {
+          const reason = skip.reason || "本次无需发送，已跳过";
+          entry.lastSkipAt = toShanghaiISO(new Date());
+          entry.lastSkipReason = reason;
+          entry.lastError = void 0;
+          await this.#ctx.store.save();
+          return { ok: true, message: `发送门控判定本次无需发送，已跳过：${reason}` };
+        }
       } else if (entry.mode === "tool") {
         throw new Error("tool 执行器未配置，无法运行该定时任务");
       } else {

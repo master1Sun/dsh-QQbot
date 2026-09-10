@@ -18,6 +18,7 @@ import { PASSIVE_REPLY_LIMIT } from "../qq/api.js";
 import type { Outbox } from "./outbox.js";
 import type { QuotaTracker } from "../infra/quota.js";
 import { tr } from "../../shared/reply-i18n.js";
+import { SILENT_MARKER, isSilentReply, type PassiveReplyRecord } from "../../shared/types.js";
 import { configForGroup } from "../../shared/config.js";
 import { sanitizeOutgoingText } from "./sanitize.js";
 import { synthesizeSpeech } from "./voice.js";
@@ -26,6 +27,7 @@ import {
   assistantTextOf,
   bindSession,
   chunkReply,
+  dequeueRecord,
   rememberSent,
   sessionIdOf,
   takeTurnText,
@@ -39,6 +41,11 @@ export interface ReplyPumpContext {
   outbox?: Outbox;
   /** 主动消息每日配额（合成事件回复 / 主动兜底消耗）。 */
   quota?: QuotaTracker;
+  /**
+   * 定时任务被静默（AI 判定本次无需发送）时的回调：
+   * 把「跳过原因」写回对应任务条目，设置页可据此解释「为什么这次没发」。
+   */
+  onScheduleSilent?: (scheduleId: string, reason: string) => void | Promise<void>;
   logger: Pick<Console, "info" | "warn" | "error">;
 }
 
@@ -76,11 +83,13 @@ type SessionBus = {
   off(event: string, listener: (session: unknown, event: { type: string; data?: unknown }) => void): unknown;
 };
 
-export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: ReplyPumpContext): () => void {
+export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, onScheduleSilent }: ReplyPumpContext): () => void {
   const bus = ctx as SessionBus;
 
-  const send = async (bot: BotRuntime, sessionId: string, rawText: string) => {
-    const record = bot.state.recordBySession.get(sessionId);
+  const send = async (bot: BotRuntime, sessionId: string, rawText: string, recordOverride?: PassiveReplyRecord) => {
+    // 优先用调用方按 turn 精确取出的记录（recordQueue 出队）：同一聊天并发多条消息时，
+    // recordBySession 只保留最新一条，直接读它会把 @ 消息的引用门控字段挤掉。
+    const record = recordOverride ?? bot.state.recordBySession.get(sessionId);
     if (!record) return;
     // 生效配置 = 按群覆盖合并（群聊时群覆盖 > 机器人默认；单聊用机器人配置）。
     const config = record.target.scope === "group"
@@ -89,6 +98,29 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
     // 出站净化：剥离模型输出里的 system-reminder / <think> 等隐藏块（防内部内容泄漏）。
     const text = sanitizeOutgoingText(rawText, { enabled: config.sanitizeReplies });
     if (!text) return;
+    // ── 定时任务静默 ────────────────────────────────────────────────
+    // 模型按「本次没有值得发送的内容」只输出了静默标记 → 不投递、不吵群、不占配额。
+    // 放在净化之后判定：标记带空白/换行也能识别（isSilentReply 会先剥离标记再判空）。
+    // 预扣的主动消息额度在此归还——调度层已为本次触发扣过一次。
+    if (record.silentOk && isSilentReply(text)) {
+      bot.typing.stop(record.chatKey);
+      await quota?.refund();
+      logger.info(`[dsh-qqbot] 定时任务静默：本次不发送 chat=${record.chatKey}（模型判定无事可报）`);
+      void bot.archiver.append({
+        kind: "proactive",
+        chat: record.chatKey,
+        content: SILENT_MARKER,
+        note: "schedule:silent",
+      });
+      if (record.scheduleId && onScheduleSilent) {
+        try {
+          await onScheduleSilent(record.scheduleId, "AI 判定本次无需发送（静默）");
+        } catch (error) {
+          logger.warn("[dsh-qqbot] 回写静默原因失败:", error);
+        }
+      }
+      return;
+    }
     const limit = Math.min(config.maxRepliesPerMessage, PASSIVE_REPLY_LIMIT[record.target.scope]);
     // 出站引用组合矩阵（平台主动消息能力收敛后实测定版）：
     //   仅 message_reference（主动通道，不传 msg_id）→ 手机端同一条内容出现两条；
@@ -110,6 +142,10 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
       && (config.quoteReply === "all" || record.quoteMention)
       && Boolean(record.selfIdx)
       && Boolean(record.msgId);
+    logger.info(
+      `[dsh-qqbot][diag-quote] chat=${record.chatKey} mode=${config.quoteReply} ` +
+      `quoteMention=${record.quoteMention} selfIdx=${record.selfIdx ? "✓" : "∅"} msgId=${record.msgId ? "✓" : "∅"} → quoteReply=${quoteReply}`,
+    );
     const chunks = chunkReply(text, config.replyChunkChars, limit);
     if (chunks.length === 0) return;
     // 本条回复即将发出：停掉单聊「正在输入」状态（TTS 成功路径同样受益）。
@@ -137,13 +173,16 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
     }
     let usedMarkdown = config.markdownReply;
     // 合成事件（定时任务）没有 msg_id → 整条回复走主动消息，消耗每日配额。
+    // 但定时任务的额度已由调度层在触发时预扣 1 次，这里**不再逐片扣费**：
+    // 否则「一条分 N 片的定时广播」会被记成 1+N 次主动消息（旧行为，明显超扣）。
     const isProactive = !record.msgId;
+    const quotaPrepaid = record.scheduled === true;
     for (const [index, chunk] of chunks.entries()) {
       if (record.nextSeq > limit) {
         logger.warn(`[dsh-qqbot] 消息 ${record.msgId} 被动回复次数已达上限，剩余内容未发送`);
         break;
       }
-      if (isProactive && quota && !(await quota.tryConsume())) break;
+      if (isProactive && quota && !quotaPrepaid && !(await quota.tryConsume())) break;
       const seq = record.nextSeq++;
       // withQuote=true：被动回复（msg_id + msgSeq）同传引用卡片（message_reference=REFIDX）；
       // false：普通被动回复（msg_id，无卡片）。
@@ -193,7 +232,8 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
         // 结果不确定的失败重发会造成重复内容，直接入投递出箱由后台处理。
         if (config.proactiveFallback && record.target.scope === "group" && certainNotSent(error)) {
           try {
-            if (quota && !(await quota.tryConsume())) throw new Error("主动消息配额已用尽");
+            // 定时任务同样已预扣过额度，兜底重发不再叠加计费（与主路径一致）。
+            if (quota && !quotaPrepaid && !(await quota.tryConsume())) throw new Error("主动消息配额已用尽");
             const fallback = await bot.client.sendReply(record.target, chunk, { markdown: false });
             if (fallback.id) rememberSent(bot.state, record.chatKey, fallback.id);
             bot.state.counters.proactive += 1;
@@ -267,7 +307,9 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
           if (!Number.isSafeInteger(turn)) return;
           const text = takeTurnText(bot.state, sessionId, turn);
           const failure = failureMessageOf(data?.reason);
-          const record = bot.state.recordBySession.get(sessionId);
+          // 按 turn 精确取出触发本次回复的记录（FIFO）：并发消息下避免读到后到消息的记录，
+          // 从而保住 @ 消息的引用门控字段（quoteMention/selfIdx/msgId）。队列空则回退最新记录。
+          const record = dequeueRecord(bot.state, sessionId) ?? bot.state.recordBySession.get(sessionId);
           let notice: string | null = null;
           if (failure) {
             const now = Date.now();
@@ -293,7 +335,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger }: 
             content: content.slice(0, 2000),
             sessionId,
           });
-          void send(bot, sessionId, content);
+          void send(bot, sessionId, content, record ?? undefined);
           return;
         }
         default:

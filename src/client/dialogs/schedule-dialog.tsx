@@ -152,6 +152,11 @@ function blankEntry(detailAppId: string) {
     genPrompt: "",
     cwd: "",
     resultMode: "raw",
+    parsePrompt: "",
+    gate: "always",
+    goal: "",
+    notifyWhen: "",
+    verify: false,
     tool: "",
     args: {} as Record<string, unknown>,
   };
@@ -282,6 +287,11 @@ export function ScheduleDialog(props: {
               genError: String(entry.genError ?? ""),
               cwd: String(entry.cwd ?? ""),
               resultMode: entry.resultMode === "ai" ? "ai" : "raw",
+              parsePrompt: String(entry.parsePrompt ?? ""),
+              gate: entry.gate === "nonempty" ? "nonempty" : entry.gate === "changed" ? "changed" : "always",
+              goal: String(entry.goal ?? ""),
+              notifyWhen: String(entry.notifyWhen ?? ""),
+              verify: entry.verify === true,
               tool: typeof entry.tool === "string" ? entry.tool : "",
               args: entry.args && typeof entry.args === "object" ? { ...entry.args } : {},
             },
@@ -380,18 +390,28 @@ export function ScheduleDialog(props: {
       ...(Array.isArray(e.weekdays) && e.weekdays.length ? { weekdays: e.weekdays } : {}),
       mode: e.mode,
       ...(e.mode === "tool"
-        ? String(e._cmdMode ?? "manual") === "ai"
-          ? {
-              // AI 生成模式：只传描述词，宿主后台生成脚本后回填 command。
-              genPrompt: String(e.genPrompt ?? "").trim(),
-              resultMode: e.resultMode === "ai" ? "ai" : "raw",
-            }
-          : {
-              command: String(e.command ?? "").trim(),
-              ...(String(e.cwd ?? "").trim() ? { cwd: String(e.cwd).trim() } : {}),
-              resultMode: e.resultMode === "ai" ? "ai" : "raw",
-            }
+        ? {
+            // 生成方式二选一：AI 生成脚本（只传描述词，宿主后台生成后回填 command）/ 手写命令。
+            ...(String(e._cmdMode ?? "manual") === "ai"
+              ? { genPrompt: String(e.genPrompt ?? "").trim() }
+              : {
+                  command: String(e.command ?? "").trim(),
+                  ...(String(e.cwd ?? "").trim() ? { cwd: String(e.cwd).trim() } : {}),
+                }),
+            // 「加工 → 门控」两段对两种生成方式都生效（脚本生成完成后走同一条流水线）。
+            resultMode: e.resultMode === "ai" ? "ai" : "raw",
+            gate: e.gate === "nonempty" || e.gate === "changed" ? e.gate : "always",
+            ...(String(e.parsePrompt ?? "").trim() ? { parsePrompt: String(e.parsePrompt).trim() } : {}),
+          }
         : { content: String(e.content ?? "").trim() }),
+      // 任务契约：ai / tool 模式通用（text 是固定句子直发，无需分诊）。
+      ...(e.mode === "ai" || e.mode === "tool"
+        ? {
+            ...(String(e.goal ?? "").trim() ? { goal: String(e.goal).trim() } : {}),
+            ...(String(e.notifyWhen ?? "").trim() ? { notifyWhen: String(e.notifyWhen).trim() } : {}),
+            verify: e.verify === true,
+          }
+        : {}),
       ...(e.appId ? { appId: e.appId } : detailAppId ? { appId: detailAppId } : {}),
     };
     const res = await rpcCall("schedule.add", payload);
@@ -659,6 +679,60 @@ export function ScheduleDialog(props: {
     );
   };
 
+  /** 任务契约（ai / tool 通用）：目标 + 通知条件 + 发送前自校验。 */
+  const contractFields = (e: Record<string, any>) => [
+    editRow(
+      "任务目标（可选）",
+      "一句话说明这条任务服务于什么判断，供 AI 分诊时理解意图。",
+      TextInput({
+        className: "qbot-input",
+        value: String(e.goal ?? ""),
+        placeholder: "例如：盯住竞品价格波动",
+        onChange: (ev: any) => setEditField("goal", ev.target.value),
+        "aria-label": "任务目标",
+      }),
+    ),
+    editRow(
+      "通知条件（可选）",
+      "用自然语言写明「什么时候才值得打扰大家」。不满足时本次静默不发，也不占主动消息配额。",
+      TextArea({
+        rows: 2,
+        value: String(e.notifyWhen ?? ""),
+        placeholder: "例如：只有涨幅超过 5%、或出现异常时才提醒",
+        onChange: (ev: any) => setEditField("notifyWhen", ev.target.value),
+        "aria-label": "通知条件",
+      }),
+    ),
+    editRow(
+      "发送前自校验",
+      "开启后，投递前再复核一次草稿是否满足上面的目标与通知条件，不达标就不发。tool 模式为独立模型二次复核，ai 模式为强化自查。",
+      h(
+        "div",
+        { className: "qbot-schedSeg", role: "group", "aria-label": "发送前自校验" },
+        h(
+          "button",
+          {
+            type: "button",
+            className: `qbot-segBtn${e.verify !== true ? " is-on" : ""}`,
+            "aria-pressed": e.verify !== true,
+            onClick: () => setEditField("verify", false),
+          },
+          "关闭校验",
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: `qbot-segBtn${e.verify === true ? " is-on" : ""}`,
+            "aria-pressed": e.verify === true,
+            onClick: () => setEditField("verify", true),
+          },
+          "开启校验",
+        ),
+      ),
+    ),
+  ];
+
   /** 执行内容区：text/ai 为文本，tool 为命令（手写 / AI 生成脚本）+ 结果处理。 */
   const actionField = (e: Record<string, any>) => {
     if (e.mode === "tool") {
@@ -756,7 +830,7 @@ export function ScheduleDialog(props: {
             ],
         editRow(
           "结果处理",
-          "raw = 直接把命令输出推送给用户；ai = 先把输出交给 AI 整理成简洁播报再推送（输出很长或含噪音时推荐）。",
+          "raw = 直接把命令输出推送给用户；ai = 先按「数据加工指令」把输出整理后推送（输出很长或含噪音时推荐）。",
           h(
             "select",
             {
@@ -766,24 +840,57 @@ export function ScheduleDialog(props: {
               "aria-label": "结果处理",
             },
             h("option", { value: "raw" }, "raw：直接推送原始输出"),
-            h("option", { value: "ai" }, "ai：交给 AI 整理后推送"),
+            h("option", { value: "ai" }, "ai：交给 AI 加工后推送"),
           ),
         ),
+        e.resultMode === "ai"
+          ? editRow(
+              "数据加工指令（可选）",
+              "规定把命令输出处理成什么样再发：筛选、排序、限行、固定格式都写在这里。留空则用内置的「整理成一段简洁播报」要求。",
+              TextArea({
+                rows: 3,
+                value: String(e.parsePrompt ?? ""),
+                placeholder: "例如：只保留今天新增的订单，按金额从高到低排列，最多 5 条；没有新增就什么都别发",
+                onChange: (ev: any) => setEditField("parsePrompt", ev.target.value),
+                "aria-label": "数据加工指令",
+              }),
+            )
+          : null,
+        editRow(
+          "发送门控",
+          "投递到 QQ 前的最后一道判断：changed 适合「有变化才播报」，nonempty 适合「有异常才报警」。被拦下时不投递，也不消耗主动消息配额。",
+          h(
+            "select",
+            {
+              className: "qbot-settingSelect",
+              value: e.gate === "nonempty" ? "nonempty" : e.gate === "changed" ? "changed" : "always",
+              onChange: (ev: any) => setEditField("gate", ev.target.value),
+              "aria-label": "发送门控",
+            },
+            h("option", { value: "always" }, "always：每次都发（默认）"),
+            h("option", { value: "nonempty" }, "nonempty：没有实质输出就跳过"),
+            h("option", { value: "changed" }, "changed：与上次内容相同就跳过"),
+          ),
+        ),
+        ...contractFields(e),
       );
     }
-    return editRow(
+    const contentRow = editRow(
       "内容",
       e.mode === "ai"
-        ? "给 AI 的生成指令（如「播报今天的天气」），到点由 AI 生成内容后发送。"
+        ? "给 AI 的任务指令（如「总结昨天群聊的重点」「价格低于 100 再提醒我」）。到点 AI 会自己调用工具取数、加工，再决定发什么；若判断无事可报会自动静默——不打扰大家，也不占主动消息配额。"
         : "到点直接发送的文本，上限 2000 字。",
       TextArea({
         rows: 3,
         value: String(e.content ?? ""),
-        placeholder: e.mode === "ai" ? "例如：总结今天的待办" : "例如：记得喝水",
+        placeholder: e.mode === "ai" ? "例如：总结昨天群聊的重点；没有重点就别发" : "例如：记得喝水",
         onChange: (ev: any) => setEditField("content", ev.target.value),
         "aria-label": "定时任务内容",
       }),
     );
+    // text 模式是固定句子直发，无分诊/校验，只渲染内容；ai 模式追加任务契约。
+    if (e.mode !== "ai") return contentRow;
+    return h("div", { className: "qbot-schedFieldCol" }, contentRow, ...contractFields(e));
   };
 
   return h(
@@ -799,7 +906,7 @@ export function ScheduleDialog(props: {
           "div",
           null,
           h("strong", null, "定时任务管理"),
-          h("p", null, "支持 daily / interval / cron / at 四种触发条件，以及 文本 / AI 生成 / 执行命令 三种执行方式。"),
+          h("p", null, "支持 daily / interval / cron / at 四种触发条件，以及 文本 / AI 智能任务 / 执行命令 三种执行方式。"),
         ),
         h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: onClose }, "×"),
       ),
@@ -909,13 +1016,13 @@ export function ScheduleDialog(props: {
                 ),
                 section(
                   "③ 到点做什么",
-                  "选择执行方式并填写内容。",
+                  "选择执行方式；除「直接发送文本」外，都能在「执行」与「发送」之间插入加工与判断。",
                   h(
                     "div",
                     { className: "qbot-schedFieldCol" },
                     editRow(
                       "执行方式",
-                      "文本=到点原样发送；AI 生成=把内容当指令交给 AI 生成后回复；执行命令=到点跑一条命令并把输出推送给用户。",
+                      "文本=到点原样发送；AI 智能任务=把内容当任务指令，到点 AI 自己取数、加工、决定发不发；执行命令=确定性跑一条命令，再按加工指令与发送门控推送给用户。",
                       h(
                         "select",
                         {
@@ -925,7 +1032,7 @@ export function ScheduleDialog(props: {
                           "aria-label": "执行方式",
                         },
                         h("option", { value: "text" }, "直接发送文本"),
-                        h("option", { value: "ai" }, "AI 生成内容"),
+                        h("option", { value: "ai" }, "AI 智能任务（自主取数并决定发不发）"),
                         h("option", { value: "tool" }, "执行命令并推送结果"),
                       ),
                     ),
@@ -1055,18 +1162,32 @@ export function ScheduleDialog(props: {
                                 { className: "qbot-schedTop" },
                                 e.enabled === false ? h("span", { className: "qbot-chip qbot-chipOff" }, "已禁用") : null,
                                 h("span", { className: "qbot-chip is-active" }, summarizeType(e)),
-                                e.mode === "ai" ? h("span", { className: "qbot-chip" }, "AI 生成") : null,
+                                e.mode === "ai" ? h("span", { className: "qbot-chip" }, "AI 智能任务") : null,
                                 e.mode === "tool"
                                   ? h(
                                       "span",
                                       { className: "qbot-chip" },
-                                      e.resultMode === "ai" ? "命令 → AI 播报" : "命令 → 原始输出",
+                                      e.resultMode === "ai" ? "命令 → AI 加工" : "命令 → 原始输出",
                                     )
+                                  : null,
+                                e.mode === "tool" && e.gate && e.gate !== "always"
+                                  ? h(
+                                      "span",
+                                      { className: "qbot-chip" },
+                                      e.gate === "nonempty" ? "门控：无输出不发" : "门控：无变化不发",
+                                    )
+                                  : null,
+                                (e.mode === "ai" || e.mode === "tool") && e.notifyWhen
+                                  ? h("span", { className: "qbot-chip" }, "条件触发")
+                                  : null,
+                                (e.mode === "ai" || e.mode === "tool") && e.verify === true
+                                  ? h("span", { className: "qbot-chip" }, "发送前自校验")
                                   : null,
                                 Array.isArray(e.weekdays) && e.weekdays.length
                                   ? h("span", { className: "qbot-chip" }, weekdayText(e.weekdays as number[]))
                                   : null,
                                 e.lastError ? h("span", { className: "qbot-chip qbot-chipError" }, "执行失败") : null,
+                                e.lastSkipAt ? h("span", { className: "qbot-chip qbot-chipInfo" }, "上次已跳过发送") : null,
                                 e.genStatus === "pending" ? h("span", { className: "qbot-chip qbot-chipInfo" }, "脚本生成中…") : null,
                                 e.genStatus === "error" ? h("span", { className: "qbot-chip qbot-chipError" }, "脚本生成失败") : null,
                               ),
@@ -1102,6 +1223,16 @@ export function ScheduleDialog(props: {
                                       : `下次 ${e.nextRunAt ? formatTime(e.nextRunAt) : localizeText("待补算")}`,
                                 ),
                                 e.lastError ? h("span", { className: "qbot-schedError" }, String(e.lastError)) : null,
+                                e.lastSkipAt
+                                  ? h(
+                                      "span",
+                                      null,
+                                      "上次跳过（",
+                                      formatTime(e.lastSkipAt),
+                                      "）：",
+                                      String(e.lastSkipReason ?? "本次无需发送"),
+                                    )
+                                  : null,
                               ),
                             ),
                             h(

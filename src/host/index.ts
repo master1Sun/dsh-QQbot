@@ -24,8 +24,24 @@ import { installReplyPump } from "./messaging/reply.js";
 import { makeQqbotRoutes } from "./admin/routes.js";
 import { BotRuntimeManager, type BotRuntime } from "./bots.js";
 import { loadGlobalConfig, saveCredentials, upsertBot, type StoredBot, type StoredCredentials } from "./infra/store-file.js";
-import { MAX_SCHEDULES_PER_CHAT, ScheduleStore, Scheduler, type ScheduleBus, type ScheduleEntry } from "./schedule/schedule.js";
-import { runCommand, formatCommandResult, composeParsePrompt, normalizeScriptCommand } from "./schedule/command-runner.js";
+import {
+  MAX_SCHEDULES_PER_CHAT,
+  ScheduleStore,
+  Scheduler,
+  gateSkipReason,
+  type ScheduleBus,
+  type ScheduleEntry,
+  type ScheduleSkipResult,
+} from "./schedule/schedule.js";
+import {
+  runCommand,
+  formatCommandResult,
+  composeParsePrompt,
+  composeContractBlock,
+  composeVerifyPrompt,
+  normalizeScriptCommand,
+} from "./schedule/command-runner.js";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { runScheduledAction } from "./schedule/schedule-actions.js";
 import { createScriptGenerator, type ScriptGenerator, type ScriptGenLlm } from "./schedule/script-gen.js";
 import { sanitizeOutgoingText } from "./messaging/sanitize.js";
@@ -36,6 +52,7 @@ import { QuotaTracker } from "./infra/quota.js";
 import { handleRawEvent } from "./messaging/events.js";
 import type { ApprovalInteractionEvent } from "./messaging/approval.js";
 import type { QqbotConfig } from "../shared/config.js";
+import { SILENT_MARKER, isSilentReply } from "../shared/types.js";
 
 export const name = "qqbot";
 
@@ -168,27 +185,87 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     return bot?.config?.scheduleMaxPerChat ?? MAX_SCHEDULES_PER_CHAT;
   });
   await schedules.load();
+  /** 按机器人 appId 解析当前选择的模型（设置页配置）；AI 脚本生成与定时任务加工/校验共用。 */
+  const resolveModelSel = (appId?: string): { provider: string; model: string } | undefined => {
+    const bot = (appId ? bots.get(appId) : undefined) ?? bots.primary();
+    const m = bot?.config.model;
+    return m && typeof m === "object" ? { provider: m.provider, model: m.model } : undefined;
+  };
+  /** 取宿主 LLM 流式服务（可能尚未就绪）。 */
+  const getHostLlm = (): ScriptGenLlm | undefined => {
+    const host = ctx;
+    const llm = (typeof host.get === "function" ? host.get("llm") : undefined) ?? host.llm;
+    return llm as unknown as ScriptGenLlm | undefined;
+  };
   // tool 模式 AI 脚本生成器：genPrompt 非空的任务由它生成脚本并回填命令。
   const scriptGen: ScriptGenerator = createScriptGenerator({
     store: schedules,
-    resolveModel: (appId?: string) => {
-      const bot = (appId ? bots.get(appId) : undefined) ?? bots.primary();
-      const m = bot?.config.model;
-      return m && typeof m === "object" ? { provider: m.provider, model: m.model } : undefined;
-    },
-    getLlm: () => {
-      const host = ctx;
-      const llm = (typeof host.get === "function" ? host.get("llm") : undefined) ?? host.llm;
-      return llm as unknown as ScriptGenLlm | undefined;
-    },
+    resolveModel: resolveModelSel,
+    getLlm: getHostLlm,
     logger,
   });
   // 主动消息每日配额（以主机器人配置为准）。
   const quota = new QuotaTracker(logger, () => bots.primary()?.config.quotaPerDay ?? 50);
+  /**
+   * 定时任务派发时的提示词前缀。
+   * 关键作用是把身份讲对：定时任务是「到点自动触发的自主任务」，
+   * 不是「用户刚刚 @ 了你」——否则模型会以为有人在等它实时回答，
+   * 既不会主动去取数加工，也不会在无事可报时闭嘴。
+   */
+  const scheduledPromptFor = (instruction: string, entry: ScheduleEntry): string => {
+    const contract = composeContractBlock(entry);
+    const lines = [
+      "【定时任务·自动触发】下面这段是到点自动执行的任务指令，不是用户刚刚发来的消息，此刻没有人在等你即时回答。",
+      "请自行完成它：需要数据就调用工具去取（执行命令、读写文件、访问接口等），把取到的数据处理成适合直接发到 QQ 的最终内容，再给出回复。",
+    ];
+    if (contract) {
+      lines.push(contract, "请先按「通知条件」分诊：不满足条件时本次不要发送，直接静默。");
+    }
+    if (entry.verify) {
+      lines.push(
+        "发送前先自查：草稿是否满足任务目标与通知条件？是否准确、无编造、无内部字样（命令/脚本/工具/定时任务）？不达标就保持静默。"
+      );
+    }
+    lines.push(
+      "输出要求：只输出最终要发出去的那段内容本身——不要复述任务要求，不要出现「定时任务」「工具」「脚本」「命令」等字样，不要解释你的分析过程，不要用 Markdown 标题。",
+      `如果你判断本次没有值得发送的内容（例如数据无变化、条件不满足、没有任何异常），只输出 ${SILENT_MARKER}，不要附带任何其它文字。`,
+      "",
+      "任务指令：",
+      instruction
+    );
+    return lines.join("\n");
+  };
+  /**
+   * 定时任务的一次性模型调用（宿主直连 LLM，无工具、无会话）。
+   * 用于 tool 模式的「分诊 / 加工 / 自校验」——此时数据已由命令取到，
+   * 只需模型判断与改写，不需要给模型工具权限（Exec 与 AgentTurn 分离）。
+   */
+  const runScheduledAi = async (entry: ScheduleEntry, prompt: string): Promise<string> => {
+    const llm = getHostLlm();
+    if (!llm || typeof llm.stream !== "function") throw new Error("宿主 LLM 服务不可用，无法进行 AI 加工/校验");
+    const sel = resolveModelSel(entry.appId);
+    if (!sel) throw new Error("该机器人未配置模型，无法进行 AI 加工/校验");
+    const stream = llm.stream({
+      provider: sel.provider,
+      model: sel.model,
+      system:
+        "你是定时任务的内容加工与质检助手。严格按用户要求，只输出最终要发送到 QQ 的正文；不解释过程，不使用 Markdown 标题。",
+      messages: [
+        createUserMessage({ content: [{ type: "text", text: prompt }], source: { kind: "user" } }),
+      ],
+      temperature: 0.3,
+    });
+    let out = "";
+    for await (const chunk of stream) {
+      if (chunk.type === "text-delta") out += chunk.text ?? "";
+    }
+    return out.trim();
+  };
   // AI 模式定时任务：把 prompt 当作合成事件注入 webhookRuntime，
   // 机器人在目标聊天创建会话生成内容并回复（回复走主动消息通道，消耗配额）。
   // 返回 deliveryId 供测试执行等待真实投递结果。
-  const dispatchPrompt = (bot: BotRuntime, entry: ScheduleEntry, text: string): string => {
+  // silentOk=true：允许模型输出静默标记放弃本次发送（见 SILENT_MARKER）。
+  const dispatchPrompt = (bot: BotRuntime, entry: ScheduleEntry, text: string, opts: { silentOk?: boolean } = {}): string => {
     if (!runtime) throw new Error("webhook 运行时不可用，AI 定时任务无法创建会话");
     const eventId = `sched-${entry.id}-${Date.now()}`;
     const deliveryId = `qqws:${eventId}`;
@@ -215,6 +292,8 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
               ? { member_openid: entry.createdBy || "scheduler", username: "定时任务" }
               : { user_openid: entry.openid, username: "定时任务" },
             __scheduled: true,
+            __scheduleId: entry.id,
+            __silentOk: opts.silentOk === true,
           },
         },
         botAppId: bot.appId,
@@ -224,11 +303,12 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     return deliveryId;
   };
   const generateAndSend = async (entry: ScheduleEntry, bot: BotRuntime): Promise<string> => {
-    return dispatchPrompt(bot, entry, entry.content);
+    // content 由「死句子」升级为「任务指令」：模型可自行取数、加工，并决定是否发送。
+    return dispatchPrompt(bot, entry, scheduledPromptFor(entry.content, entry), { silentOk: true });
   };
-  // tool 模式：优先走动作注册表（send_message/send_image/...），否则执行命令；
-  // resultMode=ai 把命令输出交给 AI 整理后播报，raw 直接发格式化结果。
-  const executeTool = async (entry: ScheduleEntry, bot: BotRuntime): Promise<void> => {
+  // tool 模式：一条「取数 → 加工 → 门控 → 投递」的确定性流水线
+  // （旧的动作注册表调用仍兼容）。返回 skipped 时表示本次未投递，由调度层归还预扣配额。
+  const executeTool = async (entry: ScheduleEntry, bot: BotRuntime): Promise<ScheduleSkipResult | void> => {
     if (!entry.command && entry.tool) {
       await runScheduledAction(entry.tool, entry.args, { bot, scope: entry.scope, openid: entry.openid, logger });
       return;
@@ -252,13 +332,36 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       entry.lastError = reason;
       throw new Error(reason);
     }
+    // ① 取数完成 → ② 发送门控：没实质产出 / 与上次一致，直接拦下，
+    //    连后续的 AI 加工都不必做（省一次模型调用，也不占主动消息配额）。
+    const collected = formatCommandResult(result);
+    const skipReason = gateSkipReason(entry, collected);
+    if (skipReason) return { skipped: true, reason: skipReason };
+    // ③ 加工 + 分诊：raw 直通 / ai 走「分诊 → 加工 →（可选）自校验」流水线。
+    //    ai 分支由宿主直连模型完成（数据已由命令取到，无需给模型工具权限），
+    //    产出正文或静默标记；静默/不达标时返回 skipped，由调度层归还预扣配额。
     if (entry.resultMode === "ai") {
-      dispatchPrompt(bot, entry, composeParsePrompt(command, result));
+      const contract = composeContractBlock(entry);
+      const draft = await runScheduledAi(
+        entry,
+        composeParsePrompt(command, result, { instruction: entry.parsePrompt, allowSilent: true, contract })
+      );
+      if (!draft) return { skipped: true, reason: "AI 加工结果为空，已跳过发送" };
+      if (isSilentReply(draft)) return { skipped: true, reason: "AI 分诊判定本次无需发送" };
+      let finalText = draft;
+      if (entry.verify) {
+        const checked = await runScheduledAi(entry, composeVerifyPrompt(command, draft, contract));
+        if (isSilentReply(checked)) return { skipped: true, reason: "自校验判定本次无需发送" };
+        if (checked) finalText = checked;
+      }
+      const text = sanitizeOutgoingText(finalText, { enabled: bot.config.sanitizeReplies });
+      if (!text) return { skipped: true, reason: "加工结果经净化后为空，已跳过发送" };
+      await bot.client.sendText({ scope: entry.scope, openid: entry.openid }, text);
       return;
     }
     await bot.client.sendText(
       { scope: entry.scope, openid: entry.openid },
-      sanitizeOutgoingText(formatCommandResult(result), { enabled: bot.config.sanitizeReplies })
+      sanitizeOutgoingText(collected, { enabled: bot.config.sanitizeReplies })
     );
   };
   const scheduler = new Scheduler({
@@ -462,7 +565,14 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   });
 
   // 回复泵：会话 → 来源机器人的 QQ 聊天（含出箱重投与主动配额）。
-  const disposePump = installReplyPump(ctx, { bots, outbox, quota, logger });
+  // onScheduleSilent：AI 判定本次无需发送时，把跳过原因写回对应定时任务条目。
+  const disposePump = installReplyPump(ctx, {
+    bots,
+    outbox,
+    quota,
+    logger,
+    onScheduleSilent: (scheduleId, reason) => schedules.markSkipped(scheduleId, reason),
+  });
 
   // webhookRuntime 规则：QQ 事件 → 会话（命令系统带 schedule store 与长期记忆）。
   let disposeRule: (() => void | Promise<void>) | undefined;

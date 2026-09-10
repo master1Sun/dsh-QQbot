@@ -12,10 +12,12 @@ export function createBotState(): BotState {
     pending: new Map(),
     sessionByDelivery: new Map(),
     recordBySession: new Map(),
+    recordQueue: new Map(),
     chatSession: new Map(),
     turnText: new Map(),
     groupBuffer: new Map(),
     incomingFingerprints: new Map(),
+    mergeRecords: new Map(),
     seenEvents: new Map(),
     errorNoticeAt: new Map(),
     sentByChat: new Map(),
@@ -107,6 +109,33 @@ export function recentGroupMessages(
   return list.slice(-count);
 }
 
+const RECORD_QUEUE_CAP = 32;
+
+/**
+ * 记录入队：同一会话按入站顺序排队，turn/end 时按序出队，保证每条回复
+ * 用回「触发它的那条消息」的引用门控字段（@ 消息不被后到消息覆盖）。
+ */
+export function enqueueRecord(state: BotState, sessionId: string, record: PassiveReplyRecord): void {
+  const q = state.recordQueue.get(sessionId) ?? [];
+  q.push(record);
+  if (q.length > RECORD_QUEUE_CAP) q.splice(0, q.length - RECORD_QUEUE_CAP);
+  state.recordQueue.set(sessionId, q);
+}
+
+/** 记录出队：取最早入队、尚未回复的记录；队列空返回 null。 */
+export function dequeueRecord(state: BotState, sessionId: string): PassiveReplyRecord | null {
+  const q = state.recordQueue.get(sessionId);
+  if (!q || q.length === 0) return null;
+  const record = q.shift()!;
+  if (q.length === 0) state.recordQueue.delete(sessionId);
+  return record;
+}
+
+/** 清空某会话的待回复记录队列（/new 解绑等场景）。 */
+export function clearRecordQueue(state: BotState, sessionId: string): void {
+  state.recordQueue.delete(sessionId);
+}
+
 /** 绑定 deliveryId 与会话：此后该会话的助手回复发回 QQ。 */
 export function bindSession(state: BotState, deliveryId: string, sessionId: string): PassiveReplyRecord | null {
   const pending = state.pending.get(deliveryId);
@@ -114,6 +143,7 @@ export function bindSession(state: BotState, deliveryId: string, sessionId: stri
   state.pending.delete(deliveryId);
   state.sessionByDelivery.set(deliveryId, sessionId);
   state.recordBySession.set(sessionId, pending);
+  enqueueRecord(state, sessionId, pending);
   // 聊天键 → 会话映射：同群/同单聊的下一条消息复用该会话（/new 解绑）。
   state.chatSession.set(pending.chatKey, sessionId);
   return pending;

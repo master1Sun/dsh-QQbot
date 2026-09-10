@@ -7,6 +7,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
+import { SILENT_MARKER } from "../../shared/types.js";
 
 const execAsync = promisify(exec);
 
@@ -279,23 +280,79 @@ function resultBody(result: CommandRunResult): string {
       "（无错误输出，可检查脚本文件是否存在/解释器是否安装）";
 }
 
-/** 生成「命令输出 → AI 播报」的整理用 prompt（resultMode=ai 用）。 */
-export function composeParsePrompt(entryTitle: string, result: CommandRunResult, limit = 4e3): string {
+/**
+ * 组装【任务契约】文本块（goal / notifyWhen），供 AI 模式与 tool 加工/校验复用。
+ * 两者都为空时返回空串，便于调用方 `.filter(Boolean)` 拼接。
+ */
+export function composeContractBlock(contract: { goal?: string; notifyWhen?: string }): string {
+  const goal = (contract.goal ?? "").trim();
+  const notifyWhen = (contract.notifyWhen ?? "").trim();
+  if (!goal && !notifyWhen) return "";
+  const lines = ["【任务契约】"];
+  if (goal) lines.push(`- 任务目标：${goal}`);
+  if (notifyWhen) lines.push(`- 通知条件：只有当「${notifyWhen}」时才发送；否则本次保持静默。`);
+  return lines.join("\n");
+}
+
+/**
+ * 生成「命令输出 → AI 播报」的整理用 prompt（resultMode=ai 用）。
+ *
+ * options.instruction 非空时用它替代内置的「整理成简洁播报」默认要求，
+ * 让使用者能规定「把数据处理成什么样」（筛选 / 排序 / 限行 / 固定格式 / 阈值判断）。
+ * options.contract 非空时注入【任务契约】，让模型在加工的同时按「通知条件」做分诊。
+ * options.allowSilent=true 时额外授权模型「本次不发送」——
+ * 只输出 {@link SILENT_MARKER} 即不投递、不占主动消息配额。
+ */
+export function composeParsePrompt(
+  entryTitle: string,
+  result: CommandRunResult,
+  options: { instruction?: string; allowSilent?: boolean; contract?: string; limit?: number } = {},
+): string {
+  const limit = options.limit ?? 4e3;
+  const instruction = (options.instruction ?? "").trim();
+  const contract = (options.contract ?? "").trim();
   const body = result.ok
     ? result.stdout.trim() || "（命令执行成功，但没有任何输出）"
     : [result.error, result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n");
   const { text } = truncateOutput(body, limit);
-  return [
+  const lines = [
     `以下是「${entryTitle}」所执行命令的输出结果。`,
-    "请阅读并将其整理成一段简洁、可直接发送给用户的播报（保留关键数据与结论，去掉噪音与重复）。",
-    "要求：只输出播报正文——用户在 QQ 里看到的就是这段话本身，不要出现「定时任务」「命令」「工具执行」「脚本输出」等字样，",
+    instruction
+      ? `请严格按下面的加工要求处理，产出最终要发送给用户的内容：\n${instruction}`
+      : "请阅读并将其整理成一段简洁、可直接发送给用户的播报（保留关键数据与结论，去掉噪音与重复）。",
+  ];
+  if (contract) {
+    lines.push(contract, "请先按「通知条件」分诊：不满足条件时不要发送，直接静默。");
+  }
+  lines.push(
+    "要求：只输出最终正文——用户在 QQ 里看到的就是这段话本身，不要出现「定时任务」「命令」「工具执行」「脚本输出」等字样，",
     "不要解释你的分析过程，不要使用 Markdown 标题。",
-    result.ok ? "" : "注意：该命令执行失败，请在播报中说明失败原因。",
+    result.ok ? "" : "注意：该命令执行失败，请在正文中说明失败原因。",
+  );
+  if (options.allowSilent) {
+    lines.push(
+      `如果你按上面的要求处理完后，判断本次没有值得发送给用户的内容` +
+      `（例如没有任何符合条件的数据、无变化、无异常、不满足通知条件），只输出 ${SILENT_MARKER}，不要输出任何其它文字。`
+    );
+  }
+  return [...lines, "", "命令：", result.command, "", "输出：", text].filter((line) => line !== "").join("\n");
+}
+
+/**
+ * 生成「发送前自校验」prompt：由独立模型复核草稿是否满足任务契约。
+ * 只需输出最终正文或 {@link SILENT_MARKER}——既做门控，也顺带做一次润色。
+ */
+export function composeVerifyPrompt(entryTitle: string, draft: string, contract?: string): string {
+  const block = (contract ?? "").trim();
+  return [
+    `你是「${entryTitle}」这条定时任务发送到 QQ 之前的质检员。请复核下面这份草稿。`,
+    block,
+    "复核标准：① 是否满足「通知条件」——不满足则本次不必发送；② 内容是否准确、无编造，且不出现「命令」「脚本」「工具」「定时任务」等内部字样；③ 是否是一段可直接阅读的正文。",
+    "输出规则：",
+    `- 若本次确实不值得发送，只输出 ${SILENT_MARKER}，不要输出任何其它文字；`,
+    "- 否则输出修订后的最终正文（若草稿已合格，原样输出正文即可）；只输出正文，不要解释复核过程。",
     "",
-    "命令：",
-    result.command,
-    "",
-    "输出：",
-    text,
+    "草稿：",
+    draft,
   ].filter((line) => line !== "").join("\n");
 }

@@ -21,7 +21,7 @@ import { helpText, tr, type ReplyLocale } from "../../shared/reply-i18n.js";
 import { type ScheduleEntry, type ScheduleStore } from "../schedule/schedule.js";
 import type { ChatMemoryStore, MemoryEntry } from "../infra/memory.js";
 import type { QuotaTracker } from "../infra/quota.js";
-import { lastSent, rememberSent } from "../messaging/state.js";
+import { clearRecordQueue, lastSent, rememberSent } from "../messaging/state.js";
 import { clearDefault, isPermissionAdmin, readDefault, writeDefault } from "../infra/permissions.js";
 import type { BotState, PassiveReplyRecord, ReplyTarget } from "../../shared/types.js";
 
@@ -123,6 +123,7 @@ export async function runCommand(
       const boundId = ctx.state.chatSession.get(chatKey);
       if (boundId) {
         ctx.state.recordBySession.delete(boundId);
+        clearRecordQueue(ctx.state, boundId);
         ctx.state.chatSession.delete(chatKey);
         await reply(T(`已解绑会话 ${boundId.slice(0, 8)}…，下一条消息开启全新会话。`));
       } else {

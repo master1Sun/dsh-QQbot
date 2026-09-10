@@ -19,7 +19,6 @@ import type { Agent as LiveAgent } from "@deepseek-ai/dsh-agent";
 import type { BotRuntime } from "../bots.js";
 import { runCommand, type CommandContext } from "../chat/commands.js";
 import { resolvePermission, permissionBlock } from "../infra/permissions.js";
-import { formatInboundQuoteContext } from "./quote.js";
 import { inboundRefEntry, parseRefIdx } from "./ref-index.js";
 import { sttReady, transcribeVoiceAttachment } from "./voice.js";
 import { fetchFileTextPreview, isIngestibleTextFile } from "./files.js";
@@ -29,6 +28,7 @@ import type { QqbotConfig } from "../../shared/config.js";
 import { configForGroup } from "../../shared/config.js";
 import {
   addGroupMessage,
+  enqueueRecord,
   markIncoming,
   markSeen,
   recentGroupMessages,
@@ -92,6 +92,7 @@ function buildAtPrompt(
   bot: BotRuntime,
   content: string,
   groupOpenid: string,
+  scheduled = false,
 ): string {
   const config = bot.config;
   if (config.atContextMessages <= 0 || !groupOpenid) return content;
@@ -107,16 +108,22 @@ function buildAtPrompt(
     "",
     ...lines,
     "",
-    "用户 @机器人 说：",
+    // 定时任务的 prompt 自带「自动触发」身份说明，这里不能再套「用户 @ 你」——
+    // 否则模型会以为有人在等它实时回答，既不会主动取数加工，也不会静默。
+    scheduled ? "以下是到点自动触发的定时任务：" : "用户 @机器人 说：",
     content,
   ].join("\n");
 }
 
 /**
  * 入站引用处理（openclaw 的 REFIDX 思路）：
- *  1. `msg_idx` 存在 → 把本条消息登记进本地引用索引，供将来被别人引用时还原；
- *  2. `ref_msg_idx` 存在 → 用户引用了某条消息，从索引恢复原文，交给模型看。
- * 返回注入提示词的上下文文本；没有引用时返回 null。
+ *  `msg_idx` 存在 → 把本条消息登记进本地引用索引，供出站引用卡片 /
+ *  其他消息被引用时还原原文使用。
+ *
+ *  注意：按需求**不再**把「被引用原文」以整段上下文注入提示词——
+ *  该段（「（用户引用了聊天中的一条消息）… > 某人：内容」）既冗余，
+ *  又会导致模型把原文复述回正文。回复的引用关系由消息引用卡片承载，
+ *  正文只需回答当前问题。故此处恒返回 null。
  */
 function quoteContextOf(
   bot: BotRuntime,
@@ -125,13 +132,12 @@ function quoteContextOf(
   sender: string,
   content: string,
 ): string | null {
-  const { selfIdx, refIdx } = parseRefIdx(payload);
+  const { selfIdx } = parseRefIdx(payload);
   if (selfIdx) {
     const entry = inboundRefEntry(selfIdx, chatKey, payload, sender, content);
     if (entry) bot.refIndex.record(entry);
   }
-  if (!refIdx) return null;
-  return formatInboundQuoteContext(bot.refIndex.resolve(refIdx), bot.config.quoteMaxChars);
+  return null;
 }
 
 // ── 多模态附件 / 语音转写 ───────────────────────────────────────────────────
@@ -327,12 +333,51 @@ export function createQqRule({
       // 之后整条处理链（价值过滤 / 冷却 / 敏感词 / 上下文条数 / Preset / 命令）都读这份。
       const config = configForGroup(bot.config, group);
       const state = bot.state;
+      // 群全量冷却：阈值设为 0（无限制）时一并跳过冷却——用户已显式选择「全部回复」，
+      // 否则即使阈值=0，群/发送者冷却仍会在短时间内挡掉连续回复，表现为「不能一直聊」。
+      const noThreshold = config.valueThreshold <= 0;
       const valueFilter = {
         enabled: config.groupFullReply,
         threshold: config.valueThreshold,
-        groupCooldownMs: config.groupCooldownMs,
-        senderCooldownMs: config.senderCooldownMs,
+        groupCooldownMs: noThreshold ? 0 : config.groupCooldownMs,
+        senderCooldownMs: noThreshold ? 0 : config.senderCooldownMs,
       };
+      // ── 诊断日志（引用卡片 / 连续回复排查，带 [diag] 前缀便于过滤）──
+      // 打印每条消息事件的引用相关字段与最终判定，定位「仅群@ 不出卡片」「阈值0仍不连续」等平台行为问题。
+      {
+        const diagSelfIdx = parseRefIdx(payload).selfIdx;
+        const diagKnownSelf = group ? bot.selfOpenids.get(group) ?? "" : "";
+        const diagMentionIds = [...(content.matchAll(MENTION_CAPTURE))].map((m) => m[1]!);
+        const diagIsAt = atBot(payload)
+          || (diagKnownSelf ? diagMentionIds.includes(diagKnownSelf) : AT_TEXT_PATTERN.test(content));
+        logger.info(
+          `[dsh-qqbot][diag] event=${eventType} scope=${target?.scope ?? "?"} ` +
+          `content="${(content || "").slice(0, 28)}" ` +
+          `mentions=${JSON.stringify((payload.mentions ?? []).map((m) => ({ is_you: m?.is_you ?? false, bot: m?.bot ?? false, id: (m?.id ?? "").slice(0, 8) })))} ` +
+          `selfIdx=${diagSelfIdx ? diagSelfIdx.slice(0, 12) + "…" : "∅"} msgId=${payload.id ? "✓" : "∅"} ` +
+          `groupFullReply=${config.groupFullReply} valueThreshold=${config.valueThreshold} noThreshold=${noThreshold} isAt=${diagIsAt}`,
+        );
+      }
+      // ── 群 @ 消息孪生事件富化 ───────────────────────────────────────
+      // 群里 @ 一条消息会同时推 GROUP_MESSAGE_CREATE（带 msg_idx/selfIdx）与
+      // GROUP_AT_MESSAGE_CREATE（带可靠 @ 信号）。去重后仅首事件建会话并回复，
+      // 这里在孪生事件到达时（turn/end 之前）就地补全记录的 quoteMention / selfIdx，
+      // 使 quoteReply=at 的引用门控拿到完整数据，不受到达顺序影响。
+      if (eventType === "GROUP_MESSAGE_CREATE" || eventType === "GROUP_AT_MESSAGE_CREATE") {
+        const fp = `${group}:${sender}:${content.replace(/\s+/g, "").slice(0, 120)}`;
+        const twin = bot.state.mergeRecords.get(fp);
+        if (twin && Date.now() - twin.at < 10000) {
+          if (eventType === "GROUP_AT_MESSAGE_CREATE") {
+            twin.record.quoteMention = true;
+            learnSelfOpenid(bot, group, content, logger);
+          } else {
+            const selfIdx = parseRefIdx(payload).selfIdx;
+            if (selfIdx) twin.record.selfIdx = selfIdx;
+          }
+          bot.state.mergeRecords.delete(fp);
+          return null;
+        }
+      }
       const commandCtx: CommandContext = {
         getConfig: () => config,
         state: bot.state,
@@ -497,7 +542,7 @@ export function createQqRule({
         quoteMention: true,
         attachmentContext: attachCtx,
         memoryBlock,
-        promptBuilder: () => buildAtPrompt(bot, content, group),
+        promptBuilder: () => buildAtPrompt(bot, content, group, scheduled),
         config,
       });
     },
@@ -532,11 +577,11 @@ function newMessageId(): MessageId {
   return randomUUID() as unknown as MessageId;
 }
 
-/** 群全量非 AT 消息：限制只做聊天与问答，不执行工具。 */
-const CHAT_ONLY_HINT = [
-  "（群聊全量模式·非 @ 触发）只做简短的聊天与问题回答。",
-  "不要调用任何工具、不要读写文件、不要执行命令。",
-].join("\n");
+/**
+ * 群全量非 @ 消息：仅这一句工具约束（不执行工具/不读写文件/不执行命令）。
+ * 只加这一句，其它「提示」段（回复风格等）按需求不注入。
+ */
+const CHAT_ONLY_HINT = "（群聊全量模式·非 @ 触发）不要调用任何工具、不要读写文件、不要执行命令。";
 
 /** 统一会话入口：复用已绑定会话（followup）或请求创建新会话。 */
 async function enterConversation(args: EnterConversationArgs): Promise<WebhookSessionRequest | null> {
@@ -566,11 +611,29 @@ async function enterConversation(args: EnterConversationArgs): Promise<WebhookSe
     receivedAt: Date.now(),
     quoteMention,
     ...(selfIdx ? { selfIdx } : {}),
+    // 定时任务合成事件：配额已在调度层预扣（回复泵不再逐片扣），并允许模型静默放弃发送。
+    ...(payload.__scheduled === true
+      ? {
+          scheduled: true,
+          silentOk: payload.__silentOk === true,
+          ...(typeof payload.__scheduleId === "string" && payload.__scheduleId ? { scheduleId: payload.__scheduleId } : {}),
+        }
+      : {}),
   };
+  // 群消息登记孪生事件富化表：让后到的 @ / 全量孪生事件在回复前补全 quoteMention / selfIdx。
+  // 仅保留近期条目（孪生事件在数百毫秒内到达），避免内存增长。
+  if (target.scope === "group") {
+    const mergeFp = `${target.openid}:${senderIdOf(payload)}:${(payload.content ?? "").trim().replace(/\s+/g, "").slice(0, 120)}`;
+    if (bot.state.mergeRecords.size > 256) {
+      for (const [k, v] of bot.state.mergeRecords) if (Date.now() - v.at > 3000) bot.state.mergeRecords.delete(k);
+    }
+    bot.state.mergeRecords.set(mergeFp, { record, at: Date.now() });
+  }
   const sender = senderIdOf(payload);
   // 提示词本体提前计算：文件等附件消息 content 为空，本体可能为空串——
   // 有附件上下文时用占位句代替（见下方组装处）；无文字也无可用附件则无事可做
   // （早退，避免启动 typing 后空等）。
+  // 非 @ 群消息只注入这一句工具约束（其余「提示」段均按需求去掉）。
   const rawBody = allowTools ? promptBuilder() : `${CHAT_ONLY_HINT}\n\n${promptBuilder()}`;
   if (!rawBody.trim() && !attachmentContext) return null;
   // 单聊「正在输入」状态：AI 处理期间向用户显示（QQ 平台能力仅限单聊），
@@ -605,6 +668,7 @@ async function enterConversation(args: EnterConversationArgs): Promise<WebhookSe
         content: [{ type: "text", text: prompt }],
         source: { kind: "user" },
       });
+      enqueueRecord(state, boundId!, record);
       return null;
     } catch (error) {
       logger.warn("[dsh-qqbot] followup 失败，改走新会话:", error);

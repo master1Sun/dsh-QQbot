@@ -56,12 +56,23 @@ function describeEntry(entry: ScheduleEntry, index: number): Record<string, unkn
           command: entry.command ?? "",
           ...(entry.cwd ? { cwd: entry.cwd } : {}),
           resultMode: entry.resultMode ?? "raw",
+          ...(entry.parsePrompt ? { parsePrompt: entry.parsePrompt } : {}),
+          gate: entry.gate ?? "always",
           ...(entry.tool ? { tool: entry.tool, args: entry.args ?? {} } : {}),
         }
       : { content: entry.content }),
+    // 任务契约（ai / tool 两种模式通用）。
+    ...(entry.mode === "ai" || entry.mode === "tool"
+      ? {
+          ...(entry.goal ? { goal: entry.goal } : {}),
+          ...(entry.notifyWhen ? { notifyWhen: entry.notifyWhen } : {}),
+          verify: entry.verify === true,
+        }
+      : {}),
     enabled: entry.enabled,
     nextRunAt: entry.nextRunAt ?? null,
     lastSentAt: entry.lastSentAt ?? null,
+    ...(entry.lastSkipAt ? { lastSkipAt: entry.lastSkipAt, lastSkipReason: entry.lastSkipReason ?? "" } : {}),
     lastError: entry.lastError ?? null,
   };
 }
@@ -142,13 +153,16 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
       description: [
         "为当前 QQ 聊天添加一条定时主动任务（由来源机器人发送）。",
         "定时类型：daily（每天 HH:mm）、interval（每 N 分钟，>=5）、cron（标准 5 段表达式，可带时区）、at（一次性绝对时间，到点后自动删除）。",
-        "执行方式：text（直接发送 content）、ai（把 content 当指令交给 AI 生成）、tool（到点执行一条命令并把结果推送给用户）。",
-        "tool 模式即「生成工具 → 解析工具 → 执行 → 回传结果」：你需要自己写出完整可执行命令行（command），例如",
+        "执行方式：text（直接发送 content）、ai（把 content 当任务指令，到点由 AI 自主取数、加工并决定是否发送）、tool（到点执行一条命令并按加工/门控规则推送结果）。",
+        "tool 模式是一条「取数 → 加工 → 门控 → 投递」的流水线：你需要自己写出完整可执行命令行（command），例如",
         '"python C:/scripts/report.py"、"powershell -File C:/scripts/check.ps1"、"C:/scripts/backup.bat"、"node C:/scripts/sync.mjs"；',
-        "可用 cwd 指定工作目录；resultMode=raw 直接推送原始输出，resultMode=ai 则把输出交给 AI 整理成简洁播报后再推送（输出很长时推荐）。",
+        "可用 cwd 指定工作目录；resultMode=raw 直接推送原始输出，resultMode=ai 则先按 parsePrompt（未填则用内置的「简洁播报」要求）整理后再推送。",
+        "gate 决定本次「值不值得发」：always（默认，总是发）、nonempty（没有实质产出就跳过）、changed（与上次内容一致就跳过）；被拦下时不投递、不消耗主动消息配额。",
+        "ai 模式适合「内容每次都要现算」的任务（如每天汇总群聊重点、按条件播报）：到点它会自己调用工具取数加工，若判断无事可报会自动静默不发。",
+        "任务契约（ai/tool 可用）把「什么时候该发」交给语义判断：goal 说明任务目标、notifyWhen 用自然语言写明通知条件（如「只有涨幅超过 5% 才提醒」），不满足时本次静默不发、不占配额；verify=true 则在投递前再做一次自校验。",
         `daily/interval 可附加 weekdays（0-6 数组，仅在该星期触发）。每个聊天的条数上限由机器人配置 scheduleMaxPerChat 决定（默认 ${MAX_SCHEDULES_PER_CHAT} 条，0 = 不限）；超限时先让用户删除旧任务。`,
         "用户说「每天九点提醒我…」「每 30 分钟发一次…」「每周一到周五早九点播报」「下周三下午三点提醒我开会」",
-        "「每天早上跑一次那个 py 脚本把结果发我」时调用。"
+        "「每天早上跑一次那个 py 脚本，只把异常行发我」（→ tool + gate=nonempty，或 resultMode=ai 配 parsePrompt 筛选）时调用。"
       ].join(" "),
       parameters: {
         type: "object",
@@ -174,7 +188,28 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
           resultMode: {
             type: "string",
             enum: ["raw", "ai"],
-            description: "tool 模式结果处理：raw=直接推送命令输出（默认）；ai=把输出交给 AI 整理成播报后推送"
+            description: "tool 模式结果处理：raw=直接推送命令输出（默认）；ai=按 parsePrompt 把输出加工成播报后推送"
+          },
+          parsePrompt: {
+            type: "string",
+            description: "数据加工指令（tool + resultMode=ai 时用）：规定把命令输出整理成什么样，如「只保留涨幅超过 5% 的，每行一条」「压缩成一句话摘要」。留空则用内置的简洁播报要求"
+          },
+          gate: {
+            type: "string",
+            enum: ["always", "nonempty", "changed"],
+            description: "发送门控（tool 模式）：always=总是发送（默认）；nonempty=命令没有实质输出时跳过；changed=与上次发送内容一致时跳过。跳过不投递、不消耗主动消息配额"
+          },
+          goal: {
+            type: "string",
+            description: "任务契约·目标（ai/tool 模式）：这条任务服务于什么判断，供 AI 分诊时理解意图，如「盯住竞品价格波动」"
+          },
+          notifyWhen: {
+            type: "string",
+            description: "任务契约·通知条件（ai/tool 模式，自然语言）：满足什么才值得发送，如「只有涨幅超过 5%、或出现异常时才提醒」。不满足时本次静默不发、不占配额"
+          },
+          verify: {
+            type: "boolean",
+            description: "任务契约·发送前自校验（ai/tool 模式）：开启后投递前复核草稿是否满足契约，不达标则不发送（tool 模式为独立模型二次复核，ai 模式为强化自查）"
           },
           tool: { type: "string", description: "@deprecated 旧版动作 id，已由 command 取代" },
           args: { type: "object", description: "@deprecated 旧版动作参数，已由 command 取代" }
@@ -188,7 +223,9 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
         const a = args as {
           type?: string; time?: string; minutes?: number; cron?: string; tz?: string; at?: string;
           weekdays?: unknown; content?: string; mode?: string; command?: string; genPrompt?: string;
-          cwd?: string; resultMode?: string; tool?: string; args?: Record<string, unknown>;
+          cwd?: string; resultMode?: string; parsePrompt?: string; gate?: string;
+          goal?: string; notifyWhen?: string; verify?: boolean;
+          tool?: string; args?: Record<string, unknown>;
         };
         const result = await store.add({
           scope,
@@ -205,6 +242,11 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
           genPrompt: a.genPrompt,
           cwd: a.cwd,
           resultMode: a.resultMode,
+          parsePrompt: a.parsePrompt,
+          gate: a.gate,
+          goal: a.goal,
+          notifyWhen: a.notifyWhen,
+          verify: a.verify,
           tool: a.tool,
           args: a.args,
           appId,

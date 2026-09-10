@@ -397,12 +397,15 @@ const EN = Object.freeze({
     "Direct = send the text below as-is at send time; AI = treat the text below as a prompt for the AI and send its generated reply (creates a session, costs tokens).",
   "直接发送文本": "Send text directly",
   "AI 生成内容": "Generate with AI",
+  "AI 智能任务（自主取数并决定发不发）": "AI smart task (fetch data and decide whether to send)",
+  "AI 智能任务": "AI smart task",
   "内容": "Content",
-  "给 AI 的生成指令（如「播报今天的天气」），到点由 AI 生成内容后发送。":
-    "Prompt for the AI (e.g. \"report today's weather\"); the AI generates and sends the content at send time.",
+  "给 AI 的任务指令（如「总结昨天群聊的重点」「价格低于 100 再提醒我」）。到点 AI 会自己调用工具取数、加工，再决定发什么；若判断无事可报会自动静默——不打扰大家，也不占主动消息配额。":
+    "A task instruction for the AI (e.g. \"summarize yesterday's chat highlights\", \"alert me only if the price drops below 100\"). At send time the AI fetches data with tools, processes it, and decides what to send; if there is nothing worth reporting it stays silent — no noise, and no proactive-message quota consumed.",
   "到点直接发送的文本，上限 2000 字。":
     "Text sent as-is at send time, up to 2000 characters.",
   "总结今天的待办": "e.g. summarize today's todos",
+  "例如：总结昨天群聊的重点；没有重点就别发": "e.g. Summarize yesterday's chat highlights; say nothing if there are none",
   "记得喝水": "e.g. drink some water",
   "定时消息内容": "Scheduled message content",
   "保存后立即生效并重新计算下次发送时间":
@@ -554,8 +557,8 @@ const EN = Object.freeze({
   "保存后立即生效，无需重启": "Takes effect immediately after saving — no restart needed",
   // ── 定时任务管理（daily / interval / cron / at × 文本 / AI / 执行命令）──
   "定时任务管理": "Scheduled task manager",
-  "支持 daily / interval / cron / at 四种触发条件，以及 文本 / AI 生成 / 执行命令 三种执行方式。":
-    "Four triggers — daily / interval / cron / at — and three actions: text / AI-generated / run a command.",
+  "支持 daily / interval / cron / at 四种触发条件，以及 文本 / AI 智能任务 / 执行命令 三种执行方式。":
+    "Four triggers — daily / interval / cron / at — and three actions: text / AI smart task / run a command.",
   "待补算": "TBD",
   "新增定时任务": "New scheduled task",
   "正在读取定时任务…": "Loading scheduled tasks…",
@@ -623,10 +626,11 @@ const EN = Object.freeze({
 
   // 编辑表单 · ③ 到点做什么
   "③ 到点做什么": "③ What it does",
-  "选择执行方式并填写内容。": "Pick an action and fill in its content.",
+  "选择执行方式；除「直接发送文本」外，都能在「执行」与「发送」之间插入加工与判断。":
+    "Pick an action. Except for plain text sending, every action can insert processing and a decision between “run” and “send”.",
   "执行方式": "Action",
-  "文本=到点原样发送；AI 生成=把内容当指令交给 AI 生成后回复；执行命令=到点跑一条命令并把输出推送给用户。":
-    "text = send as-is; AI = treat the content as a prompt and reply with what the AI generates; run command = execute a command and push its output to the user.",
+  "文本=到点原样发送；AI 智能任务=把内容当任务指令，到点 AI 自己取数、加工、决定发不发；执行命令=确定性跑一条命令，再按加工指令与发送门控推送给用户。":
+    "text = send as-is; AI smart task = treat the content as a task instruction and let the AI fetch data, process it, and decide whether to send; run command = deterministically run a command, then push it through the processing instruction and send gate.",
   "执行命令并推送结果": "Run a command and push its output",
   "要执行的命令": "Command to run",
   "到点由服务端执行这条命令行，捕获 stdout/stderr 与退出码后推送给用户。支持 python / powershell -File / .bat / node / vbs(cscript //Nologo) / perl / php / ruby 等。":
@@ -639,13 +643,49 @@ const EN = Object.freeze({
   "例如 C:/scripts": "e.g. C:/scripts",
   "工作目录": "Working directory",
   "结果处理": "Result handling",
-  "raw = 直接把命令输出推送给用户；ai = 先把输出交给 AI 整理成简洁播报再推送（输出很长或含噪音时推荐）。":
-    "raw = push the command output as-is; ai = let the AI turn it into a short report first (recommended when output is long or noisy).",
+  "raw = 直接把命令输出推送给用户；ai = 先按「数据加工指令」把输出整理后推送（输出很长或含噪音时推荐）。":
+    "raw = push the command output as-is; ai = process it according to the “data processing instruction” first (recommended when output is long or noisy).",
   "raw：直接推送原始输出": "raw: push raw output",
   "ai：交给 AI 整理后推送": "ai: summarize with AI, then push",
+  "ai：交给 AI 加工后推送": "ai: process with AI, then push",
+  "数据加工指令（可选）": "Data processing instruction (optional)",
+  "规定把命令输出处理成什么样再发：筛选、排序、限行、固定格式都写在这里。留空则用内置的「整理成一段简洁播报」要求。":
+    "Describe how the command output should be shaped before sending: filtering, sorting, row limits, fixed formats. Leave empty to use the built-in “condense into a short report” requirement.",
+  "例如：只保留今天新增的订单，按金额从高到低排列，最多 5 条；没有新增就什么都别发":
+    "e.g. Keep only orders created today, sorted by amount descending, at most 5; send nothing if there are none",
+  "数据加工指令": "Data processing instruction",
+  "任务目标（可选）": "Task goal (optional)",
+  "一句话说明这条任务服务于什么判断，供 AI 分诊时理解意图。":
+    "One line on what decision this task serves, so the AI understands intent when triaging.",
+  "例如：盯住竞品价格波动": "e.g. watch a competitor's price moves",
+  "任务目标": "Task goal",
+  "通知条件（可选）": "Notify condition (optional)",
+  "用自然语言写明「什么时候才值得打扰大家」。不满足时本次静默不发，也不占主动消息配额。":
+    "State in plain language when it is worth interrupting people. When unmet, nothing is sent this round and no proactive-message quota is consumed.",
+  "例如：只有涨幅超过 5%、或出现异常时才提醒": "e.g. notify only when the change exceeds 5% or an anomaly appears",
+  "通知条件": "Notify condition",
+  "发送前自校验": "Self-check before sending",
+  "开启后，投递前再复核一次草稿是否满足上面的目标与通知条件，不达标就不发。tool 模式为独立模型二次复核，ai 模式为强化自查。":
+    "When on, the draft is reviewed once more against the goal and notify condition before delivery; if it falls short, nothing is sent. For tool mode this is a second, independent model review; for ai mode it is a strengthened self-check.",
+  "关闭校验": "Off",
+  "开启校验": "On",
+  "条件触发": "Conditional",
+  "发送门控": "Send gate",
+  "投递到 QQ 前的最后一道判断：changed 适合「有变化才播报」，nonempty 适合「有异常才报警」。被拦下时不投递，也不消耗主动消息配额。":
+    "The final check before delivering to QQ: changed suits “report only on change”, nonempty suits “alert only on output”. When blocked, nothing is delivered and no proactive-message quota is consumed.",
+  "always：每次都发（默认）": "always: send every time (default)",
+  "nonempty：没有实质输出就跳过": "nonempty: skip when there is no real output",
+  "changed：与上次内容相同就跳过": "changed: skip when identical to the previous send",
+  "门控：无输出不发": "gate: skip if empty",
+  "门控：无变化不发": "gate: skip if unchanged",
+  "上次已跳过发送": "last run skipped",
+  "上次跳过（": "Last skipped (",
+  "）：": "): ",
+  "本次无需发送": "nothing to send",
   "例如：记得喝水": "e.g. drink some water",
   "定时任务内容": "Scheduled task content",
   "命令 → AI 播报": "command → AI report",
+  "命令 → AI 加工": "command → AI processing",
   "命令 → 原始输出": "command → raw output",
 
   // 校验提示（编辑表单）
