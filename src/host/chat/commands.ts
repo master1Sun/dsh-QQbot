@@ -18,7 +18,7 @@ import type { QqApiClient } from "../qq/api.js";
 import { PASSIVE_REPLY_LIMIT } from "../qq/api.js";
 import type { QqbotConfig } from "../../shared/config.js";
 import { helpText, tr, type ReplyLocale } from "../../shared/reply-i18n.js";
-import { MAX_SCHEDULES_PER_CHAT, type ScheduleEntry, type ScheduleStore } from "../schedule/schedule.js";
+import { type ScheduleEntry, type ScheduleStore } from "../schedule/schedule.js";
 import type { ChatMemoryStore, MemoryEntry } from "../infra/memory.js";
 import type { QuotaTracker } from "../infra/quota.js";
 import { lastSent, rememberSent } from "../messaging/state.js";
@@ -154,8 +154,10 @@ export async function runCommand(
       // 查看
       if (!sub || sub === "查看" || sub === "list") {
         const mine = ctx.schedules.listForChat(scope, openid);
+        // 单聊天条数上限由机器人配置 scheduleMaxPerChat 决定（默认 15，0 = 不限）。
+        const limitText = config.scheduleMaxPerChat > 0 ? `（每聊天最多 ${config.scheduleMaxPerChat} 条）` : "";
         await reply(mine.length === 0
-          ? T(`当前聊天还没有定时消息。用法：/定时 每天 09:00 内容 或 /定时 间隔 30 内容（每聊天最多 ${MAX_SCHEDULES_PER_CHAT} 条）。`)
+          ? T(`当前聊天还没有定时消息。用法：/定时 每天 09:00 内容 或 /定时 间隔 30 内容${limitText}。`)
           : [T("当前定时消息："), ...mine.map(describe)].join("\n"));
         return { handled: true };
       }
@@ -202,7 +204,9 @@ export async function runCommand(
         T("/定时 查看"),
         T("/定时 每天 09:00 记得喝水"),
         T("/定时 间隔 30 休息一下"),
-        T(`/定时 取消 <序号>（每聊天最多 ${MAX_SCHEDULES_PER_CHAT} 条）`),
+        T(config.scheduleMaxPerChat > 0
+          ? `/定时 取消 <序号>（每聊天最多 ${config.scheduleMaxPerChat} 条）`
+          : "/定时 取消 <序号>"),
       ].join("\n"));
       return { handled: true };
     }

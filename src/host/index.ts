@@ -24,7 +24,7 @@ import { installReplyPump } from "./messaging/reply.js";
 import { makeQqbotRoutes } from "./admin/routes.js";
 import { BotRuntimeManager, type BotRuntime } from "./bots.js";
 import { loadGlobalConfig, saveCredentials, upsertBot, type StoredBot, type StoredCredentials } from "./infra/store-file.js";
-import { ScheduleStore, Scheduler, type ScheduleBus, type ScheduleEntry } from "./schedule/schedule.js";
+import { MAX_SCHEDULES_PER_CHAT, ScheduleStore, Scheduler, type ScheduleBus, type ScheduleEntry } from "./schedule/schedule.js";
 import { runCommand, formatCommandResult, composeParsePrompt, normalizeScriptCommand } from "./schedule/command-runner.js";
 import { runScheduledAction } from "./schedule/schedule-actions.js";
 import { createScriptGenerator, type ScriptGenerator, type ScriptGenLlm } from "./schedule/script-gen.js";
@@ -162,7 +162,11 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   };
 
   // 定时消息：store + 30s 调度循环（按归属机器人发送）。
-  const schedules = new ScheduleStore(logger);
+  // 单群/单聊定时条数上限按机器人配置解析（bots.json scheduleMaxPerChat；未启用的机器人回落默认值）。
+  const schedules = new ScheduleStore(logger, (appId) => {
+    const bot = (appId ? bots.get(appId) : undefined) ?? bots.primary();
+    return bot?.config?.scheduleMaxPerChat ?? MAX_SCHEDULES_PER_CHAT;
+  });
   await schedules.load();
   // tool 模式 AI 脚本生成器：genPrompt 非空的任务由它生成脚本并回填命令。
   const scriptGen: ScriptGenerator = createScriptGenerator({

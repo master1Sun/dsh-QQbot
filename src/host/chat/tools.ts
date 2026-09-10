@@ -126,12 +126,12 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
       parameters: { type: "object", properties: {}, additionalProperties: false },
       output: OBJECT_OUTPUT,
       async execute(_args: unknown, exec: ToolRunContext) {
-        const { scope, openid } = requireBot(exec);
+        const { scope, openid, appId } = requireBot(exec);
         const mine = store.listForChat(scope, openid);
         return {
           ok: true,
           chat: `${scope}:${openid}`,
-          max: MAX_SCHEDULES_PER_CHAT,
+          max: store.maxPerChat(appId),
           count: mine.length,
           schedules: mine.map(describeEntry),
         };
@@ -146,7 +146,7 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
         "tool 模式即「生成工具 → 解析工具 → 执行 → 回传结果」：你需要自己写出完整可执行命令行（command），例如",
         '"python C:/scripts/report.py"、"powershell -File C:/scripts/check.ps1"、"C:/scripts/backup.bat"、"node C:/scripts/sync.mjs"；',
         "可用 cwd 指定工作目录；resultMode=raw 直接推送原始输出，resultMode=ai 则把输出交给 AI 整理成简洁播报后再推送（输出很长时推荐）。",
-        "daily/interval 可附加 weekdays（0-6 数组，仅在该星期触发）。每个聊天最多 5 条。",
+        `daily/interval 可附加 weekdays（0-6 数组，仅在该星期触发）。每个聊天的条数上限由机器人配置 scheduleMaxPerChat 决定（默认 ${MAX_SCHEDULES_PER_CHAT} 条，0 = 不限）；超限时先让用户删除旧任务。`,
         "用户说「每天九点提醒我…」「每 30 分钟发一次…」「每周一到周五早九点播报」「下周三下午三点提醒我开会」",
         "「每天早上跑一次那个 py 脚本把结果发我」时调用。"
       ].join(" "),
@@ -218,7 +218,8 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
           ok: true,
           chat: `${scope}:${openid}`,
           schedule: describeEntry(result.entry!, mine.indexOf(result.entry!) + 1),
-          remaining: MAX_SCHEDULES_PER_CHAT - mine.length,
+          // 0 = 不限：剩余额度无意义，回传 null
+          remaining: store.maxPerChat(appId) > 0 ? store.maxPerChat(appId) - mine.length : null,
         };
       },
     },

@@ -178,7 +178,7 @@ export const BOT_CONFIG_FIELDS = [
   "ttsReply", "ttsBaseUrl", "ttsApiKey", "ttsModel", "ttsVoice", "typingIndicator",
   "approvalButtons", "fileIngestion",
   "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords",
-  "memoryEnabled", "quotaPerDay", "replyLocale",
+  "memoryEnabled", "quotaPerDay", "replyLocale", "scheduleMaxPerChat",
   "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "permissionInjection", "permissionAdmins", "groupOverrides",
 ] as const;
 
@@ -233,6 +233,7 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   memoryEnabled: true,
   quotaPerDay: 50,
   replyLocale: "zh",
+  scheduleMaxPerChat: 15,
   sanitizeReplies: true,
   ssrfGuard: true,
   localPathWhitelist: false,

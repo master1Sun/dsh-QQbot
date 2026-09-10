@@ -173,6 +173,8 @@ export function ScheduleDialog(props: {
     editing: Record<string, any> | null;
     editError: string;
     saving: boolean;
+    /** 每个群/单聊的定时条数上限（服务端 scheduleMaxPerChat，默认 15，0=不限）。 */
+    maxPerChat: number;
   }>({
     loading: true,
     error: "",
@@ -181,6 +183,7 @@ export function ScheduleDialog(props: {
     editing: null,
     editError: "",
     saving: false,
+    maxPerChat: 15,
   });
   const [scheduleRemoving, setScheduleRemoving] = React.useState("");
   const [scheduleToggling, setScheduleToggling] = React.useState("");
@@ -199,7 +202,13 @@ export function ScheduleDialog(props: {
       const v = val(res) ?? {};
       setScheduleModal((prev) =>
         prev
-          ? { ...prev, loading: false, error: "", items: Array.isArray(v.schedules) ? v.schedules : [] }
+          ? {
+              ...prev,
+              loading: false,
+              error: "",
+              items: Array.isArray(v.schedules) ? v.schedules : [],
+              maxPerChat: Number.isFinite(Number(v.maxPerChat)) ? Number(v.maxPerChat) : prev.maxPerChat,
+            }
           : prev,
       );
     } else {
@@ -1145,9 +1154,13 @@ export function ScheduleDialog(props: {
             h(
               "span",
               { className: "qbot-hint" },
-              scheduleModal.botScope === "all"
-                ? `所有机器人共 ${scheduleModal.items.length} 条（每个群/单聊最多 5 条）`
-                : `共 ${scheduleModal.items.length} 条（每个群/单聊最多 5 条）`,
+              scheduleModal.maxPerChat > 0
+                ? (scheduleModal.botScope === "all"
+                  ? `所有机器人共 ${scheduleModal.items.length} 条（每个群/单聊最多 ${scheduleModal.maxPerChat} 条）`
+                  : `共 ${scheduleModal.items.length} 条（每个群/单聊最多 ${scheduleModal.maxPerChat} 条）`)
+                : (scheduleModal.botScope === "all"
+                  ? `所有机器人共 ${scheduleModal.items.length} 条`
+                  : `共 ${scheduleModal.items.length} 条`),
             ),
             h(
               "div",

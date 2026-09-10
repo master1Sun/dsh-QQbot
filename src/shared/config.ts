@@ -132,6 +132,11 @@ export interface QqbotConfig {
   bannedWords: string[];
   /** 每聊天的长期记忆（跨 /new 保留上下文）。 */
   memoryEnabled: boolean;
+  /**
+   * 每个群/单聊允许的定时消息条数上限（0 = 不限，默认 15）。
+   * 仅 bots.json 可配（设置页不展示）。
+   */
+  scheduleMaxPerChat: number;
   /** 主动消息每日配额（0=不限制）；超出后停止主动发送并告警。 */
   quotaPerDay: number;
   /** 发给 QQ 用户的回复文案语言：zh=中文（默认）；en=英文。 */
@@ -342,6 +347,8 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
       ? (pick("bannedWords") as unknown[]).filter((w): w is string => typeof w === "string" && w.length > 0)
       : [],
     memoryEnabled: boolOr(pick("memoryEnabled"), true),
+    // 0 = 不限；默认 15（定时消息按群/单聊计数）
+    scheduleMaxPerChat: clampInt(pick("scheduleMaxPerChat"), 0, 500, 15),
     quotaPerDay: clampInt(pick("quotaPerDay"), 0, 100000, 50),
     replyLocale: oneOf(pick("replyLocale"), ["zh", "en"], "zh"),
     sanitizeReplies: boolOr(pick("sanitizeReplies"), true),

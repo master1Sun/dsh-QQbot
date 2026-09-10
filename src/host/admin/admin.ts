@@ -336,12 +336,14 @@ export function createAdminService(ctx: AdminServiceContext) {
     // 机器人过滤：allBots=true 返回全部；否则默认只看「当前机器人」
     // （条目未写 appId 时归属主机器人，与运行时 resolveBot 的兜底语义一致）。
     let mine = all;
+    const effAppId = typeof payload.appId === "string" && payload.appId ? payload.appId : primaryAppId();
     if (payload.allBots !== true) {
-      const appId = typeof payload.appId === "string" && payload.appId ? payload.appId : primaryAppId();
-      mine = mine.filter((e: ScheduleEntry) => (e.appId ?? primaryAppId()) === appId);
+      mine = mine.filter((e: ScheduleEntry) => (e.appId ?? primaryAppId()) === effAppId);
     }
     if (scope && openid) mine = mine.filter((e: ScheduleEntry) => e.scope === scope && e.openid === openid);
-    return { ok: true, data: { schedules: mine, total: all.length, maxPerChat: 5 } };
+    // 上限按机器人配置解析（bots.json scheduleMaxPerChat，默认 15；allBots 视图回落主机器人）。
+    const maxPerChat = schedules.maxPerChat(payload.allBots === true ? undefined : effAppId);
+    return { ok: true, data: { schedules: mine, total: all.length, maxPerChat } };
   };
 
   const scheduleAdd = async (payload: Record<string, unknown>) => {

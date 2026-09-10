@@ -19,7 +19,11 @@ import { isValidCron, nextCronRun, tzOffsetMs } from "../../shared/cron.js";
 import { normalizeScriptCommand } from "./command-runner.js";
 import { sessionIdOf, webhookDeliveryIdOf } from "../messaging/state.js";
 
-export const MAX_SCHEDULES_PER_CHAT = 5;
+/**
+ * 每个群/单聊的定时消息条数**默认上限**（可被 bots.json 的 `scheduleMaxPerChat` 覆盖，0 = 不限）。
+ * 仅作为兜底：实际生效值由 ScheduleStore 的 resolver 按机器人配置解析（见 maxPerChat）。
+ */
+export const MAX_SCHEDULES_PER_CHAT = 15;
 
 /** 定时任务执行类型。 */
 export type ScheduleEntryType = "daily" | "interval" | "cron" | "at";
@@ -111,9 +115,21 @@ export class ScheduleStore {
   #entries: ScheduleEntry[] = [];
   #loaded = false;
   #logger: Pick<Console, "warn" | "error">;
+  /** 按机器人解析单聊/单群定时条数上限（bots.json `scheduleMaxPerChat`）；0 = 不限。 */
+  #resolveMax: (appId?: string) => number;
 
-  constructor(logger: Pick<Console, "warn" | "error">) {
+  constructor(
+    logger: Pick<Console, "warn" | "error">,
+    resolveMaxPerChat?: (appId?: string) => number,
+  ) {
     this.#logger = logger;
+    this.#resolveMax = resolveMaxPerChat ?? (() => MAX_SCHEDULES_PER_CHAT);
+  }
+
+  /** 某机器人的单群/单聊定时条数上限（0 = 不限）。 */
+  maxPerChat(appId?: string): number {
+    const n = this.#resolveMax(appId);
+    return Number.isSafeInteger(n) && n >= 0 ? n : MAX_SCHEDULES_PER_CHAT;
   }
 
   async load(): Promise<ScheduleEntry[]> {
@@ -223,8 +239,10 @@ export class ScheduleStore {
     }
     const existing = input.id ? this.#entries.find((e) => e.id === input.id) : void 0;
     if (input.id && !existing) return { ok: false, error: "未找到该定时任务" };
-    if (!existing && this.countForChat(scope, String(input.openid)) >= MAX_SCHEDULES_PER_CHAT) {
-      return { ok: false, error: `每个群/单聊最多 ${MAX_SCHEDULES_PER_CHAT} 条定时任务` };
+    const maxPerChat = this.maxPerChat(input.appId);
+    // 0 = 不限
+    if (!existing && maxPerChat > 0 && this.countForChat(scope, String(input.openid)) >= maxPerChat) {
+      return { ok: false, error: `每个群/单聊最多 ${maxPerChat} 条定时任务` };
     }
     const prevGenPrompt = existing?.genPrompt ?? "";
     const regen = Boolean(genPrompt) && (genPrompt !== prevGenPrompt || existing?.genStatus === "error");

@@ -1,187 +1,78 @@
 # dsh-QQbot
 
-把 [QQ 官方机器人](https://q.qq.com)（WebSocket 长连接模式）接入本机 [DeepSeek Harness（dsh）](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
+把 [QQ 官方机器人](https://q.qq.com)（WebSocket 长连接模式）接入本机 [DeepSeek Harness（dsh）](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)，让 AI 直接在 QQ 群聊 / 单聊里工作。
+
+> 功能详解、操作步骤与全部配置参数见 **[用户手册.md](./用户手册.md)**。
 
 ```
-QQ 群/单聊消息 ──WebSocket 长连接（主动外连，每机器人一条）──▶ dsh-qqbot ──webhookRuntime──▶ DSH 会话
-QQ 聊天窗口 ◀──被动回复──── 回复泵（session/event，按来源机器人路由）◀── 助手回复
-定时消息  ──30s 调度──▶ QQ 群/单聊（每日 / 固定间隔，由归属机器人发送）
+QQ 群/单聊 ──WebSocket（每机器人一条）──▶ dsh-qqbot ──webhookRuntime──▶ DSH 会话
+QQ 窗口  ◀──被动回复── 回复泵（按来源机器人路由）◀── 助手回复
+定时消息 ──30s 调度──▶ QQ 群/单聊
 ```
 
-## 功能
+## 核心能力
 
-- **多机器人**：`~/.dsh/qqbot/bots.json` 是唯一事实来源，每个机器人独立凭据、独立行为配置、独立状态；全部启用的机器人**同时**保持 WebSocket 长连接（`BotRuntimeManager`），事件按归属路由（deliveryId→appId / sessionId→appId），回复、主动消息、定时消息都由来源机器人发送。同群里多个机器人各自判定、各自回复，互不共享上下文。
-- **WebSocket 接收**：`@tencent-connect/qqbot-nodejs` 官方 SDK 长连接，本机主动拨出 QQ 网关收事件（心跳/断线重连/RESUME 续传），**无需公网 IP、域名与回调配置**；事件经 `ctx.webhookRuntime` 走 DSH 官方 webhook 通道创建会话。
-- **群 AT 消息**（`GROUP_AT_MESSAGE_CREATE`）：@机器人直接回复，默认附带最近 10 条群聊记录作上下文（`atContextMessages` 可调，0 关闭），**可执行工具**。
-- **群全量消息**（`GROUP_MESSAGE_CREATE`）：全部消息入环形缓冲；@机器人 → 跳过价值过滤直接回复（可执行工具）；非 @ 消息 → 价值评分过滤通过后**仅聊天/问答，不执行工具**（使用 `agentPresetChat`）。@ 判定三级：`mentions` bot 标记 → 已学习的本机器人该群 openid（AT 事件 content 首个 `<@id>` 自动学习并持久化到 `~/.dsh/qqbot/self-openids/<appId>.json`，多机器人同群时精确区分 @ 的是哪台）→ 该群从未 @ 过时回退宽匹配（含任意 `<@...>` 即算 @）。
-- **单聊**（`C2C_MESSAGE_CREATE`）：创建 DSH 会话并回复。
-- **会话复用**：同一群/单聊复用同一会话（`agent.followup`），`/new` 解绑重开。
-- **多模态**：入站图片/文件/语音附件注入会话上下文（视觉模型可看图，语音优先用平台自带转写文本）；出站支持发图/文件/语音（SDK 富媒体上传，AI 工具 `qqbot_send_image` / `qqbot_send_file` / `qqbot_send_voice`）。
-- **语音转写**：`voiceTranscription` 五档——`off` 忽略 / `note` 平台转写（`asr_refer_text`）/ `download` 注入音频地址 / `asr` 调用自定义转写服务（`asrEndpoint`）/ `stt` 本地转码后调 OpenAI 兼容 `/audio/transcriptions`（`sttBaseUrl`/`sttApiKey`/`sttModel`，失败回退平台转写）。默认 `off`，仅 bots.json 可配。
-- **单聊语音回复**：`ttsReply` 开启后单聊回复自动经 OpenAI 兼容 `/audio/speech`（`ttsBaseUrl`/`ttsApiKey`/`ttsModel`/`ttsVoice`）合成 WAV 语音气泡发送，合成失败回退文字。默认关，仅 bots.json 可配。
-- **正在输入**：单聊处理消息期间发送「正在输入」状态（`typingIndicator`，默认开，仅 bots.json 可配），回复发出即停止。
-- **文件内容识别**：收到文本类文件（txt/md/json/csv/代码等，≤1MB）时自动下载并截取正文注入模型上下文，AI 直接读懂文件内容再回复；二进制文件仅列文件名（`fileIngestion`，默认开，仅 bots.json 可配）。
-- **对话权限注入**：每机器人一份默认权限文本（`~/.dsh/qqbot/permissions/<appId>/_default.md`），会话开始注入 prompt 顶部（`permissionInjection`，默认开）；聊天命令 `/perm view|set|clear` 管理，`permissionAdmins` 配置修改权限名单（空=任何人可改）。
-- **事件处理**：入群/加好友自动欢迎语（`welcomeEnabled` 默认开 + `welcomeMessage`，`{nick}` 占位）；机器人消息被 🗑️ 表情回应时自动撤回（`reactionRecall`，默认开，需消息撤回权限）。两者均仅 bots.json 可配。
-- **按钮审批**：AI 请求执行敏感操作时发送「允许/拒绝」按钮消息，点击回调回传决定（`approvalButtons`，默认开，仅 bots.json 可配）。
-- **聊天命令**：`/help` `/status` `/new` `/stop` `/steer <指令>` `/session` `/记忆` `/清空记忆` `/撤回` `/perm view|set|clear` `/广播 <内容>` `/定时 …`。
-- **定时消息**：`/定时 每天 09:00 内容`、`/定时 间隔 30 内容`、`/定时 查看`、`/定时 取消 <序号>`；设置界面可新建/删除；**每个群最多 5 条**；也可让 AI 直接帮你设置。**AI 动态模式**：`mode=ai` 时 content 为生成指令，到点由 AI 在目标聊天生成内容后回复（如「每天早上总结昨日群聊」）。
-- **群管理**：`bannedWords` 敏感词——群消息（@ 与全量均覆盖）命中即撤回原消息并跳过回复（需消息撤回权限，无权限时仅拦截回复）；`/广播` 向机器人已见过的所有群群发。
-- **安全防护**：`sanitizeReplies` 回复净化——发送前剥离模型输出里的 `system-reminder`、`<think>` 等隐藏标签块，防止内部提示词与推理过程泄漏（归档与模型上下文保留原文）；`ssrfGuard` 媒体链接校验——AI 发图/文件/语音时拒绝内网与保留地址（含 DNS 解析后全记录校验，QQ 官方域名直通）；`localPathWhitelist` 本地路径白名单——本机文件仅允许工作区目录与插件数据目录内。
-- **按群配置**：`groupOverrides` 按群 openid 覆盖行为字段（群全量回复/价值阈值/@ 上下文/双冷却/分片/回复上限/Markdown/敏感词；`memoryEnabled` 与 `agentPresetChat` 也属于覆盖字段但不再出现在设置页，仅 bots.json 可配——界面编辑其他字段保存时不会丢失这两个字段的已有值），设置页可视化编辑、保存即生效；未覆盖字段跟随机器人默认。
-- **长期记忆**：每聊天持久记忆（`~/.dsh/qqbot/memory/<chatKey>.md`，Markdown 格式，人可直接阅读编辑），跨 `/new` 保留；只存重要对话内容本身——不带日期与装饰符号，写入时自动剥离 emoji、markdown 标记与行首列表符；会话开始自动注入；AI 工具 `qqbot_memory_add/list/clear` + `/记忆` `/清空记忆` 命令。默认开启，仅 bots.json 可关（`memoryEnabled`）。
-- **可靠投递**：回复发送失败时剩余内容写入投递出箱（`~/.dsh/qqbot/outbox.json`），每 60s 重投（走主动消息通道），最多重试 5 次。
-- **主动消息配额**：`quotaPerDay`（默认 50）按上海日计数；定时消息、欢迎语、出箱补发、AI 发消息/发图/发文件/发语音全部计入，超限自动停止并告警；`/status` 可查用量。
-- **AI 工具**：`qqbot_schedule_list` / `qqbot_schedule_add`（支持 mode=ai）/ `qqbot_schedule_remove` / `qqbot_send_message` / `qqbot_send_image` / `qqbot_send_file` / `qqbot_send_voice` / `qqbot_memory_add` / `qqbot_memory_list` / `qqbot_memory_clear`，通过 `exec.agent.id` 反查当前聊天与来源机器人，用户说「每天九点提醒我喝水」「记住这个群在准备团建」即可自动完成。
-- **登录方式**：设置页「添加机器人」——扫码（官方 SDK 下发凭据）或手动填写 AppID/AppSecret，凭据按机器人写入 `bots.json` 并立即热生效；`secretEnv`（DSH 凭据引用，优先级高于明文 AppSecret）仅 bots.json 可配，不出现在设置页；终端 `dsh-qqbot login` 扫码写入 `credentials.json`（0600），作为 entry 单机器人模式的兜底凭据。
-- **设置界面**：dsh 设置 → **QQ 机器人**，机器人列表卡片（主机器人标识 / 启用状态 / 连接状态）→ 点卡片进详情（连接状态、行为配置、运行统计、移除接入），支持添加 / 删除 / 启用停用 / 设为主机器人 / 重试连接。部分配置项刻意不在界面展示（默认常开/合理默认，仅 bots.json 可调），完整清单见「配置」一节。
-- **消息归档**：`~/.dsh/qqbot/archive/archive-YYYY-MM-DD.jsonl`（按天一个文件，上海时间；旧版月文件首次使用时自动拆分迁移），记录 inbound / reply / proactive / session。默认开启，仅 bots.json 可关（`archiveEnabled`），设置页不提供开关。
-- **被动回复**：按 `msg_id` + `msg_seq` 回复，遵守官方限额（群 5 分钟 / 5 次，单聊 60 分钟 / 4 次）；优先 Markdown（失败逐片降级纯文本），超长自动分片。
-- **回复引用**：出站引用为**原生引用卡片**——按 `quoteReply` 范围（`at` 仅群 @，`all` 全部，`off` 不引用；单聊一律不引用）附带 `message_reference`，QQ 客户端渲染为可点击定位到用户原消息的引用卡片。带引用的消息走主动消息通道（不传 `msg_id`）：实测 `msg_id` 与 `message_reference` 同传时，手机端同一条内容会出现两次（电脑端正常）；仅 `msg_id` 则两端都不显示引用；仅 `message_reference` 是「有引用且内容只出现一次」的唯一组合。卡片仅在**平台明确拒绝**（HTTP 4xx，确定未创建消息）时降级为普通被动回复；结果不确定的失败（超时/网络/5xx）不重发，直接走投递出箱——结果不确定时重发正是「同一条内容出现两次」的来源。入站方向始终生效：本地维护 REFIDX 引用索引（`~/.dsh/qqbot/ref-index-<appId>.jsonl`），用户引用聊天中某条消息时，被引用原文恢复后注入模型上下文（标注为外部未信任数据）。
-- **AI 报错提示**：AI 请求失败（如 API 余额不足、超时）时向来源聊天回复 `⚠️ AI 回复出错：<平台错误信息>`，不再静默无回复；已有部分正常文本则附加在文本之后。同一聊天 60 秒内最多提示一次，连续报错不刷屏。
-- **主动消息**：`POST /qqbot/send`（需 `adminToken`，可带 `appId` 指定机器人）；被动失败可配 `proactiveFallback` 兜底。主动消息配额极少，慎用。
-
-## 依赖：webhook 运行时
-
-QQ 消息要创建 DSH 会话，需要 `@deepseek-ai/dsh-webhook` 提供的 `ctx.webhookRuntime`：
-
-- 宿主已启用 → 插件直接使用；
-- 未启用 → 插件会尝试自行加载它（该包是可选 peer，随 dsh 安装自带）；
-- 仍不可用 → 插件**降级运行**（不创建会话），dsh 正常启动，设置界面与 `/status` 可查；
-  状态里 `sessionEnabled: false` 即表示这种状态。
-
-推荐在 profile 中显式启用（web profile 的 `cordis.patch.yml`）：
-
-```yaml
-- insert:
-    - id: webhook
-      name: "@deepseek-ai/dsh-webhook"
-```
+- **多机器人**：`bots.json` 唯一事实来源，每机器人独立凭据与配置，全部启用的同时在线，回复 / 定时 / 主动消息都由来源机器人发出。
+- **免公网接入**：官方 SDK 长连接主动外连 QQ 网关，**无需公网 IP、域名与回调配置**。
+- **消息响应**：群 @ 直接回复（可执行工具，附带最近 10 条上下文）；群未 @ 消息经价值评分过滤后才以「只聊天」方式插话；单聊直接会话。
+- **会话与记忆**：同一群/单聊复用会话（`/new` 重开）；长期记忆跨会话保留（`/记忆`、`/清空记忆`）。
+- **多模态与语音**：入站图片 / 文件 / 语音入上下文；语音转写五档（默认平台转写）、可选单聊 TTS 语音回复、单聊「正在输入」状态。
+- **定时消息**：`/定时 每天 09:00 …`、`间隔`、`查看`、`取消`（每群/单聊默认 15 条，bots.json `scheduleMaxPerChat` 可调，0=不限）；`mode=ai` 到点由 AI 现场生成内容。
+- **群管理**：敏感词撤回、`/广播`、入群欢迎语、🗑️ 表情撤回、敏感操作按钮审批。
+- **AI 工具**：`qqbot_schedule_*`、`qqbot_send_message/image/file/voice`、`qqbot_memory_*`、`qqbot_request_approval`——直接说话即可（「每天九点提醒我喝水」）。
+- **安全与可靠**：回复净化、媒体 SSRF 防护、可选本地路径白名单；发送失败进出箱每 60s 重投；主动消息每日配额可控；消息本地归档。
+- **设置界面**：dsh 设置 → **QQ 机器人**，扫码或手动添加机器人，行为配置即改即生效。
 
 ## 安装
 
 ```sh
-# 在 dsh web profile 中安装
 dsh plugin --profile web add <本目录或 git 地址>
 ```
 
-开发模式：`npm run deploy`（构建并同步到 `~/.dsh/profiles/web/node_modules/@sunjuntao/dsh-qqbot`）。
+开发模式：`npm run build && npm run sync`（同步到 `~/.dsh/profiles/web/node_modules/@sunjuntao/dsh-qqbot`）。
 
-构建前需链接 dsh 类型依赖（`postinstall` 已自动执行）：
+依赖 `@deepseek-ai/dsh-webhook` 提供的 `ctx.webhookRuntime`；不可用时插件降级运行（不创建会话，设置页与 `/status` 可查）。
 
-```sh
-npm install          # 自动执行 link-dsh-deps
-npm run typecheck    # 类型检查（含设置界面 tsx）
-npm run build        # 仅产出 lib/index.js（host）+ lib/client.js（设置界面）
-npm run build:cli    # 需要终端登录时单独构建 lib/cli.js（node bin/dsh-qqbot.mjs）
-npm run build:types  # 类型声明输出到根 types/（可选）
-```
+## 快速上手
+
+1. QQ 开放平台建机器人，拿 `appId` / `appSecret`，配置出口 **IP 白名单**；群设置里把「可获取的群聊消息范围」设为全部。
+2. dsh 设置 → **QQ 机器人** → 添加机器人（扫码或手动填写），保存即热生效。
+3. 拉机器人进群 @ 它说话，或加好友私聊。
+
+## 配置速览
+
+行为配置**按机器人独立**存于 `~/.dsh/qqbot/bots.json`，热生效无需重启。最常用几项：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `agentPreset` | `default` | @ 与单聊使用的 Preset |
+| `groupFullReply` / `valueThreshold` | `true` / `5` | 群未 @ 消息是否参与回复 / 价值阈值（越高越安静） |
+| `groupCooldownMs` / `senderCooldownMs` | `60000` / `30000` | 同群 / 同人回复最小间隔 |
+| `atContextMessages` | `10` | @ 消息附带的群聊上下文条数 |
+| `quotaPerDay` | `50` | 主动消息每日配额（0=不限） |
+| `bannedWords` | `[]` | 群敏感词（命中撤回并跳过回复） |
+| `groupOverrides` | `{}` | 按群 openid 覆盖行为字段 |
+
+**界面隐藏配置项**：归档 `archiveEnabled`、长期记忆 `memoryEnabled`、文件识别 `fileIngestion`、欢迎语、表情撤回、Markdown、回复净化、正在输入、按钮审批、多模态等**默认常开**；`ttsReply`、路径白名单、主动兜底默认关；`secretEnv`、`agentPresetChat`（留空跟随 `agentPreset`）、`voiceTranscription`（默认 `note`）、`scheduleMaxPerChat`（默认 15）、`permissionAdmins` 等**仅 bots.json 可配**。完整清单与参数关联见手册。
 
 ## 目录结构
 
 ```
-src/host/     插件运行时（入口 index.ts + bots.ts，按功能分子目录）
-  ├─ admin/      设置页 RPC 与管理（admin/routes/catalogs/updater）
-  ├─ messaging/  消息收发管线（rule/reply/events/state/outbox/sanitize/quote/ref-index/self-id）
-  ├─ schedule/   定时任务与脚本执行（schedule/schedule-actions/script-gen/command-runner）
-  ├─ chat/       聊天命令与宿主工具（commands/tools）
-  ├─ qq/         QQ 平台对接（api/ws/qr-login）
-  └─ infra/      基础设施（store-file/quota/net-guard/value-filter/memory/permissions/archive/stats）
-src/client/   设置界面（index.tsx 入口 + i18n/meta/ui/glyphs + add-bot-view 与弹窗子模块，esbuild 单入口打包）
+src/host/     插件运行时（admin/ messaging/ schedule/ chat/ qq/ infra/）
+src/client/   设置界面（挂 dsh 设置页「QQ 机器人」）
 src/shared/   前后端共用（config / time / types）
-src/cli.ts    终端凭据管理 CLI（build:cli 单独打包）
-scripts/build/   构建脚本（build.mjs / build-cli.mjs）
-scripts/deploy/  部署脚本（sync-to-profile.mjs / link-dsh-deps.mjs）
-scripts/dev/     开发辅助（diag-qq-api.mjs / preview-add-page.mjs / check-i18n.mjs 设置界面 i18n 覆盖检查）
-verify-client.mjs / render-verify.mjs   根级契约与渲染校验
+src/cli.ts    终端凭据管理 CLI
+scripts/      build / deploy / dev 脚本
 ```
 
-## 存储布局
-
-```
-~/.dsh/qqbot/bots.json            机器人库：primaryAppId + bots[]（凭据与行为配置每机器人独立）
-~/.dsh/qqbot/global.json          全局配置：仅 adminToken
-~/.dsh/qqbot/credentials.json     终端 dsh-qqbot login 的兜底凭据（0600）
-~/.dsh/qqbot/schedules.json       定时消息（调度精度 30s）
-~/.dsh/qqbot/memory/              每聊天长期记忆
-~/.dsh/qqbot/archive/             消息归档（月度 jsonl）
-~/.dsh/qqbot/outbox.json          投递出箱（失败重投）
-~/.dsh/qqbot/ref-index-<appId>.jsonl   入站引用索引（每机器人一份）
-```
-
-## 配置
-
-行为配置**按机器人独立**保存于 `bots.json`，设置页修改即改即生效（热更新，无需重启）；下表字段每个机器人各一份。`global.json` 只存 `adminToken`。
-
-**界面隐藏配置项**：以下字段**刻意不出现在设置页**，仅可通过 `bots.json` 调整（改完热生效）——归档 `archiveEnabled`（默认开）、长期记忆 `memoryEnabled`（默认开）、文件识别 `fileIngestion`（默认开）、欢迎语 `welcomeEnabled`（默认开）、表情撤回 `reactionRecall`（默认开）、Markdown `markdownReply`（默认开）、单聊 `allowC2c`（默认开）、回复净化 `sanitizeReplies`（默认开）、正在输入 `typingIndicator`（默认开）、按钮审批 `approvalButtons`（默认开）、多模态 `multimodalInbound`（默认开）、单聊语音回复 `ttsReply`（默认关）、SSRF 防护 `ssrfGuard`（默认开）、本地路径白名单 `localPathWhitelist`（默认关）、主动兜底 `proactiveFallback`（默认关）、语音转写 `voiceTranscription`（默认 note，平台转写）、凭据引用 `secretEnv`、群聊聊天 Preset `agentPresetChat`（留空跟随 `agentPreset`）。
-
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| `appId` / `appSecret` | 每机器人独立（`bots.json`） | 机器人凭据，添加机器人时写入；环境变量 `QQBOT_APP_ID` / `QQBOT_APP_SECRET` 仅作 entry 模式兜底 |
-| `secretEnv` | — | AppSecret 的 DSH 凭据引用（优先级最高；仅 bots.json 可配） |
-| `adminToken` | — | `/send` 主动消息端点令牌（全局，`global.json`） |
-| `workspacePath` | 启动目录 | 会话工作区；设置页可点「选择…」浏览文件夹自选 |
-| `agentPreset` / `agentPresetChat` | `default` / 空（跟随前者） | AT 用 Preset / 群全量非 @ 聊天用 Preset（`agentPresetChat` 仅 bots.json 可配） |
-| `permissionPreset` | `default` | 会话权限 Preset |
-| `permissionInjection` / `permissionAdmins` | `true` / `[]` | 对话权限注入开关；权限管理员 openid 名单（空=任何人可用 `/perm` 改默认权限，`"*"`=全部） |
-| `model` | 部署默认 | 显式模型路由，`provider/model` 或 `provider/model:输出上限` |
-| `allowC2c` | `true` | 是否接受单聊（仅 bots.json 可配） |
-| `respondToBots` | `false` | 是否响应其他机器人发出的消息（QQ 群聊通常不向机器人推送其他机器人消息，仅平台确实推送时生效） |
-| `allowGroups` / `allowUsers` | `["*"]` | 群 / 用户 openid 白名单 |
-| `atContextMessages` | `10` | AT 消息附带的群聊上下文条数（0 关闭） |
-| `groupBufferMax` | `50` | 每群全量消息缓冲条数 |
-| `groupFullReply` | `true` | 群全量消息价值回复总开关 |
-| `valueThreshold` | `5` | 价值评分阈值（0–10） |
-| `groupCooldownMs` / `senderCooldownMs` | `60000` / `30000` | 同群 / 同人回复最小间隔 |
-| `replyChunkChars` | `1000` | 单条回复分片最大字符数 |
-| `maxRepliesPerMessage` | `5` | 每条消息最多被动回复次数（官方上限） |
-| `markdownReply` | `true` | 优先 Markdown 回复，被拒降级纯文本（仅 bots.json 可配） |
-| `sanitizeReplies` | `true` | 发送前剥离 `system-reminder`/`<think>` 等隐藏标签块（出站防泄漏；仅 bots.json 可配） |
-| `quoteReply` | `at` | 出站引用范围（仅群聊生效，单聊一律不引用）：`off` 不引用；`at` 仅群 @ 回复（推荐）；`all` 群聊全部回复。引用为原生 `message_reference` 卡片，与被动回复凭证 `msg_id` **同传**（2026-09 实测矩阵：仅 `message_reference` 的主动消息通道手机端同一条内容出现两条；仅 `msg_id` 不显示引用；被动同传是唯一可行组合；合成事件无 `msg_id` 不引用）；仅平台明确拒绝（HTTP 4xx）时降级普通被动回复，结果不确定的失败（超时/网络/5xx）不重发、走投递出箱。降级发生时会在消息归档写一条 note（含平台拒绝原因） |
-| `quoteMaxChars` | `120` | 引用原话注入上下文的字数上限（入站引用恢复用） |
-| `archiveEnabled` | `true` | 消息本地归档（审计轨迹；仅 bots.json 可配） |
-| `proactiveFallback` | `false` | 被动回复失败时改用主动消息重发（仅 bots.json 可配） |
-| `multimodalInbound` | `true` | 入站图片/文件/语音附件注入会话上下文（仅 bots.json 可配） |
-| `fileIngestion` | `true` | 文本类文件（txt/md/json/csv/代码等，≤1MB）自动下载并截取正文注入模型上下文；二进制文件仅列文件名（仅 bots.json 可配） |
-| `typingIndicator` | `true` | 单聊处理期间发送「正在输入」状态（仅 bots.json 可配） |
-| `approvalButtons` | `true` | AI 请求敏感操作时发送「允许/拒绝」按钮消息（仅 bots.json 可配） |
-| `voiceTranscription` | `off` | 语音处理：off / note / download / asr / stt（仅 bots.json 可配） |
-| `asrEndpoint` | — | 自定义语音转写服务（POST {url} → {text}），`voiceTranscription=asr` 时使用 |
-| `sttBaseUrl` / `sttApiKey` / `sttModel` | — / — / `whisper-1` | OpenAI 兼容转写服务（`/audio/transcriptions`），`voiceTranscription=stt` 时使用 |
-| `ttsReply` | `false` | 单聊回复自动转语音（WAV 直传，合成失败回退文字；仅 bots.json 可配） |
-| `ttsBaseUrl` / `ttsApiKey` / `ttsModel` / `ttsVoice` | — / — / `tts-1` / `alloy` | OpenAI 兼容语音合成服务（`/audio/speech`），`ttsReply=true` 时使用 |
-| `welcomeEnabled` / `welcomeMessage` | `true` / — | 入群/加好友欢迎语（{nick} 占位；仅 bots.json 可配） |
-| `reactionRecall` | `true` | 🗑️ 表情回应撤回机器人消息（仅 bots.json 可配） |
-| `bannedWords` | `[]` | 群消息敏感词（@ 与全量均覆盖；命中撤回并跳过回复） |
-| `ssrfGuard` | `true` | AI 发图/文件/语音时拒绝内网与保留地址链接（QQ 官方域名直通；仅 bots.json 可配） |
-| `localPathWhitelist` | `false` | 本地文件仅允许工作区与插件数据目录内（仅 bots.json 可配） |
-| `replyLocale` | `zh` | 发给 QQ 用户的回复文案语言：`zh` / `en` |
-| `groupOverrides` | `{}` | 按群覆盖配置（群 openid → 行为字段子集：groupFullReply / valueThreshold / atContextMessages / 双冷却 / replyChunkChars / maxRepliesPerMessage / markdownReply / memoryEnabled / agentPresetChat / bannedWords；浅合并，群覆盖优先；设置页「按群配置」编辑，其中 memoryEnabled / agentPresetChat 仅 bots.json 可配但已有值在界面保存时保留） |
-| `memoryEnabled` | `true` | 每聊天长期记忆（跨 /new；仅 bots.json 可配） |
-| `quotaPerDay` | `50` | 主动消息每日配额（0=不限） |
-
-## 设置界面
-
-dsh 设置 → **QQ 机器人**：
-
-- **机器人列表**：卡片展示每个机器人的 AppID（脱敏）、接入方式、保存时间、主机器人标识与启用状态；支持设为主机器人 / 启用停用 / 删除。
-- **添加机器人**：分段 Tab——扫码登录（生成二维码，手机 QQ 扫码即完成，凭据自动落盘）| 手动填写（AppID/AppSecret）。
-- **机器人详情**：连接状态（含「重试连接」）、运行统计（按机器人持久化到 `~/.dsh/qqbot/stats/<appId>.json`，跨重启累计，每 10s 落盘一次，可「复位」清零）；行为配置——工作区（文件夹浏览）、模型、Agent Preset、群聊聊天 Preset、secretEnv、白名单、冷却、阈值、分片、归档、Markdown、敏感词、回复净化 / SSRF 防护 / 本地路径白名单安全开关等，即改即生效；**按群配置**卡片可为特定群单独覆盖行为字段（弹窗编辑，保存即生效）。
-- **定时消息**：按群查看/新建/取消，单群上限 5 条。
-
-## QQ 开放平台侧配置
-
-1. 开发设置拿到 `appId` / `secret`，配置 **IP 白名单**（回复走 OpenAPI 需要出口 IP 在白名单内）。
-2. 消息接收为 WebSocket 长连接，q.qq.com **无需配置回调地址**。
-3. 手机 QQ 群设置：机器人「可获取的群聊消息范围」设为全部、开启「机器人主动在群聊内发言」（如需主动消息/定时消息）。
+主要数据落在 `~/.dsh/qqbot/`：`bots.json`（机器人库，唯一事实来源）、`global.json`（`adminToken`）、`schedules.json`、`memory/`、`archive/`、`outbox.json`、`permissions/<appId>/`、`stats/`。
 
 ## 已知边界
 
-- 定时消息存在 `~/.dsh/qqbot/schedules.json`，调度精度 30 秒；进程未运行时不会触发。
-- webhookRuntime 为进程内 fire-and-forget：进程崩溃会丢未入会话的消息，无重试队列。
-- 群被动回复窗口只有 5 分钟，超长任务回复可能发送失败（可开 `proactiveFallback`，但注意主动消息配额）。
-- 群聊历史上下文（AT 附带记录 / 群全量缓冲）只回放**文本**，不含历史消息的图片/文件附件（仅触发消息本身带附件进上下文）。
-- 文件夹浏览器只列子目录（跳过以 `.` 开头的目录），不会创建或删除任何文件。
+- 定时消息调度精度 30 秒，进程未运行时不触发。
+- 群被动回复窗口 5 分钟 / 5 次，超长任务可能发送失败（可开 `proactiveFallback`，但消耗主动配额）。
+- 群聊历史上下文只回放**文本**，不含历史附件的图片 / 文件。
+- webhookRuntime 为进程内 fire-and-forget，进程崩溃会丢未入会话的消息。
 
 ## License
 

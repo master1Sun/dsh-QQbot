@@ -92,7 +92,7 @@ const EN = Object.freeze({
   "点击二维码下方的「生成二维码」，出现二维码后开始 5 分钟倒计时。":
     "Click “Generate QR code” below the QR area; a 5-minute countdown starts once it appears.",
   "打开手机 QQ，从右上角「＋」菜单进入「扫一扫」，扫描这张二维码。":
-    "Open mobile QQ, tap “＋” in the top-right corner, choose “Scan”, and scan this code.",
+    "Open mobile QQ, tap “+” in the top-right corner, choose “Scan”, and scan this code.",
   "按 QQ 页面提示完成确认，把这个机器人授权给本机 dsh 使用。":
     "Follow the QQ prompts to confirm and authorize this bot for the local dsh.",
   "本页每 2 秒检查一次结果，绑定成功后会自动进入机器人详情页。":
@@ -223,7 +223,7 @@ const EN = Object.freeze({
     "Images, files, and voice from groups/DMs are injected into the session context as attachments: vision models can see the images directly, and voice uses the platform's built-in transcript first. When off, non-text content is reduced to a placeholder note.",
   "长期记忆": "Long-term memory",
   "每个群/单聊维护一份持久记忆（跨 /new 保留）。对话里说「记住某事」AI 会自动写入；用 /记忆 查看、/清空记忆 清空。":
-    "Each group/DM keeps a persistent memory (survives /new). Say “remember something” in chat and the AI writes it down automatically; use /记忆 to view and /清空记忆 to clear it.",
+    "Each group/DM keeps a persistent memory (survives /new). Say “remember something” in chat and the AI writes it down automatically; use /memory to view and /forget to clear it.",
   "欢迎语": "Welcome message",
   "新成员进群或新好友添加时，机器人自动发送欢迎语（文案见下方输入框，{nick} 会替换为对方标识）。走主动消息通道，消耗每日配额。":
     "When a new member joins a group or adds the bot as a friend, the bot sends a welcome message automatically (text in the input below; {nick} is replaced with their identifier). Sent via the proactive channel and counts against the daily quota.",
@@ -420,7 +420,7 @@ const EN = Object.freeze({
   // ── 定时消息与归档（详情页卡片 + 两个独立弹窗）──
   "定时消息与归档": "Scheduled messages & archive",
   "定时消息：查看 / 删除这个机器人已设置的定时发送任务（聊天里的 /定时 命令与 AI 设置的任务都在这里）。消息归档：只读查看本地落盘的最近收发记录，按当前机器人过滤。":
-    "Scheduled messages: view/remove timed tasks set for this bot (both /定时 chat commands and AI-created ones). Archive: read-only view of recent locally archived messages, filtered by the current bot.",
+    "Scheduled messages: view/remove timed tasks set for this bot (both /schedule chat commands and AI-created ones). Archive: read-only view of recent locally archived messages, filtered by the current bot.",
   "定时消息管理": "Scheduled message manager",
   "列出这个机器人名下的全部定时消息（每天定时与间隔循环），可单条删除；删除立即生效并落盘。":
     "Lists all scheduled messages under this bot (daily and interval), each removable; removal takes effect immediately and is persisted.",
@@ -441,8 +441,8 @@ const EN = Object.freeze({
     "All scheduled send tasks under this bot (from chat commands and AI alike)",
   "正在读取定时消息…": "Loading scheduled messages…",
   "还没有定时消息。可在聊天里发 /定时 每天 09:00 内容、让 AI 帮你设置，或点上方「＋ 新增」。":
-    "No scheduled messages yet. Send /定时 daily 09:00 text in chat, ask the AI to set one up, or click “＋ New” above.",
-  "＋ 新增": "＋ New",
+    "No scheduled messages yet. Send /schedule daily 09:00 text in chat, ask the AI to set one up, or click “+ New” above.",
+  "＋ 新增": "+ New",
   "新增定时消息": "New scheduled message",
   "创建": "Create",
   "AI 生成": "AI-generated",
@@ -560,7 +560,7 @@ const EN = Object.freeze({
   "新增定时任务": "New scheduled task",
   "正在读取定时任务…": "Loading scheduled tasks…",
   "还没有定时任务。可在聊天里发 /定时 每天 09:00 内容、让 AI 帮你设置，或点上方「＋ 新增」。":
-    "No scheduled tasks yet. Send /timer daily 09:00 text in chat, ask the AI to set one up, or click “＋ New” above.",
+    "No scheduled tasks yet. Send /schedule daily 09:00 text in chat, ask the AI to set one up, or click “+ New” above.",
   "确定删除这条定时任务？删除后立即停止发送。":
     "Delete this scheduled task? It stops firing immediately.",
   "保存后立即生效并重新计算下次触发时间":
@@ -876,12 +876,17 @@ function translateDynamic(text: string): string {
   if (m) return `(AI generating) ${m[1]}`;
   m = /^已生成脚本：(.+?)。修改描述词并保存会重新生成。$/.exec(text);
   if (m) return `Generated script: ${m[1]}. Edit the prompt and save to regenerate.`;
-  m = /^共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
-  if (m) return `${m[1]} in total (max 5 per chat)`;
-  m = /^所有机器人共 (\d+) 条（每个群\/单聊最多 5 条）$/.exec(text);
-  if (m) return `All bots: ${m[1]} in total (max 5 per chat)`;
+  // 条数上限由 bots.json scheduleMaxPerChat 决定（默认 15，0=不限 → 无括号后缀）
+  m = /^共 (\d+) 条（每个群\/单聊最多 (\d+) 条）$/.exec(text);
+  if (m) return `${m[1]} in total (max ${m[2]} per chat)`;
+  m = /^所有机器人共 (\d+) 条（每个群\/单聊最多 (\d+) 条）$/.exec(text);
+  if (m) return `All bots: ${m[1]} in total (max ${m[2]} per chat)`;
   m = /^已显示最近 (\d+) 条（更早记录仍在归档文件里）$/.exec(text);
   if (m) return `Showing latest ${m[1]} (older records remain in the archive files)`;
+  m = /^共 (\d+) 条$/.exec(text);
+  if (m) return `${m[1]} in total`;
+  m = /^所有机器人共 (\d+) 条$/.exec(text);
+  if (m) return `All bots: ${m[1]} in total`;
   m = /^共 (\d+) 条记录$/.exec(text);
   if (m) return `${m[1]} record(s) in total`;
   // ── 定时消息编辑表单（动态串） ──

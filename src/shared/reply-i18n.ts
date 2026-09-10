@@ -40,15 +40,15 @@ const EN: Readonly<Record<string, string>> = Object.freeze({
   "分钟": "min",
   "（上次失败：": " (last failed: ",
   "）": ")",
-  "当前聊天还没有定时消息。用法：/定时 每天 09:00 内容 或 /定时 间隔 30 内容（每聊天最多 5 条）。":
-    "No scheduled messages in this chat yet. Usage: /定时 daily 09:00 text or /定时 interval 30 text (max 5 per chat).",
+  "当前聊天还没有定时消息。用法：/定时 每天 09:00 内容 或 /定时 间隔 30 内容。":
+    "No scheduled messages in this chat yet. Usage: /schedule daily 09:00 text or /schedule interval 30 text.",
   "当前定时消息：": "Scheduled messages:",
   "定时消息用法（也可直接用自然语言让 AI 帮你设置）：":
     "Scheduled message usage (you can also just ask the AI in natural language):",
-  "/定时 查看": "/定时 list",
-  "/定时 每天 09:00 记得喝水": "/定时 daily 09:00 drink some water",
-  "/定时 间隔 30 休息一下": "/定时 interval 30 take a break",
-  "用法：/定时 取消 <序号>": "Usage: /定时 cancel <index>",
+  "/定时 查看": "/schedule list",
+  "/定时 每天 09:00 记得喝水": "/schedule daily 09:00 drink some water",
+  "/定时 间隔 30 休息一下": "/schedule interval 30 take a break",
+  "用法：/定时 取消 <序号>": "Usage: /schedule cancel <index>",
 
   // ── /记忆 /清空记忆 ──
   "长期记忆未启用（可在设置中开启）。": "Long-term memory is off (enable it in settings).",
@@ -64,7 +64,7 @@ const EN: Readonly<Record<string, string>> = Object.freeze({
 
   // ── /广播 ──
   "用法：/广播 <内容>（向本机器人已见过的所有群发送）":
-    "Usage: /广播 <text> (send to all groups this bot has seen)",
+    "Usage: /broadcast <text> (send to all groups this bot has seen)",
   "本机器人还没有记录到任何群（收到群消息后才会加入广播范围）。":
     "No groups recorded yet (groups join the broadcast list after a group message arrives).",
 
@@ -133,7 +133,10 @@ function trDynamic(text: string): string | null {
   m = /^每个群\/单聊最多 (\d+) 条定时消息$/.exec(text);
   if (m) return `Max ${m[1]} scheduled messages per chat`;
   m = /^\/定时 取消 <序号>（每聊天最多 (\d+) 条）$/.exec(text);
-  if (m) return `/定时 cancel <index> (max ${m[1]} per chat)`;
+  if (m) return `/schedule cancel <index> (max ${m[1]} per chat)`;
+  // 条数上限由 scheduleMaxPerChat 决定（默认 15，0 = 不限 → 无括号后缀）
+  m = /^当前聊天还没有定时消息。用法：\/定时 每天 09:00 内容 或 \/定时 间隔 30 内容（每聊天最多 (\d+) 条）。$/.exec(text);
+  if (m) return `No scheduled messages in this chat yet. Usage: /schedule daily 09:00 text or /schedule interval 30 text (max ${m[1]} per chat).`;
   m = /^今日 (\d+)\/(\d+)$/.exec(text);
   if (m) return `today ${m[1]}/${m[2]}`;
   m = /^今日 (\d+)（不限）$/.exec(text);
@@ -178,11 +181,11 @@ export function helpText(locale: ReplyLocale): string {
     "/stop            Stop the running task",
     "/steer <text>    Add instructions to the running task",
     "/session         Show the bound session id",
-    "/记忆            View this chat's long-term memory",
-    "/清空记忆        Clear this chat's long-term memory",
-    "/撤回            Recall the bot's latest message",
-    "/广播 <text>     Broadcast to all known groups",
-    "/定时 list | /定时 daily HH:mm text | /定时 interval minutes text | /定时 cancel index",
+    "/memory          View this chat's long-term memory",
+    "/forget          Clear this chat's long-term memory",
+    "/recall          Recall the bot's latest message",
+    "/broadcast <text>  Broadcast to all known groups",
+    "/schedule list | /schedule daily HH:mm text | /schedule interval minutes text | /schedule cancel index",
     "/perm set/view/clear  Set · view · clear the default conversation permission (injected into prompt, applies to everyone)",
   ].join("\n");
 }
