@@ -73,6 +73,14 @@ export function OverrideDialog(props: {
   // 归档会话聚合：群 openid 下拉候选（id + 最近发言者名称）。
   const archiveChats = useArchiveChats(rpcCall, appId);
 
+  // 内联错误条统一 8 秒后自动收起（与其他 notice 行为一致）；
+  // 校验类错误会由用户下一次输入（setOverrideField）立即清掉，不会「说什么都没反应」。
+  React.useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(""), 8000);
+    return () => clearTimeout(timer);
+  }, [error]);
+
   const setOverrideField = (key: string, value: string) => {
     setError("");
     setDraft((prev) => ({ ...prev, [key]: value }));

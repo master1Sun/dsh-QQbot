@@ -216,6 +216,13 @@ export function ScheduleDialog(props: {
     }
   };
 
+  // 提示条自动收起：无论成功还是失败，8 秒后清空（失败原因在列表卡片的错误行里仍可看到）。
+  React.useEffect(() => {
+    if (!schedNotice) return;
+    const timer = setTimeout(() => setSchedNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [schedNotice]);
+
   React.useEffect(() => {
     void loadSchedules("current");
   }, []);
@@ -970,7 +977,7 @@ export function ScheduleDialog(props: {
               schedNotice
                 ? h(
                     "div",
-                    { key: "notice", className: `qbot-schedNotice${schedNotice.ok ? "" : " is-error"}` },
+                    { key: "notice", className: `qbot-schedNotice is-autoHide${schedNotice.ok ? "" : " is-error"}` },
                     schedNotice.text,
                   )
                 : null,

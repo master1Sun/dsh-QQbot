@@ -261,16 +261,22 @@ function truncateOutput(text: string, limit = COMMAND_OUTPUT_LIMIT): { text: str
   return { text: `${clean.slice(0, limit)}\n…（输出已截断，共 ${clean.length} 字）`, truncated: true };
 }
 
-/** 把命令执行结果格式化为可直接播报的文本（resultMode=raw 用）。 */
+/**
+ * 把命令执行结果格式化为可直接发送的文本（resultMode=raw 用）。
+ * **只发输出内容本身**：不带「定时任务」标题、不带命令行/耗时/退出码等工具元信息，
+ * 用户在 QQ 里看到的就是脚本的输出。
+ */
 export function formatCommandResult(result: CommandRunResult, limit = COMMAND_OUTPUT_LIMIT): string {
-  const head = result.ok ? "✅ 定时任务执行成功" : "❌ 定时任务执行失败";
-  const meta = `${result.command} · ${Math.round(result.durationMs / 100) / 10}s${result.exitCode !== null ? ` · exit ${result.exitCode}` : ""}`;
-  const body = result.ok
+  const { text } = truncateOutput(resultBody(result), limit);
+  return text;
+}
+
+/** 命令输出正文：成功取 stdout（无输出时给 stderr/占位），失败取错误 + stderr + stdout。 */
+function resultBody(result: CommandRunResult): string {
+  return result.ok
     ? result.stdout.trim() || (result.stderr.trim() ? `（无标准输出）stderr：\n${result.stderr.trim()}` : "（无输出）")
     : [result.error, result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n") ||
       "（无错误输出，可检查脚本文件是否存在/解释器是否安装）";
-  const { text } = truncateOutput(body, limit);
-  return `${head}\n${meta}\n\n${text}`;
 }
 
 /** 生成「命令输出 → AI 播报」的整理用 prompt（resultMode=ai 用）。 */
@@ -280,10 +286,11 @@ export function composeParsePrompt(entryTitle: string, result: CommandRunResult,
     : [result.error, result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n");
   const { text } = truncateOutput(body, limit);
   return [
-    `以下是定时任务「${entryTitle}」所执行命令的输出结果。`,
+    `以下是「${entryTitle}」所执行命令的输出结果。`,
     "请阅读并将其整理成一段简洁、可直接发送给用户的播报（保留关键数据与结论，去掉噪音与重复）。",
-    "要求：只输出播报正文，不要解释你的分析过程，不要使用 Markdown 标题。",
-    result.ok ? "" : "注意：该命令执行失败，请在播报中明确说明失败原因。",
+    "要求：只输出播报正文——用户在 QQ 里看到的就是这段话本身，不要出现「定时任务」「命令」「工具执行」「脚本输出」等字样，",
+    "不要解释你的分析过程，不要使用 Markdown 标题。",
+    result.ok ? "" : "注意：该命令执行失败，请在播报中说明失败原因。",
     "",
     "命令：",
     result.command,

@@ -50,6 +50,33 @@ export function SettingRow(props: { label: string; desc: string; control: any; r
 }
 
 /**
+ * 提示条自动消失倒计时：返回「剩余秒数」，到 0 时调用 onExpire。
+ * 依赖 key 变化（提示内容更新）会重新开始计时——同一条文案重复设置时不会重置，
+ * 需要重置可在调用方把带计数的文本作为 key 传入。
+ */
+export function useCountdown(activeKey: unknown, seconds: number, onExpire: () => void): number {
+  const [left, setLeft] = React.useState(0);
+  React.useEffect(() => {
+    if (!activeKey) { setLeft(0); return; }
+    let remain = seconds;
+    setLeft(remain);
+    const id = setInterval(() => {
+      remain -= 1;
+      if (remain <= 0) { clearInterval(id); setLeft(0); onExpire(); return; }
+      setLeft(remain);
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey, seconds]);
+  return left;
+}
+
+/** 提示条右侧的倒计时胶囊（纯数字 + s，无需翻译）。 */
+export function countdownBadge(left: number) {
+  return h("span", { className: "qbot-noticeCount", key: "countdown" }, `${left}s`);
+}
+
+/**
  * RPC 层在通道未响应时会返回结构化错误 { code, message, details } 而非字符串。
  * 统一转成可安全渲染的字符串，避免把对象当 React 子节点（React #31）。
  */

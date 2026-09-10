@@ -41,9 +41,11 @@ import {
   StateLabel,
   TextArea,
   confirmDlg,
+  countdownBadge,
   errText,
   formatTime,
   presetOptions,
+  useCountdown,
   val,
 } from "./ui.js";
 import { CSS_TEXT } from "./styles.js";
@@ -60,6 +62,9 @@ export const inject = ["slots", "connection", "locale"];
 declare const __PLUGIN_VERSION__: string;
 
 const RPC_CHANNEL = "/qqbot-settings";
+
+/** 提示条自动消失时长（秒）：倒计时归零后清空并隐藏。 */
+const NOTICE_TTL_SECONDS = 8;
 
 export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [status, setStatus] = React.useState<any>(null);
@@ -147,12 +152,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [notice]);
 
-  // 提示条自动消失：8 秒后清空，避免过期提示长期驻留。
-  React.useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(""), 8000);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
+  // 提示条自动消失：8 秒倒计时后清空；倒计时秒数实时显示在提示条右侧（见 countdownBadge）。
+  const noticeLeft = useCountdown(notice, NOTICE_TTL_SECONDS, () => setNotice(""));
 
   // ── 运行统计刷新 ─────────────────────────────────────────────────────────────
   const refreshStats = async () => {
@@ -358,7 +359,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   // ═══ 列表视图（panel 内容） ════════════════════════════════════════════════
   const listView = h("div", { className: "qbot-channelPage" },
     loadError ? h("div", { className: "qbot-statusNotice", role: "alert" }, loadError) : null,
-    notice ? h("div", { className: "qbot-infoNotice", id: "qbot-notice", role: "status" }, notice) : null,
+    notice ? h("div", { className: "qbot-infoNotice", id: "qbot-notice", role: "status", key: `notice-${notice}` },
+      h("span", { className: "qbot-noticeText", key: "text" }, notice), countdownBadge(noticeLeft)) : null,
     h("div", { className: "qbot-listHeading" },
       h("h3", null, `已配置机器人（${bots?.bots.length ?? 0}）`),
       h("button", {
@@ -533,7 +535,9 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         h("div", { className: "qbot-heroStat" },
           h("span", { className: "qbot-heroStatLabel" }, "最近连接"),
           h("div", { className: "qbot-heroStatValue" }, h("strong", null, lastChecked)))),
-      cardSummary ? h("div", { className: "qbot-heroFoot", id: "qbot-notice", role: "status" }, cardSummary) : null),
+      cardSummary ? h("div", { className: "qbot-heroFoot", id: "qbot-notice", role: "status" },
+        h("span", { className: "qbot-noticeText", key: "text" }, cardSummary),
+        notice ? countdownBadge(noticeLeft) : null) : null),
 
     // ── 运行统计（持久化：跨重启累计，stats/<appId>.json；可复位清零） ──
     status
