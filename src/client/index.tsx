@@ -21,7 +21,7 @@
  *   dialogs/*.tsx — 目录选择 / 定时消息 / 按群覆盖 / 消息归档四个弹窗。
  */
 import * as React from "react";
-import { QQBOT_LOCALE_NAMESPACE, en, h, localizeText, setTranslator, zh } from "./i18n.js";
+import { QQBOT_LOCALE_NAMESPACE, fmt, h, hostDictionaries, setLocale, setTranslator, t } from "./i18n/index.js";
 import {
   EMPTY_CATALOGS,
   type BotInfo,
@@ -99,7 +99,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         rpcCall("catalogs"),
       ]);
       if (s.ok) setStatus(val(s) ?? null);
-      else setLoadError(errText(s.error ?? "状态读取失败"));
+      else setLoadError(errText(s.error ?? t("common.statusReadFailed")));
       if (c.ok) {
         const stored = val(c)?.config ?? {};
         setForm({ ...stored });
@@ -131,7 +131,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     setForm((prev) => ({ ...prev, [key]: value }));
     const res = await rpcCall("config.save", { appId: detailAppId || undefined, [key]: value });
     if (!res.ok) {
-      const message = `保存失败：${errText(res.error)}`;
+      const message = fmt("notice.saveFailedPrefix", errText(res.error));
       setNotice(message);
       return { ok: false, error: message };
     }
@@ -177,7 +177,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const setPrimaryBot = async (appId: string) => {
     setNotice("");
     const res = await rpcCall("bots.setPrimary", { appId });
-    setNotice(res.ok ? "已设为主机器人" : `操作失败：${errText(res.error)}`);
+    setNotice(res.ok ? t("notice.setPrimary") : fmt("notice.operationFailedPrefix", errText(res.error)));
     if (res.ok) await refresh();
   };
 
@@ -185,20 +185,20 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const toggleEnabled = async (bot: BotInfo, enabled: boolean) => {
     setNotice("");
     const res = await rpcCall("bots.enable", { appId: bot.appId, enabled });
-    setNotice(res.ok ? (enabled ? "机器人已启用" : "机器人已停用") : `操作失败：${errText(res.error)}`);
+    setNotice(res.ok ? (enabled ? t("notice.botEnabled") : t("notice.botDisabled")) : fmt("notice.operationFailedPrefix", errText(res.error)));
     if (res.ok) await refresh();
   };
 
   const removeBot = async (bot: BotInfo) => {
-    if (!(await confirmDlg({ message: localizeText(`确定删除机器人 ${bot.appIdMasked}？删除后该机器人停止接收消息。`), danger: true }))) return;
+    if (!(await confirmDlg({ message: fmt("conn.removeConfirm", bot.appIdMasked), danger: true }))) return;
     setNotice("");
     const res = await rpcCall("bots.remove", { appId: bot.appId });
     if (res.ok) {
       await refresh();
       setPage("list");
-      setNotice("机器人已删除");
+      setNotice(t("notice.botRemoved"));
     } else {
-      setNotice(`删除失败：${errText(res.error)}`);
+      setNotice(fmt("notice.removeFailedPrefix", errText(res.error)));
     }
   };
 
@@ -209,7 +209,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     try {
       const res = await rpcCall("bots.reconnect", detailAppId ? { appId: detailAppId } : {});
       if (res.ok) await refresh();
-      setNotice(res.ok ? "已重新发起连接，请稍候查看状态" : `重试失败：${errText(res.error)}`);
+      setNotice(res.ok ? t("notice.reconnectStarted") : fmt("notice.retryFailedPrefix", errText(res.error)));
     } finally {
       setReconnecting(false);
     }
@@ -217,35 +217,35 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
 
   // ── 版本检查与自更新（host: update.check / update.apply，源 GitHub master 分支） ──
   const runUpdateCheck = async () => {
-    setUpdate({ busy: true, message: "正在检查更新…", done: false });
+    setUpdate({ busy: true, message: t("update.checking"), done: false });
     try {
       const res = await rpcCall("update.check");
       if (!res.ok) {
-        setUpdate({ busy: false, message: `检查失败：${errText(res.error)}`, done: false });
+        setUpdate({ busy: false, message: fmt("notice.checkFailedPrefix", errText(res.error)), done: false });
         return;
       }
       const v = (val(res) ?? {}) as { current?: string; latest?: string; hasUpdate?: boolean };
       if (!v.hasUpdate) {
-        setUpdate({ busy: false, message: `暂无新版本（当前 v${v.current || "?"} 已是最新）`, done: false });
+        setUpdate({ busy: false, message: fmt("update.noNewVersion", v.current || "?"), done: false });
         return;
       }
       // 检查到新版本：自动更新（下载 → 备份旧文件 → 覆盖安装目录）。
-      setUpdate({ busy: true, message: `发现新版本 v${v.latest}，正在自动更新…`, done: false });
+      setUpdate({ busy: true, message: fmt("update.found", v.latest ?? "?"), done: false });
       const applied = await rpcCall("update.apply");
       if (applied.ok) {
         const r = (val(applied) ?? {}) as { updatedTo?: string };
         setUpdate({
           busy: false,
-          message: `已自动更新到 v${r.updatedTo ?? v.latest}（备份于安装目录 .update-backup/），重启 DSH 后生效`,
+          message: fmt("update.updatedTo", r.updatedTo ?? v.latest ?? "?"),
           done: true,
         });
       } else {
-        setUpdate({ busy: false, message: `更新失败：${errText(applied.error)}`, done: false });
+        setUpdate({ busy: false, message: fmt("notice.updateFailedPrefix", errText(applied.error)), done: false });
       }
     } catch (error) {
       setUpdate({
         busy: false,
-        message: `检查失败：${error instanceof Error ? error.message : String(error)}`,
+        message: fmt("notice.checkFailedPrefix", error instanceof Error ? error.message : String(error)),
         done: false,
       });
     }
@@ -266,44 +266,59 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   /** 覆盖字段的简短摘要（列表行展示）。 */
   const overrideSummary = (ov: Record<string, unknown>): string => {
     const parts: string[] = [];
-    if (ov.groupFullReply !== undefined) parts.push(`全量回复 ${ov.groupFullReply ? "开" : "关"}`);
-    if (ov.valueThreshold !== undefined) parts.push(`阈值 ${ov.valueThreshold}`);
-    if (ov.atContextMessages !== undefined) parts.push(`上下文 ${ov.atContextMessages} 条`);
-    if (ov.groupCooldownMs !== undefined) parts.push(`群冷却 ${cooldownLabel(Number(ov.groupCooldownMs))}`);
-    if (ov.senderCooldownMs !== undefined) parts.push(`同人冷却 ${cooldownLabel(Number(ov.senderCooldownMs))}`);
-    if (ov.replyChunkChars !== undefined) parts.push(`分片 ${ov.replyChunkChars}`);
-    if (ov.maxRepliesPerMessage !== undefined) parts.push(`回复上限 ${ov.maxRepliesPerMessage}`);
-    if (ov.markdownReply !== undefined) parts.push(`Markdown ${ov.markdownReply ? "开" : "关"}`);
-    if (ov.memoryEnabled !== undefined) parts.push(`记忆 ${ov.memoryEnabled ? "开" : "关"}`);
-    if (Array.isArray(ov.bannedWords) && ov.bannedWords.length > 0) parts.push(`敏感词 ${ov.bannedWords.length} 个`);
-    if (typeof ov.agentPresetChat === "string" && ov.agentPresetChat) parts.push(`聊天 Preset ${ov.agentPresetChat}`);
-    return parts.length > 0 ? parts.join(" · ") : "无覆盖字段";
+    if (ov.groupFullReply !== undefined) parts.push(fmt("group.summaryFullReply", ov.groupFullReply ? t("sched.form.onShort") : t("sched.form.offShort")));
+    if (ov.valueThreshold !== undefined) parts.push(fmt("group.summaryThreshold", String(ov.valueThreshold)));
+    if (ov.atContextMessages !== undefined) parts.push(fmt("group.summaryContext", String(ov.atContextMessages)));
+    if (ov.groupCooldownMs !== undefined) parts.push(fmt("group.summaryGroupCooldown", cooldownLabel(Number(ov.groupCooldownMs))));
+    if (ov.senderCooldownMs !== undefined) parts.push(fmt("group.summarySenderCooldown", cooldownLabel(Number(ov.senderCooldownMs))));
+    if (ov.replyChunkChars !== undefined) parts.push(fmt("group.summaryChunk", String(ov.replyChunkChars)));
+    if (ov.maxRepliesPerMessage !== undefined) parts.push(fmt("group.summaryMaxReplies", String(ov.maxRepliesPerMessage)));
+    if (ov.markdownReply !== undefined) parts.push(fmt("group.summaryMarkdown", ov.markdownReply ? t("sched.form.onShort") : t("sched.form.offShort")));
+    if (ov.memoryEnabled !== undefined) parts.push(fmt("group.summaryMemory", ov.memoryEnabled ? t("sched.form.onShort") : t("sched.form.offShort")));
+    if (Array.isArray(ov.bannedWords) && ov.bannedWords.length > 0) parts.push(fmt("group.summaryBannedWords", ov.bannedWords.length));
+    if (typeof ov.agentPresetChat === "string" && ov.agentPresetChat) parts.push(fmt("group.summaryChatPreset", ov.agentPresetChat));
+    return parts.length > 0 ? parts.join(" · ") : t("group.noOverrides");
   };
 
   const removeOverride = async (openid: string) => {
-    if (!(await confirmDlg({ message: localizeText(`确定删除群 ${openid.slice(0, 10)}… 的覆盖配置？删除后该群恢复使用机器人默认配置。`), danger: true }))) return;
+    if (!(await confirmDlg({ message: fmt("group.removeConfirm", `${openid.slice(0, 10)}…`), danger: true }))) return;
     const next: Record<string, Record<string, unknown>> = { ...groupOverrides };
     delete next[openid];
     await saveField("groupOverrides", next);
   };
 
   // ── 下拉选项 ────────────────────────────────────────────────────────────────
-  /** 模型按供应商分组（group 顺序即服务端返回顺序）；无 id 的脏数据直接过滤。 */
+  /**
+   * 模型按供应商分组（group 顺序即服务端返回顺序）；无 id 的脏数据直接过滤。
+   * 由于「默认模型」可能同时出现在目录的多个分组里（id 相同），这里按 id 去重——否则
+   * `<select>` 只会选中第一条，用户选下面那条会「跳」回上面那条（表现为跳回默认）。
+   * 另外：当前已存模型若不在目录中（如自定义/本地模型），补一条，避免下拉找不到匹配
+   * 而回退显示第一项「跟随默认模型」。
+   */
   const modelGroups = (): Array<{ label: string; options: Option[] }> => {
     const groups: Array<{ label: string; options: Option[] }> = [];
     const index = new Map<string, number>();
-    for (const m of catalogs.models) {
-      if (!m || typeof m.id !== "string" || !m.id) continue;
-      const slash = m.id.indexOf("/");
-      const label = String(m.group ?? (slash > 0 ? m.id.slice(0, slash) : "模型"));
-      const option: Option = { value: m.id, label: typeof m.label === "string" && m.label ? m.label : m.id };
-      const at = index.get(label);
+    const seen = new Set<string>();
+    const push = (groupLabel: string, option: Option): void => {
+      if (seen.has(option.value)) return;
+      seen.add(option.value);
+      const at = index.get(groupLabel);
       if (at === undefined) {
-        index.set(label, groups.length);
-        groups.push({ label, options: [option] });
+        index.set(groupLabel, groups.length);
+        groups.push({ label: groupLabel, options: [option] });
       } else {
         groups[at].options.push(option);
       }
+    };
+    const cur = String(form.model ?? "").trim();
+    if (cur && !catalogs.models.some((m) => m && typeof m.id === "string" && m.id === cur)) {
+      push(t("sched.scopeCurrent"), { value: cur, label: fmt("notice.currentSuffix", cur) });
+    }
+    for (const m of catalogs.models) {
+      if (!m || typeof m.id !== "string" || !m.id) continue;
+      const slash = m.id.indexOf("/");
+      const label = String(m.group ?? (slash > 0 ? m.id.slice(0, slash) : t("session.model")));
+      push(label, { value: m.id, label: typeof m.label === "string" && m.label ? m.label : m.id });
     }
     return groups;
   };
@@ -338,22 +353,22 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     [bots, detailAppId],
   );
   const botState = (bot: BotInfo): { tone: "success" | "warning" | "error" | "neutral"; text: string } => {
-    if (!bot.enabled) return { tone: "neutral", text: "已停用" };
+    if (!bot.enabled) return { tone: "neutral", text: t("status.disabled") };
     return bot.ws?.state === "connected"
-      ? { tone: "success", text: "已连接" }
+      ? { tone: "success", text: t("status.connected") }
       : bot.ws?.state === "connecting"
-        ? { tone: "warning", text: "正在连接" }
-        : { tone: "error", text: "未连接" };
+        ? { tone: "warning", text: t("status.connecting") }
+        : { tone: "error", text: t("status.disconnected") };
   };
 
   const globalBadge = (() => {
     const all = bots?.bots ?? [];
     const primary = all.find((b) => b.primary);
     const anyConnected = all.some((b) => b.ws?.state === "connected");
-    if (primary?.ws?.state === "connected") return OnlineBadge({ tone: "success", text: "主机器人已连接" });
-    if (anyConnected) return OnlineBadge({ tone: "warning", text: "部分机器人已连接" });
-    if (all.length) return OnlineBadge({ tone: "error", text: "全部未连接" });
-    return OnlineBadge({ tone: "neutral", text: "未配置机器人" });
+    if (primary?.ws?.state === "connected") return OnlineBadge({ tone: "success", text: t("status.primaryConnected") });
+    if (anyConnected) return OnlineBadge({ tone: "warning", text: t("status.someConnected") });
+    if (all.length) return OnlineBadge({ tone: "error", text: t("status.allDisconnected") });
+    return OnlineBadge({ tone: "neutral", text: t("status.noBot") });
   })();
 
   // ═══ 列表视图（panel 内容） ════════════════════════════════════════════════
@@ -362,11 +377,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     notice ? h("div", { className: "qbot-infoNotice", id: "qbot-notice", role: "status", key: `notice-${notice}` },
       h("span", { className: "qbot-noticeText", key: "text" }, notice), countdownBadge(noticeLeft)) : null,
     h("div", { className: "qbot-listHeading" },
-      h("h3", null, `已配置机器人（${bots?.bots.length ?? 0}）`),
+      h("h3", null, fmt("status.configuredBots", bots?.bots.length ?? 0)),
       h("button", {
         className: "qbot-btn qbot-btnPrimary", type: "button",
         onClick: () => { setNotice(""); setPage("add"); },
-      }, "＋ 添加机器人")),
+      }, t("list.addBot"))),
     h("div", { className: "qbot-botList" },
       (bots?.bots ?? []).map((bot) => {
         const st = botState(bot);
@@ -382,11 +397,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                 h("span", { className: "qbot-botAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
                 h("div", { className: "qbot-botName" },
                   h("h3", null, bot.appIdMasked),
-                  h("p", null, `${bot.source === "qr" ? "扫码接入" : "手动填写"} · 保存于 ${formatTime(bot.savedAt)}`))),
+                  h("p", null, fmt("notice.sourceSavedAt", bot.source === "qr" ? t("qr.tabScan") : t("qr.tabManual"), formatTime(bot.savedAt))))),
               h("div", { className: "qbot-botTools" },
                 h("div", { className: "qbot-botHealthGroup" },
                   StateLabel({ tone: st.tone, text: st.text }),
-                  h("span", { className: "qbot-lastChecked" }, bot.primary ? "主机器人" : (bot.enabled ? "已启用" : "已停用")))),
+                  h("span", { className: "qbot-lastChecked" }, bot.primary ? t("status.primaryBot") : (bot.enabled ? t("status.enabled") : t("status.disabled"))))),
             h("div", { className: "qbot-botChevron", "aria-hidden": "true" }))));
       }),
       (bots?.bots.length ?? 0) === 0
@@ -394,10 +409,10 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             h("div", { className: "qbot-surfaceBody qbot-emptyView" },
               h("div", { className: "qbot-emptyBrand", "aria-hidden": "true" }, h(QqLogoGlyph)),
               h("div", { className: "qbot-emptyCopy" },
-                h("h3", null, "还没有配置成功的机器人"),
-                h("p", null, "点击上方「＋ 添加机器人」，用手机 QQ 扫码，或手动填写 AppID / AppSecret。配置成功后即可在详情中设置行为参数。"))))
+                h("h3", null, t("list.empty")),
+                h("p", null, t("list.emptyHint")))))
         : null,
-      h("p", { className: "qbot-hint" }, "点击机器人卡片可进入详情：查看 QQ 连接状态、调整行为配置。")));
+      h("p", { className: "qbot-hint" }, t("list.cardHint"))));
 
 
   const wsInfo = detailBot ? {
@@ -406,26 +421,26 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     lastError: typeof detailBot.ws?.lastError === "string" ? detailBot.ws.lastError : null,
   } : null;
   const connState: { tone: Tone; text: string } = !detailBot
-    ? { tone: "neutral", text: "未配置" }
-    : detailBot.ws?.state === "connected" ? { tone: "success", text: "运行正常" }
-      : wsInfo?.state === "connecting" ? { tone: "warning", text: "正在连接" }
-        : { tone: "error", text: "连接未就绪" };
+    ? { tone: "neutral", text: t("status.notConfigured") }
+    : detailBot.ws?.state === "connected" ? { tone: "success", text: t("status.running") }
+      : wsInfo?.state === "connecting" ? { tone: "warning", text: t("status.connecting") }
+        : { tone: "error", text: t("status.notReady") };
   const lastChecked = wsInfo?.lastConnectedAt
     ? formatTime(wsInfo.lastConnectedAt)
-    : "尚未检查";
+    : t("status.unchecked");
   const cardSummary = notice
     || (detailBot && detailBot.ws?.state !== "connected"
-      ? (wsInfo?.lastError ? `QQ 连接未就绪：${wsInfo.lastError}。插件会自动重试。` : "QQ 连接未就绪，插件会自动重试。")
+      ? (wsInfo?.lastError ? fmt("notice.qqNotReadyDetail", wsInfo.lastError) : t("status.qqNotReadyDefault"))
       : "");
 
   /** WebSocket 内部状态 → 中文标签，避免把 idle/connecting 之类原样丢给用户。 */
   const WS_LABELS: Record<string, string> = {
-    idle: "空闲",
-    connecting: "连接中",
-    connected: "已连接",
-    reconnecting: "重连中",
-    closed: "已断开",
-    error: "异常",
+    idle: t("status.idle"),
+    connecting: t("status.connectingShort"),
+    connected: t("status.connected"),
+    reconnecting: t("status.reconnecting"),
+    closed: t("status.disconnectedShort"),
+    error: t("status.error"),
   };
   const wsLabel = wsInfo ? (WS_LABELS[wsInfo.state] ?? wsInfo.state) : "—";
   const wsTone: Tone =
@@ -467,14 +482,14 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         const errors = Number(c.errors ?? 0);
         const pending = Number(detailBot.pendingReplies ?? 0);
         return [
-          { label: "收到消息", value: String(c.received ?? 0), tone: "neutral" as Tone },
-          { label: "创建会话", value: String(c.sessions ?? 0), tone: "neutral" as Tone },
-          { label: "被动回复", value: String(c.replies ?? 0), tone: "success" as Tone },
-          { label: "主动消息", value: String(c.proactive ?? 0), tone: "neutral" as Tone },
-          { label: "绑定会话", value: String(detailBot.boundSessions ?? 0), tone: "neutral" as Tone },
-          { label: "待回复队列", value: String(pending), tone: (pending > 0 ? "warning" : "neutral") as Tone },
-          { label: "群消息缓冲", value: String(buffered), tone: "neutral" as Tone },
-          { label: "错误", value: String(errors), tone: (errors > 0 ? "error" : "neutral") as Tone },
+          { label: t("stats.received"), value: String(c.received ?? 0), tone: "neutral" as Tone },
+          { label: t("stats.sessions"), value: String(c.sessions ?? 0), tone: "neutral" as Tone },
+          { label: t("stats.passive"), value: String(c.replies ?? 0), tone: "success" as Tone },
+          { label: t("stats.proactive"), value: String(c.proactive ?? 0), tone: "neutral" as Tone },
+          { label: t("stats.bound"), value: String(detailBot.boundSessions ?? 0), tone: "neutral" as Tone },
+          { label: t("stats.pendingQueue"), value: String(pending), tone: (pending > 0 ? "warning" : "neutral") as Tone },
+          { label: t("stats.groupBuffer"), value: String(buffered), tone: "neutral" as Tone },
+          { label: t("stats.errors"), value: String(errors), tone: (errors > 0 ? "error" : "neutral") as Tone },
         ];
       })()
     : [];
@@ -482,13 +497,13 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const detailView = h("div", { className: "qbot-channelPage" },
     // ── 顶部导航：返回 + 机器人身份（QQ 图标 / 编号 / 启用状态 / 连接状态），整条 sticky 吸顶 ──
     h("div", { className: "qbot-detailNav" },
-      h("button", { className: "qbot-btn", type: "button", onClick: () => { setPage("list"); setNotice(""); } }, "← 返回列表"),
+      h("button", { className: "qbot-btn", type: "button", onClick: () => { setPage("list"); setNotice(""); } }, t("add.backToList")),
       h("div", { className: "qbot-detailIdentity" },
         h("span", { className: "qbot-detailAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
-        h("strong", null, detailBot ? detailBot.appIdMasked : "未选择机器人"),
+        h("strong", null, detailBot ? detailBot.appIdMasked : t("detail.noneSelected")),
         detailBot
           ? h("span", { className: `qbot-chip${detailBot.primary ? " is-active" : ""}` },
-              detailBot.primary ? "主机器人" : (detailBot.enabled ? "已启用" : "已停用"))
+              detailBot.primary ? t("status.primaryBot") : (detailBot.enabled ? t("status.enabled") : t("status.disabled")))
           : null,
         h("span", { className: "qbot-onlineBadge qbot-detailNavState" },
           h("span", { className: "qbot-stateDot", "data-tone": connState.tone }),
@@ -501,29 +516,29 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         h("span", { className: "qbot-heroAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
         h("div", { className: "qbot-heroIdentity" },
           h("div", { className: "qbot-heroNameRow" },
-            h("h2", null, detailBot ? detailBot.appIdMasked : "未选择机器人"),
+            h("h2", null, detailBot ? detailBot.appIdMasked : t("detail.noneSelected")),
             detailBot
               ?               h("span", { className: `qbot-chip${detailBot.primary ? " is-active" : ""}` },
-                  detailBot.primary ? "主机器人" : (detailBot.enabled ? "已启用" : "已停用"))
+                  detailBot.primary ? t("status.primaryBot") : (detailBot.enabled ? t("status.enabled") : t("status.disabled")))
               : null),
           h("div", { className: "qbot-heroMeta" },
-            h("span", null, detailBot ? (detailBot.source === "qr" ? "扫码接入" : "手动填写") : "—"),
+            h("span", null, detailBot ? (detailBot.source === "qr" ? t("qr.tabScan") : t("qr.tabManual")) : "—"),
             h("span", { className: "qbot-metaDot", "aria-hidden": "true" }),
-            h("span", null, detailBot ? `保存于 ${formatTime(detailBot.savedAt)}` : "—"))),
+            h("span", null, detailBot ? fmt("notice.savedAtPrefix", formatTime(detailBot.savedAt)) : "—"))),
         h("div", { className: "qbot-heroActions" },
           h("button", {
             className: "qbot-btn", type: "button",
             disabled: !detailBot,
             onClick: () => setScheduleOpen(true),
-          }, "定时消息"),
+          }, t("sched.tabScheduled")),
           h("button", {
             className: "qbot-btn", type: "button",
             disabled: !detailBot,
             onClick: () => setArchiveOpen(true),
-          }, "消息归档"))),
+          }, t("archive.tab")))),
       h("div", { className: "qbot-heroStats" },
         h("div", { className: "qbot-heroStat" },
-          h("span", { className: "qbot-heroStatLabel" }, "连接状态"),
+          h("span", { className: "qbot-heroStatLabel" }, t("detail.connectionStatus")),
           h("div", { className: "qbot-heroStatValue" },
             h("span", { className: "qbot-stateDot", "data-tone": connState.tone }),
             h("strong", null, connState.text))),
@@ -533,7 +548,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             h("span", { className: "qbot-stateDot", "data-tone": wsTone }),
             h("strong", null, wsLabel))),
         h("div", { className: "qbot-heroStat" },
-          h("span", { className: "qbot-heroStatLabel" }, "最近连接"),
+          h("span", { className: "qbot-heroStatLabel" }, t("detail.lastConnected")),
           h("div", { className: "qbot-heroStatValue" }, h("strong", null, lastChecked)))),
       cardSummary ? h("div", { className: "qbot-heroFoot", id: "qbot-notice", role: "status" },
         h("span", { className: "qbot-noticeText", key: "text" }, cardSummary),
@@ -541,7 +556,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
 
     // ── 运行统计（持久化：跨重启累计，stats/<appId>.json；可复位清零） ──
     status
-      ? sectionCard("运行统计", "该机器人的持久运行计数（重启不清零）；数值不会自动刷新，需要时点「刷新」。",
+      ? sectionCard(t("stats.title"), t("stats.hint"),
           h("div", { className: "qbot-metricGrid" },
             metrics.map((m) => metricCard(m.label, m.value, m.tone))),
           h("div", { className: "qbot-sectionActions" },
@@ -549,44 +564,47 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
               className: "qbot-btn", type: "button",
               disabled: refreshing,
               onClick: () => void refreshStats(),
-            }, refreshing ? "刷新中…" : "刷新"),
+            }, refreshing ? t("common.refreshing") : t("common.refresh")),
             h("button", {
               className: "qbot-btn qbot-btnDanger", type: "button",
               disabled: resetting || refreshing,
-              title: "把该机器人的运行计数清零（立即生效并落盘）",
+              title: t("stats.resetHint"),
               onClick: () => void resetStats(),
-            }, resetting ? "复位中…" : "复位")))
+            }, resetting ? t("common.resetting") : t("common.reset"))))
       : null,
 
     // ── 会话与模型 ──
-    sectionCard("会话与模型", "决定这个机器人以什么身份、在哪个目录、用哪个模型干活；每个机器人彼此独立，改动只对之后新建的会话生效。",
+    sectionCard(t("session.title"), t("session.hint"),
       h("div", { className: "qbot-settingList" },
         // 工作区：路径较长，独占一行展示
         h("div", { className: "qbot-workspaceCard" },
           h("div", { className: "qbot-workspaceCardHead" },
             h("div", { className: "qbot-settingCopy" },
-              h("span", { className: "qbot-settingTitle" }, "工作区目录"),
+              h("span", { className: "qbot-settingTitle" }, t("session.workspace")),
               h("span", { className: "qbot-settingDesc" },
-                "QQ 消息创建的会话都在这个目录里读写文件。留空则使用默认工作区；改动只对新建会话生效。")),
-            h("button", { className: "qbot-btn", type: "button", onClick: () => setPickerOpen(true) }, "选择目录")),
+                t("session.workspaceHint"))),
+            h("button", { className: "qbot-btn", type: "button", onClick: () => setPickerOpen(true) }, t("session.chooseDir"))),
           h("code", { className: "qbot-workspacePath", title: String(form.workspacePath ?? "") },
-            String(form.workspacePath ?? "").trim() || "默认工作区（~/.dsh/file）")),
+            String(form.workspacePath ?? "").trim() || t("session.defaultWorkspace"))),
         SettingRow({
-          label: "模型",
-          desc: "这个机器人会话使用的模型；留空则跟随宿主默认模型。切换后已有会话需要重置才会生效。",
+          label: t("session.model"),
+          desc: t("session.modelHint"),
           control: h("select", {
+            // key 随「当前值 + 目录规模」变化：目录异步到达时强制重挂载，
+            // 避免「value 先于 option 设置」导致 select 卡在第一项「跟随默认模型」。
+            key: `model-${String(form.model ?? "")}-${catalogs.models.length}`,
             className: "qbot-settingSelect",
             value: String(form.model ?? ""),
             onChange: (e: any) => void saveField("model", e.target.value),
-            "aria-label": "模型",
+            "aria-label": t("session.model"),
           },
-            h("option", { value: "" }, "跟随默认模型"),
+            h("option", { value: "" }, t("session.followDefaultModel")),
             modelGroups().map((g) => h("optgroup", { key: g.label, label: g.label },
               g.options.map((o) => h("option", { key: o.value, value: o.value }, o.label))))),
         }),
         SettingRow({
           label: "Agent Preset",
-          desc: "决定机器人的行事风格与可用工具。@ 机器人和单聊消息都走这个 Preset；群里非 @ 的回复走聊天 Preset（默认跟随本 Preset，仅可在 bots.json 配置），不会执行工具。",
+          desc: t("session.presetHint"),
           control: h("select", {
             className: "qbot-settingSelect",
             value: String(form.agentPreset ?? ""),
@@ -600,7 +618,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       )),
 
     // ── 消息与回复策略（开关） ──
-    sectionCard("消息与回复策略", "控制这个机器人「听哪些消息、怎么回」，每个机器人彼此独立。所有开关改完立即生效，不需要重启。",
+    sectionCard(t("policy.title"), t("policy.hint"),
       h("div", { className: "qbot-settingList" },
         SWITCH_DEFS.map((it) => SettingRow({
           rowKey: it.key,
@@ -616,126 +634,126 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         })),
         SettingRow({
           rowKey: "quoteReply",
-          label: "回复引用原话",
-          desc: "回复以 QQ 原生引用卡片定位到用户那条原消息（message_reference，走主动消息通道发送，不与 msg_id 同传——手机端两者同传会堆叠重复引用）。仅群聊生效，单聊一律不引用：off=不引用；at=仅群 @ 回复（推荐）；all=群聊全部回复。卡片发送失败时自动降级为普通被动回复（无卡片，内容不丢）。此外，用户引用聊天里某条消息时，被引用的原文会始终注入模型上下文，让它知道对方在回应什么。",
+          label: t("policy.quote"),
+          desc: t("policy.quoteHint"),
           control: h("select", {
             className: "qbot-settingSelect",
             value: String(form.quoteReply ?? "at"),
             onChange: (e: any) => void saveField("quoteReply", e.target.value),
-            "aria-label": "回复引用原话范围",
+            "aria-label": t("policy.quoteScope"),
           },
-            h("option", { value: "off" }, "off（不引用）"),
-            h("option", { value: "at" }, "at（仅群 @，推荐）"),
-            h("option", { value: "all" }, "all（群聊全部回复）")),
+            h("option", { value: "off" }, t("policy.quoteScopeOff")),
+            h("option", { value: "at" }, t("policy.quoteScopeAt")),
+            h("option", { value: "all" }, t("policy.quoteScopeAll"))),
         }),
         // 语音相关配置（语音消息处理 / ASR / STT / TTS）已从界面移除，仅通过 bots.json 配置——
         // 详见 meta.ts SWITCH_DEFS 顶部注释。
         SettingRow({
           rowKey: "replyLocale",
-          label: "回复语言（replyLocale）",
-          desc: "机器人直接发给 QQ 用户的系统文案（/help、/status、定时消息用法、欢迎语等）使用的语言。中文为源语言；选择 English 时这些文案自动翻译为英文，未命中的内容保持原文不丢信息。AI 对话内容本身不受影响。",
+          label: t("replyLocale.label"),
+          desc: t("replyLocale.hint"),
           control: h("select", {
             className: "qbot-settingSelect",
             value: String(form.replyLocale ?? "zh"),
             onChange: (e: any) => void saveField("replyLocale", e.target.value),
-            "aria-label": "回复语言",
+            "aria-label": t("replyLocale.labelShort"),
           },
-            h("option", { value: "zh" }, "中文（默认）"),
+            h("option", { value: "zh" }, t("replyLocale.zh")),
             h("option", { value: "en" }, "English")),
         }),
         // 欢迎语开关与文案已从界面移除（默认开启），仅通过 bots.json 配置 welcomeEnabled / welcomeMessage。
         SettingRow({
           rowKey: "bannedWords",
           wide: true,
-          label: "敏感词列表",
-          desc: "逗号分隔。群消息包含其中任意一词时，机器人撤回该消息并跳过回复（需要消息撤回权限；无权限时仅拦截回复）。",
+          label: t("feature.bannedWords"),
+          desc: t("feature.bannedWordsHint"),
           control: TextArea({
             rows: 3,
             defaultValue: Array.isArray(form.bannedWords) ? (form.bannedWords as string[]).join(", ") : "",
-            placeholder: "词1, 词2（留空不启用）",
+            placeholder: t("feature.bannedWordsPlaceholder"),
             onBlur: (e: any) => {
               const words = String(e?.target?.value ?? "").split(/[,，]/).map((w) => w.trim()).filter(Boolean);
               void saveField("bannedWords", words);
             },
-            "aria-label": "敏感词列表",
+            "aria-label": t("feature.bannedWords"),
           }),
         }))),
 
     // ── 回复调优（数值） ──
-    sectionCard("回复调优", "调节这个机器人「回得多不多、切得多碎」，每个机器人彼此独立。改完立即生效，建议先按默认值跑一段时间再微调。",
+    sectionCard(t("tune.title"), t("tune.hint"),
       h("div", { className: "qbot-settingList" },
-        numSelect("valueThreshold", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], (n) => (n === 0 ? "0（全部回复）" : `${n} 分`)),
-        numSelect("atContextMessages", [0, 2, 4, 6, 8, 10, 15, 20, 30, 50], (n) => (n === 0 ? "0（关闭）" : `${n} 条`)),
+        numSelect("valueThreshold", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], (n) => (n === 0 ? t("tune.allZero") : fmt("override.scoreOption", n))),
+        numSelect("atContextMessages", [0, 2, 4, 6, 8, 10, 15, 20, 30, 50], (n) => (n === 0 ? t("tune.offZero") : fmt("override.countOption", n))),
         numSelect("groupCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
         numSelect("senderCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
         numSelect("replyChunkChars", [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000]),
         numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5]),
-        numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => `${n} 字`),
-        numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? "0（不限）" : `${n} 条/天`))),
+        numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => fmt("override.charsOption", n)),
+        numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? t("quota.unlimitedZero") : fmt("override.perDayOption", n)))),
       undefined),
 
     // ── 按群配置（群级覆盖） ──
-    sectionCard("按群配置", "为特定群单独覆盖行为配置（阈值/冷却/敏感词/上下文等），其余字段跟随机器人默认。适合把某一个群调得更活跃或更安静，而不影响其他群。",
+    sectionCard(t("group.title"), t("group.hint"),
       h("div", { className: "qbot-settingList" },
         Object.keys(groupOverrides).length === 0
-          ? h("div", { className: "qbot-modalState" }, "还没有按群覆盖配置，所有群都使用上方机器人默认配置。")
+          ? h("div", { className: "qbot-modalState" }, t("group.empty"))
           : Object.entries(groupOverrides).map(([openid, ov]) =>
               h("div", { key: openid, className: "qbot-schedRow" },
                 h("div", { className: "qbot-schedMain" },
                   h("div", { className: "qbot-schedTop" },
-                    h("span", { className: "qbot-chip is-active" }, "群"),
+                    h("span", { className: "qbot-chip is-active" }, t("group.group")),
                     h("code", { className: "qbot-mono", title: openid },
                       `${openid.slice(0, 12)}${openid.length > 12 ? "…" : ""}`)),
                   h("div", { className: "qbot-schedContent" }, overrideSummary(ov))),
                 h("div", { className: "qbot-schedOps" },
-                  h("button", { className: "qbot-btn qbot-schedEdit", type: "button", onClick: () => setOverrideEdit(openid) }, "编辑"),
-                  h("button", { className: "qbot-btn qbot-btnDanger", type: "button", onClick: () => void removeOverride(openid) }, "删除")))),
+                  h("button", { className: "qbot-btn qbot-schedEdit", type: "button", onClick: () => setOverrideEdit(openid) }, t("common.edit")),
+                  h("button", { className: "qbot-btn qbot-btnDanger", type: "button", onClick: () => void removeOverride(openid) }, t("common.delete"))))),
         h("div", { className: "qbot-editActions" },
-          h("span", { className: "qbot-hint" }, "覆盖字段未设置时跟随机器人默认；全部清空并保存即删除该群覆盖。"),
-          h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setOverrideEdit("") }, "添加群覆盖"))),
+          h("span", { className: "qbot-hint" }, t("group.overrideHint")),
+          h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setOverrideEdit("") }, t("group.add")))),
       undefined),
 
     // ── 连接与移除 ──
-    sectionCard("连接与移除", "管理机器人的启用状态、设为主机器人、重建 QQ 长连接，或删除接入配置。",
+    sectionCard(t("conn.title"), t("conn.hint"),
       h("div", { className: "qbot-settingList" },
           detailBot
             ? SettingRow({
-                label: detailBot.enabled ? "停用此机器人" : "启用此机器人",
-                desc: "停用的机器人不会建立 QQ 长连接，也不会接收或回复消息；其它已启用的机器人不受影响。",
+                label: detailBot.enabled ? t("conn.disableBot") : t("conn.enableBot"),
+                desc: t("conn.disableHint"),
                 control: h("button", {
                   className: "qbot-btn", type: "button",
                   disabled: detailBot.primary,
                   onClick: () => void toggleEnabled(detailBot, !detailBot.enabled),
-                }, detailBot.enabled ? "停用" : "启用"),
+                }, detailBot.enabled ? t("conn.disable") : t("conn.enable")),
               })
             : null,
           detailBot && !detailBot.primary
             ? SettingRow({
-                label: "设为主机器人",
-                desc: "未显式指定机器人时（配置编辑、主动消息、定时任务），默认作用于主机器人。所有「已启用」的机器人都会同时接收并回复消息。",
+                label: t("conn.setPrimary"),
+                desc: t("conn.primaryHint"),
                 control: h("button", {
                   className: "qbot-btn", type: "button",
                   onClick: () => void setPrimaryBot(detailBot.appId),
-                }, "设为主机器人"),
+                }, t("conn.setPrimary")),
               })
             : null,
           SettingRow({
-            label: detailBot?.ws?.state === "connected" ? "检查连接" : "重试连接",
-            desc: "按当前凭据重新建立 QQ WebSocket 长连接。收不到消息时先点它排查。",
+            label: detailBot?.ws?.state === "connected" ? t("conn.check") : t("conn.retry"),
+            desc: t("conn.retryHint"),
             control: h("button", {
               className: "qbot-btn", type: "button",
               disabled: reconnecting || !detailBot,
               onClick: () => void retryConnection(),
-            }, reconnecting ? "检查中…" : detailBot?.ws?.state === "connected" ? "检查连接" : "重试连接"),
+            }, reconnecting ? t("conn.checking") : detailBot?.ws?.state === "connected" ? t("conn.check") : t("conn.retry")),
           }),
           detailBot
             ? SettingRow({
-                label: "移除接入",
-                desc: "删除这个机器人的凭据与配置，删除后它会立刻停止接收消息，且无法撤销。",
+                label: t("conn.remove"),
+                desc: t("conn.removeHint"),
                 control: h("button", {
                   className: "qbot-btn qbot-btnDanger", type: "button",
                   onClick: () => void removeBot(detailBot),
-                }, "移除接入"),
+                }, t("conn.remove")),
               })
             : null), undefined, { danger: true }));
 
@@ -753,22 +771,22 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
 
   // ═══ 页面骨架：标题栏 + 面板（无左侧导航栏，导航由面板内按钮承担） ═══════════
 
-  return h("section", { className: "qbot-page", "aria-label": "QQ 机器人设置" },
+  return h("section", { className: "qbot-page", "aria-label": t("app.settingsTitle") },
     h("header", { className: "qbot-title" },
       h("div", { className: "qbot-brand" },
         h(QqBotGlyph, { className: "qbot-brandGlyph", uid: "brand" }),
         h("div", { className: "qbot-brandText" },
           h("div", { className: "qbot-brandHeading" },
-            h("strong", { className: "qbot-brandName" }, "QQ 机器人"),
+            h("strong", { className: "qbot-brandName" }, t("app.title")),
             h("span", { className: "qbot-brandVersion" }, `v${typeof __PLUGIN_VERSION__ === "string" ? __PLUGIN_VERSION__ : "0.0.2"}`),
             h("button", {
               className: `qbot-btn qbot-updateBtn${update.done ? " is-done" : ""}`,
               type: "button",
               disabled: update.busy,
-              title: "从 GitHub 检查新版本；发现新版本会自动下载并更新，重启 DSH 后生效",
+              title: t("update.hint"),
               onClick: () => void runUpdateCheck(),
-            }, update.busy ? "检查中…" : update.done ? "已更新 ✓" : "检查更新")),
-          h("p", null, "把 QQ 机器人接入 DeepSeek Harness"))),
+            }, update.busy ? t("conn.checking") : update.done ? t("update.updated") : t("update.check"))),
+          h("p", null, t("app.subtitle")))),
       h("div", { className: "qbot-titleActions" }, globalBadge)),
     update.message
       ? h("div", { className: "qbot-infoNotice qbot-updateNotice", role: "status" }, update.message)
@@ -784,7 +802,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             setPickerOpen(false);
             void (async () => {
               await saveField("workspacePath", dir);
-              setNotice(`工作区已保存：${dir}（对新建会话生效）`);
+              setNotice(fmt("notice.workspaceSavedPrefix", dir));
             })();
           },
         })
@@ -809,12 +827,12 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             if (next[openid]) {
               const saved = (r.data?.groupOverrides ?? {}) as Record<string, unknown>;
               if (!(openid in saved)) {
-                const message = `保存未生效：群 ${short} 的覆盖未写入配置，请重试`;
+                const message = fmt("notice.groupOverrideSaveNoEffect", short);
                 setNotice(message);
                 return { ok: false, error: message };
               }
             }
-            setNotice(`群 ${short} 的覆盖配置已保存（立即生效）`);
+            setNotice(fmt("notice.groupOverrideSaved", short));
             return { ok: true };
           },
         })
@@ -828,13 +846,24 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
 }
 
 export function apply(ctx: any) {
-  // 国际化：注册中英文字典并绑定宿主翻译函数（随宿主语言切换实时生效）。
+  // 国际化：注册 cn/en 两份字段名文案表并绑定宿主翻译函数。
+  // 宿主 locale id 固定为 zh/en，这里把项目内部的 cn 映射为 zh 后注册。
   ctx.effect(
-    () => ctx.locale?.register?.(QQBOT_LOCALE_NAMESPACE, { zh, en }),
+    () => ctx.locale?.register?.(QQBOT_LOCALE_NAMESPACE, hostDictionaries),
     "qqbot-settings: locale dictionaries",
   );
-  const t = ctx.locale?.bind?.(QQBOT_LOCALE_NAMESPACE);
-  setTranslator(typeof t === "function" ? t : undefined);
+  const bound = ctx.locale?.bind?.(QQBOT_LOCALE_NAMESPACE);
+  setTranslator(typeof bound === "function" ? bound : undefined);
+
+  // 跟随宿主语言：读一次当前语言，并订阅后续切换事件。
+  try {
+    const initial = ctx.locale?.getLocale?.();
+    if (typeof initial === "string") setLocale(initial);
+  } catch { /* 宿主未提供 getLocale 时保持默认 */ }
+  ctx.effect(() => {
+    const off = ctx.locale?.subscribe?.((locale: string) => setLocale(locale));
+    return typeof off === "function" ? off : () => {};
+  }, "qqbot-settings: locale subscription");
 
   const rpcCall: RpcCall = async (endpoint, payload, signal) => {
     // framework 的 clientRequestSchema 要求信封必须带 payload 字段；始终传一个对象（至少 {}）。
@@ -845,7 +874,7 @@ export function apply(ctx: any) {
       const r = raw as { code?: unknown; message?: unknown };
       const msg = typeof r.message === "string" && r.message
         ? r.message
-        : typeof r.code === "string" ? r.code : "RPC 调用失败";
+        : typeof r.code === "string" ? r.code : t("common.rpcFailed");
       return { ok: false, error: msg };
     }
     return raw as Reply;
@@ -860,7 +889,7 @@ export function apply(ctx: any) {
         order: 31,
         label: () => h("span", { className: "qbot-navLabel" },
           h(QqBotGlyph, { className: "qbot-navGlyph", uid: "nav" }),
-          h("span", { className: "qbot-navText" }, localizeText("QQ 机器人"))),
+          h("span", { className: "qbot-navText" }, t("app.title"))),
         inject: () => ({ rpcCall }),
       },
       QqbotSettingsTab,

@@ -5,7 +5,7 @@
  * - 输入框内容即过滤词：按 openid / 名称模糊匹配，清空后展示全部候选。
  */
 import * as React from "react";
-import { h } from "./i18n.js";
+import { fmt, h, t } from "./i18n/index.js";
 import type { RpcCall } from "./types.js";
 import { errText, val } from "./ui.js";
 
@@ -84,12 +84,12 @@ export function OpenIdPicker(props: {
   /** 首行标题：群聊固定「群聊」+ 最近发言成员提示（明确昵称只是辨认辅助）；单聊显示用户昵称。 */
   const itemTitle = (c: ChatOption): string =>
     scope === "c2c"
-      ? c.name || "用户"
+      ? c.name || t("idpick.user")
       : c.lastSenderName
-        ? `群聊 · 最近发言成员：${c.lastSenderName}`
-        : "群聊";
+        ? fmt("idpick.groupRecentSpeaker", c.lastSenderName)
+        : t("sched.form.scopeGroup");
   /** id 行前缀：显式标注这个 id 是谁的，避免群候选被误认为成员的用户 id。 */
-  const idPrefix = scope === "group" ? "群 id：" : "用户 id：";
+  const idPrefix = scope === "group" ? t("idpick.groupIdLabel") : t("idpick.userIdLabel");
 
   return h(
     "div",
@@ -98,7 +98,7 @@ export function OpenIdPicker(props: {
       className: "qbot-input qbot-mono",
       value,
       readOnly: Boolean(readOnly),
-      placeholder: placeholder ?? "群或用户的 openid",
+      placeholder: placeholder ?? t("sched.form.recipientPlaceholder"),
       autoComplete: "off",
       onFocus: () => setOpen(true),
       onBlur: () => setOpen(false),
@@ -109,23 +109,23 @@ export function OpenIdPicker(props: {
         setOpen(true);
         onChange(ev.target.value);
       },
-      "aria-label": ariaLabel ?? "接收方 openid",
+      "aria-label": ariaLabel ?? t("sched.form.recipient"),
     }),
     open && !readOnly
       ? h(
           "div",
-          { className: "qbot-idPickerMenu", role: "listbox", "aria-label": "归档会话候选" },
+          { className: "qbot-idPickerMenu", role: "listbox", "aria-label": t("idpick.title") },
           loading
-            ? h("div", { className: "qbot-idPickerState" }, "正在读取归档会话…")
+            ? h("div", { className: "qbot-idPickerState" }, t("idpick.loading"))
             : error
-              ? h("div", { className: "qbot-idPickerState" }, `归档读取失败：${error}（可直接粘贴 openid）`)
+              ? h("div", { className: "qbot-idPickerState" }, fmt("notice.archiveReadFailed", error))
               : shown.length === 0
                 ? h(
                     "div",
                     { className: "qbot-idPickerState" },
                     pool.length === 0
-                      ? "归档里还没有该类型的会话记录，可直接粘贴 openid"
-                      : "没有匹配的候选，可直接粘贴 openid",
+                      ? t("idpick.empty")
+                      : t("idpick.noMatch"),
                   )
                 : [
                     ...shown.map((c) =>
@@ -149,7 +149,7 @@ export function OpenIdPicker(props: {
                       ),
                     ),
                     list.length > shown.length
-                      ? h("div", { className: "qbot-idPickerState" }, `共 ${list.length} 个候选，输入关键词继续过滤`)
+                      ? h("div", { className: "qbot-idPickerState" }, fmt("idpick.candidates", list.length))
                       : null,
                   ],
         )

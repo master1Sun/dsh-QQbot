@@ -55,6 +55,8 @@ function describeEntry(entry: ScheduleEntry, index: number): Record<string, unkn
       ? {
           command: entry.command ?? "",
           ...(entry.cwd ? { cwd: entry.cwd } : {}),
+          ...(entry.timeoutMs ? { timeoutMs: entry.timeoutMs } : {}),
+          ...(entry.env ? { env: entry.env } : {}),
           resultMode: entry.resultMode ?? "raw",
           ...(entry.parsePrompt ? { parsePrompt: entry.parsePrompt } : {}),
           gate: entry.gate ?? "always",
@@ -185,6 +187,14 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
             description: "AI 脚本描述词：填写任务目标（如「抓取某网页价格写入 csv」），保存后由系统后台让 AI 生成脚本落盘并自动回填命令。生成期间任务不执行，生成完成后按计划执行（过点不补跑）"
           },
           cwd: { type: "string", description: "tool 模式命令的工作目录（可选）" },
+          timeoutMs: {
+            type: "number",
+            description: "tool 模式：命令执行超时毫秒数（下限 1000，上限 600000，默认 120000）。报表/爬取类慢脚本可调大"
+          },
+          env: {
+            type: "object",
+            description: "tool 模式：追加到命令进程的环境变量（键值均为字符串），如 {\"API_KEY\":\"xxx\"}；避免把敏感值写进命令行"
+          },
           resultMode: {
             type: "string",
             enum: ["raw", "ai"],
@@ -223,7 +233,8 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
         const a = args as {
           type?: string; time?: string; minutes?: number; cron?: string; tz?: string; at?: string;
           weekdays?: unknown; content?: string; mode?: string; command?: string; genPrompt?: string;
-          cwd?: string; resultMode?: string; parsePrompt?: string; gate?: string;
+          cwd?: string; timeoutMs?: number; env?: Record<string, string>;
+          resultMode?: string; parsePrompt?: string; gate?: string;
           goal?: string; notifyWhen?: string; verify?: boolean;
           tool?: string; args?: Record<string, unknown>;
         };
@@ -241,6 +252,8 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
           command: a.command,
           genPrompt: a.genPrompt,
           cwd: a.cwd,
+          timeoutMs: a.timeoutMs,
+          env: a.env,
           resultMode: a.resultMode,
           parsePrompt: a.parsePrompt,
           gate: a.gate,
@@ -318,6 +331,76 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
         if (!result.ok) return { ok: false, error: result.error };
         logger.info(`[dsh-qqbot] AI ${a.enabled ? "启用" : "禁用"}定时任务 → ${scope}:${openid}（机器人 ${appId}）`);
         return { ok: true, schedule: describeEntry(result.entry!, index) };
+      },
+    },
+    {
+      name: "qqbot_schedule_update",
+      description: [
+        "就地修改当前 QQ 聊天里已存在的一条定时任务（按 qqbot_schedule_list 返回的序号）。",
+        "只传需要改动的字段，未传的字段保持原值——不必先删除再重建。",
+        "改触发时间时，传与 type 对应的字段：daily 传 time；interval 传 minutes；cron 传 cron（可加 tz）；at 传 at。",
+        "若要切换触发类型，必须同时传 type 与新类型对应的字段。",
+        "改执行方式时传 mode（text/ai/tool）；切换 mode 后请同时补齐对应的 content / command / genPrompt。",
+        "weekdays 传空数组 [] 表示清除星期过滤。",
+        "用户说「把那条提醒从九点改成十点」「第二条改成每 30 分钟」「把每天的改成只有工作日」时调用。"
+      ].join(" "),
+      parameters: {
+        type: "object",
+        properties: {
+          index: { type: "number", description: "要修改的序号（1 开始，见 qqbot_schedule_list）" },
+          type: { type: "string", enum: ["daily", "interval", "cron", "at"], description: "新的触发类型（不切换则省略）" },
+          time: { type: "string", description: "daily 的发送时间 HH:mm（上海时间）" },
+          minutes: { type: "number", description: "interval 的间隔分钟数（>=5）" },
+          cron: { type: "string", description: 'cron 的 5 段表达式，如 "0 9 * * 1-5"' },
+          tz: { type: "string", description: "cron 的时区（IANA），默认 Asia/Shanghai" },
+          at: { type: "string", description: "at 的 ISO 时间（必须晚于当前时刻）" },
+          weekdays: {
+            type: "array",
+            items: { type: "number" },
+            description: "daily/interval 的星期过滤（0=周日..6=周六）；传 [] 清除过滤"
+          },
+          content: { type: "string", description: "text/ai 模式的新内容" },
+          mode: { type: "string", enum: ["text", "ai", "tool"], description: "新的执行方式" },
+          command: { type: "string", description: "tool 模式的新命令行" },
+          genPrompt: { type: "string", description: "tool 模式：改填 AI 脚本描述词（会触发重新生成脚本）" },
+          cwd: { type: "string", description: "tool 模式的工作目录" },
+          timeoutMs: { type: "number", description: "tool 模式的命令执行超时毫秒数（1000-600000）" },
+          env: { type: "object", description: "tool 模式的命令环境变量（键值均为字符串）" },
+          resultMode: { type: "string", enum: ["raw", "ai"], description: "tool 模式的结果处理方式" },
+          parsePrompt: { type: "string", description: "tool+resultMode=ai 的数据加工指令" },
+          gate: { type: "string", enum: ["always", "nonempty", "changed"], description: "tool 模式的发送门控" },
+          goal: { type: "string", description: "任务契约·目标（ai/tool）" },
+          notifyWhen: { type: "string", description: "任务契约·通知条件（ai/tool）" },
+          verify: { type: "boolean", description: "任务契约·发送前自校验（ai/tool）" }
+        },
+        required: ["index"],
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        const { appId, scope, openid } = requireBot(exec);
+        const a = args as Record<string, unknown>;
+        const index = Number(a.index);
+        if (!Number.isSafeInteger(index) || index < 1) {
+          return { ok: false, error: "index 必须是正整数序号" };
+        }
+        const mine = store.listForChat(scope, openid);
+        const target = mine[index - 1];
+        if (!target) return { ok: false, error: `未找到该定时消息（序号 1-${mine.length}）` };
+        // 仅透传显式给出的字段（undefined 交给 Store.add 保留原值）。
+        const patch: Record<string, unknown> = { id: target.id };
+        for (const key of [
+          "type", "time", "minutes", "cron", "tz", "at", "weekdays",
+          "content", "mode", "command", "genPrompt", "cwd", "timeoutMs", "env",
+          "resultMode", "parsePrompt", "gate", "goal", "notifyWhen", "verify",
+        ] as const) {
+          if (a[key] !== undefined) patch[key] = a[key];
+        }
+        const result = await store.update(target.id, patch);
+        if (!result.ok) return { ok: false, error: result.error };
+        if (result.entry?.genStatus === "pending") scriptGen?.enqueue(result.entry);
+        logger.info(`[dsh-qqbot] AI 修改定时任务 #${index} → ${scope}:${openid}（机器人 ${appId}）`);
+        return { ok: true, chat: `${scope}:${openid}`, schedule: describeEntry(result.entry!, index) };
       },
     },
     {

@@ -67,6 +67,16 @@ export interface ScheduleEntry {
   genDoneAt?: string;
   /** tool 模式：命令工作目录。 */
   cwd?: string;
+  /**
+   * tool 模式：命令执行超时（毫秒）。
+   * 缺省用内置默认（12s，上限 10min）。报表 / 爬取类脚本常需更长，可按任务单独放宽。
+   */
+  timeoutMs?: number;
+  /**
+   * tool 模式：追加到进程环境变量的键值对（脚本可读 `process.env.XXX` / `os.environ`）。
+   * 用于传 API Key、目标路径等，避免把敏感值硬编码进命令行（会出现在日志里）。
+   */
+  env?: Record<string, string>;
   /** tool 模式：命令输出处理——raw 原始输出播报 / ai 交给 AI 总结播报。 */
   resultMode?: "raw" | "ai";
   /**
@@ -133,6 +143,8 @@ export interface ScheduleAddInput {
   tool?: string;
   genPrompt?: string;
   cwd?: string;
+  timeoutMs?: unknown;
+  env?: unknown;
   resultMode?: string;
   parsePrompt?: string;
   goal?: string;
@@ -152,6 +164,36 @@ export interface ScheduleAddInput {
 }
 
 const SCHEDULES_PATH = () => joinPath(pluginDataDir(), "schedules.json");
+
+/** 命令超时合法区间（毫秒）：下限 1s，上限 10min（与 command-runner 的上限一致）。 */
+export const COMMAND_TIMEOUT_MIN_MS = 1e3;
+export const COMMAND_TIMEOUT_MAX_LIMIT_MS = 6e5;
+
+/**
+ * 规范化 tool 任务的超时（毫秒）：非法返回 undefined（用内置默认），
+ * 越界则夹到合法区间。
+ */
+export function normalizeTimeoutMs(input: unknown): number | undefined {
+  if (input === void 0 || input === null || input === "") return void 0;
+  const n = Number(input);
+  if (!Number.isFinite(n) || n <= 0) return void 0;
+  return Math.min(Math.max(Math.round(n), COMMAND_TIMEOUT_MIN_MS), COMMAND_TIMEOUT_MAX_LIMIT_MS);
+}
+
+/**
+ * 规范化 tool 任务的附加环境变量：只保留字符串键与字符串值，
+ * 键名限制为常规环境变量字符；非法项丢弃（返回 undefined 表示无）。
+ */
+export function normalizeEnv(input: unknown): Record<string, string> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return void 0;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
+    if (v === void 0 || v === null) continue;
+    out[k] = String(v);
+  }
+  return Object.keys(out).length ? out : void 0;
+}
 
 function joinPath(dir: string, name: string): string {
   return dir.endsWith("\\") || dir.endsWith("/") ? dir + name : `${dir}/${name}`;
@@ -246,6 +288,12 @@ export class ScheduleStore {
       if (input.cwd !== void 0 && typeof input.cwd !== "string") {
         return { ok: false, error: "工作目录（cwd）必须是字符串" };
       }
+      if (input.timeoutMs !== void 0 && Number(input.timeoutMs) > 0 && !normalizeTimeoutMs(input.timeoutMs)) {
+        return { ok: false, error: "超时必须是正数（秒或毫秒的合理数值）" };
+      }
+      if (input.env !== void 0 && (typeof input.env !== "object" || Array.isArray(input.env))) {
+        return { ok: false, error: "环境变量（env）必须是对象" };
+      }
       if (input.resultMode !== void 0 && input.resultMode !== "raw" && input.resultMode !== "ai") {
         return { ok: false, error: "结果处理（resultMode）必须是 raw 或 ai" };
       }
@@ -324,6 +372,8 @@ export class ScheduleStore {
       genStartedAt: genStatus === "pending" ? toShanghaiISO() : existing?.genStartedAt,
       genDoneAt: genStatus === "done" ? existing?.genDoneAt : void 0,
       cwd: mode === "tool" && input.cwd ? String(input.cwd).trim() || void 0 : void 0,
+      timeoutMs: mode === "tool" ? normalizeTimeoutMs(input.timeoutMs) : void 0,
+      env: mode === "tool" ? normalizeEnv(input.env) : void 0,
       resultMode: mode === "tool" ? (input.resultMode === "ai" ? "ai" : "raw") : void 0,
       // 加工指令与发送门控仅对 tool 模式生效：text 内容固定、ai 由模型现场生成，
       // 都不存在「取数 → 加工 → 门控」这一段确定性流水线。
@@ -359,14 +409,246 @@ export class ScheduleStore {
   }
 
   /**
+   * 就地修改既有任务（部分字段补丁）：只覆盖显式传入的字段，其余保持原值。
+   *
+   * 与 {@link add} 的区别：add 是「整条替换」语义（未传的字段会被重置为默认/undefined），
+   * 适合设置页那种表单全量提交；本方法面向「只改时间」「只改内容」这类增量编辑，
+   * 避免调用方为了改一个字段而回填全部字段（也避免误清 openid / mode / content）。
+   *
+   * 校验与副作用：
+   *  - type 不变时，只按需校验并覆盖对应的时间字段；
+   *  - 若传了 type 且与原类型不同，则要求同时给出新类型对应的时间字段（否则会清空原配置）；
+   *  - 时间字段变更后重算 nextRunAt（enabled 时）；
+   *  - mode 切换时同步整理与该模式无关的残留字段（如 text 模式清空 gate/契约）。
+   */
+  async update(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<{ ok: boolean; error?: string; entry?: ScheduleEntry }> {
+    await this.load();
+    const entry = this.#entries.find((e) => e.id === id);
+    if (!entry) return { ok: false, error: "未找到该定时任务" };
+
+    const str = (v: unknown): string | undefined =>
+      typeof v === "string" && v.trim() ? v.trim() : undefined;
+
+    // ① 触发类型：不传则沿用。
+    let type = entry.type;
+    if (patch.type !== void 0) {
+      const t = str(patch.type);
+      if (t !== "daily" && t !== "interval" && t !== "cron" && t !== "at") {
+        return { ok: false, error: "type 必须是 daily / interval / cron / at 之一" };
+      }
+      type = t;
+    }
+    const typeChanged = type !== entry.type;
+
+    // ② 校验并按类型写入时间字段。
+    if (type === "daily") {
+      const time = patch.time !== void 0 ? str(patch.time) : entry.time;
+      if (!/^\d{1,2}:\d{2}$/.test(time ?? "")) {
+        return { ok: false, error: "time 格式应为 HH:mm（上海时间，如 09:30）" };
+      }
+      const [hh, mm] = time!.split(":").map(Number);
+      if (hh > 23 || mm > 59) return { ok: false, error: "time 的小时/分钟超出范围（00:00-23:59）" };
+      entry.time = time;
+      if (typeChanged) {
+        entry.minutes = void 0;
+        entry.cron = void 0;
+        entry.tz = void 0;
+        entry.at = void 0;
+      }
+    } else if (type === "interval") {
+      const raw = patch.minutes !== void 0 ? Number(patch.minutes) : entry.minutes;
+      if (!Number.isSafeInteger(raw) || (raw as number) < 5) {
+        return { ok: false, error: "间隔不能小于 5 分钟" };
+      }
+      entry.minutes = raw as number;
+      if (typeChanged) {
+        entry.time = void 0;
+        entry.cron = void 0;
+        entry.tz = void 0;
+        entry.at = void 0;
+      }
+    } else if (type === "cron") {
+      const expr = patch.cron !== void 0 ? str(patch.cron) : entry.cron;
+      if (!isValidCron(expr ?? "")) {
+        return { ok: false, error: 'cron 表达式非法（标准 5 段，如 "0 9 * * 1-5"）' };
+      }
+      entry.cron = expr;
+      entry.tz = (patch.tz !== void 0 ? str(patch.tz) : entry.tz) || SHANGHAI_TZ;
+      if (typeChanged) {
+        entry.time = void 0;
+        entry.minutes = void 0;
+        entry.at = void 0;
+      }
+    } else {
+      const rawAt = patch.at !== void 0 ? str(patch.at) : entry.at;
+      const d = new Date(rawAt ?? "");
+      if (Number.isNaN(d.getTime())) return { ok: false, error: "at 必须是合法 ISO 时间" };
+      if (typeChanged && d.getTime() <= Date.now()) {
+        return { ok: false, error: "at 时间必须晚于当前时间" };
+      }
+      entry.at = d.toISOString();
+      if (typeChanged) {
+        entry.time = void 0;
+        entry.minutes = void 0;
+        entry.cron = void 0;
+        entry.tz = void 0;
+      }
+    }
+    entry.type = type;
+
+    // ③ weekdays：显式传 [] 表示清除；不传则保留。
+    if (patch.weekdays !== void 0) {
+      if (!Array.isArray(patch.weekdays)) return { ok: false, error: "weekdays 必须是数组" };
+      if (patch.weekdays.length === 0) {
+        entry.weekdays = void 0;
+      } else {
+        const set = new Set<number>();
+        for (const w of patch.weekdays) {
+          const n = Number(w);
+          if (!Number.isInteger(n) || n < 0 || n > 6) return { ok: false, error: "weekdays 元素必须是 0-6（0=周日）" };
+          set.add(n);
+        }
+        entry.weekdays = [...set];
+      }
+    }
+
+    // ④ 执行方式。
+    if (patch.mode !== void 0) {
+      const m = str(patch.mode);
+      if (m !== "text" && m !== "ai" && m !== "tool") {
+        return { ok: false, error: "mode 必须是 text / ai / tool 之一" };
+      }
+      entry.mode = m;
+    }
+    const mode = entry.mode ?? "text";
+
+    // ⑤ 内容：text/ai 用 content；tool 用 command / genPrompt。
+    if (patch.content !== void 0) {
+      if (mode === "tool") return { ok: false, error: "tool 模式不使用 content，请改 command 或 genPrompt" };
+      const c = String(patch.content).trim();
+      if (!c) return { ok: false, error: "内容不能为空" };
+      if (c.length > 2e3) return { ok: false, error: "内容过长（上限 2000 字）" };
+      entry.content = c;
+    }
+    if (patch.command !== void 0 && mode === "tool") {
+      const cmd = String(patch.command).trim();
+      if (cmd) {
+        entry.command = normalizeScriptCommand(cmd) ?? cmd;
+        entry.genPrompt = void 0;
+        entry.genStatus = void 0;
+        entry.genError = void 0;
+      }
+    }
+    if (patch.genPrompt !== void 0 && mode === "tool") {
+      const gp = String(patch.genPrompt).trim();
+      if (gp.length > 2e3) return { ok: false, error: "AI 脚本描述词过长（上限 2000 字）" };
+      if (gp) {
+        entry.genPrompt = gp;
+        entry.genStatus = "pending";
+        entry.genError = void 0;
+        entry.genStartedAt = toShanghaiISO();
+        entry.command = void 0;
+      }
+    }
+    if (mode === "tool") {
+      // tool 模式下 content 展示用 command 兜底，避免列出时为空。
+      entry.content = entry.command ?? entry.genPrompt ?? entry.content;
+    }
+
+    // ⑥ tool 专属参数（仅 tool 模式生效）。
+    if (patch.cwd !== void 0) {
+      if (typeof patch.cwd !== "string") return { ok: false, error: "工作目录（cwd）必须是字符串" };
+      entry.cwd = mode === "tool" ? patch.cwd.trim() || void 0 : void 0;
+    }
+    if (patch.timeoutMs !== void 0) {
+      entry.timeoutMs = mode === "tool" ? normalizeTimeoutMs(patch.timeoutMs) : void 0;
+    }
+    if (patch.env !== void 0) {
+      if (patch.env !== null && (typeof patch.env !== "object" || Array.isArray(patch.env))) {
+        return { ok: false, error: "环境变量（env）必须是对象" };
+      }
+      entry.env = mode === "tool" ? normalizeEnv(patch.env) : void 0;
+    }
+    if (patch.resultMode !== void 0) {
+      if (patch.resultMode !== "raw" && patch.resultMode !== "ai") {
+        return { ok: false, error: "结果处理（resultMode）必须是 raw 或 ai" };
+      }
+      entry.resultMode = mode === "tool" ? patch.resultMode : void 0;
+    }
+    if (patch.parsePrompt !== void 0) {
+      const pp = String(patch.parsePrompt).trim();
+      if (pp.length > 2e3) return { ok: false, error: "数据加工指令过长（上限 2000 字）" };
+      entry.parsePrompt = mode === "tool" && pp ? pp : void 0;
+    }
+    if (patch.gate !== void 0) {
+      if (patch.gate !== "always" && patch.gate !== "nonempty" && patch.gate !== "changed") {
+        return { ok: false, error: "发送门控（gate）必须是 always / nonempty / changed" };
+      }
+      entry.gate = mode === "tool" ? patch.gate : void 0;
+    }
+    // ⑦ 任务契约（ai / tool 生效）。
+    if (patch.goal !== void 0) {
+      const g = String(patch.goal).trim();
+      if (g.length > 2e2) return { ok: false, error: "任务目标过长（上限 200 字）" };
+      entry.goal = mode !== "text" && g ? g : void 0;
+    }
+    if (patch.notifyWhen !== void 0) {
+      const n = String(patch.notifyWhen).trim();
+      if (n.length > 5e2) return { ok: false, error: "通知条件过长（上限 500 字）" };
+      entry.notifyWhen = mode !== "text" && n ? n : void 0;
+    }
+    if (patch.verify !== void 0) {
+      entry.verify = mode !== "text" && (patch.verify === true || patch.verify === "true") ? true : void 0;
+    }
+    // ⑧ 切回 text 时清理只对 ai/tool 有意义的残留。
+    if (mode === "text") {
+      entry.gate = void 0;
+      entry.goal = void 0;
+      entry.notifyWhen = void 0;
+      entry.verify = void 0;
+      entry.parsePrompt = void 0;
+      entry.resultMode = void 0;
+      entry.command = void 0;
+      entry.cwd = void 0;
+      entry.timeoutMs = void 0;
+      entry.env = void 0;
+      entry.genPrompt = void 0;
+      entry.genStatus = void 0;
+      entry.genError = void 0;
+    }
+
+    // ⑨ 重算下次运行；编辑清空上次错误（旧错误已不适用）。
+    entry.nextRunAt = entry.enabled === false ? void 0 : toShanghaiISOOrNull(nextRunFor(entry, new Date()));
+    entry.lastError = void 0;
+    await this.save();
+    return { ok: true, entry };
+  }
+
+
+  /**
    * 启用 / 禁用定时任务（设置页「禁用」按钮 + AI 工具）。
    * 禁用后 dueEntries 不再返回该条目，调度器不会执行它（也不占用主动消息配额）。
    * 重新启用时按当前时刻重算下次运行，避免把禁用期间累积的过期时刻一次性补发。
+   *
+   * 一次性（at）任务的特别处理：
+   *   `nextRunFor` 对 at 恒返回固定的 `entry.at`，因此「在触发时刻之前禁用、之后再启用」
+   *   会算出**已过期**的时刻，导致下一次 tick 立刻补发一条早已过期的提醒。
+   *   这里改为：at 任务的触发时刻已过去时，直接删除该任务并返回提示，
+   *   绝不静默补发（一次性提醒错过就是错过了）。
    */
   async setEnabled(id: string, enabled: boolean): Promise<{ ok: boolean; error?: string; entry?: ScheduleEntry }> {
     await this.load();
     const entry = this.#entries.find((e) => e.id === id);
     if (!entry) return { ok: false, error: "未找到该定时消息" };
+    // 启用已过期的一次性任务：不补发，直接清理并如实告知。
+    if (enabled && entry.type === "at" && entry.at && new Date(entry.at).getTime() <= Date.now()) {
+      this.#entries = this.#entries.filter((e) => e.id !== id);
+      await this.save();
+      return { ok: false, error: "该一次性任务的时间已过，已自动删除（未补发）" };
+    }
     const wasEnabled = entry.enabled !== false;
     entry.enabled = enabled;
     if (!enabled) {
@@ -583,8 +865,8 @@ export class Scheduler {
           entry.nextRunAt = toShanghaiISOOrNull(nextRunFor(entry, now));
           continue;
         }
-        if (this.#ctx.quota && !(await this.#ctx.quota.tryConsume())) {
-          // 配额耗尽：5 分钟后重试（不报错误）。
+        if (this.#ctx.quota && !(await this.#ctx.quota.tryConsume(1, bot.appId))) {
+          // 配额耗尽：5 分钟后重试（不报错误）。按该机器人自己的池判定。
           entry.nextRunAt = toShanghaiISOOrNull(new Date(now.getTime() + 5 * 6e4));
           continue;
         }
@@ -618,7 +900,7 @@ export class Scheduler {
             entry.lastSkipAt = toShanghaiISO(now);
             entry.lastSkipReason = reason;
             entry.lastError = void 0;
-            await this.#ctx.quota?.refund();
+            await this.#ctx.quota?.refund(1, bot.appId);
             this.#ctx.logger.info(
               `[dsh-qqbot] 定时任务跳过发送（机器人 ${bot.appId}，mode=tool，gate=${entry.gate ?? "always"}）：${reason}`
             );

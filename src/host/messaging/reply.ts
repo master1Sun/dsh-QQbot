@@ -104,7 +104,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
     // 预扣的主动消息额度在此归还——调度层已为本次触发扣过一次。
     if (record.silentOk && isSilentReply(text)) {
       bot.typing.stop(record.chatKey);
-      await quota?.refund();
+      await quota?.refund(1, bot.appId);
       logger.info(`[dsh-qqbot] 定时任务静默：本次不发送 chat=${record.chatKey}（模型判定无事可报）`);
       void bot.archiver.append({
         kind: "proactive",
@@ -182,7 +182,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
         logger.warn(`[dsh-qqbot] 消息 ${record.msgId} 被动回复次数已达上限，剩余内容未发送`);
         break;
       }
-      if (isProactive && quota && !quotaPrepaid && !(await quota.tryConsume())) break;
+      if (isProactive && quota && !quotaPrepaid && !(await quota.tryConsume(1, bot.appId))) break;
       const seq = record.nextSeq++;
       // withQuote=true：被动回复（msg_id + msgSeq）同传引用卡片（message_reference=REFIDX）；
       // false：普通被动回复（msg_id，无卡片）。
@@ -233,7 +233,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
         if (config.proactiveFallback && record.target.scope === "group" && certainNotSent(error)) {
           try {
             // 定时任务同样已预扣过额度，兜底重发不再叠加计费（与主路径一致）。
-            if (quota && !quotaPrepaid && !(await quota.tryConsume())) throw new Error("主动消息配额已用尽");
+            if (quota && !quotaPrepaid && !(await quota.tryConsume(1, bot.appId))) throw new Error("主动消息配额已用尽");
             const fallback = await bot.client.sendReply(record.target, chunk, { markdown: false });
             if (fallback.id) rememberSent(bot.state, record.chatKey, fallback.id);
             bot.state.counters.proactive += 1;
@@ -322,7 +322,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
                 }
               }
               const locale = bot.config.replyLocale === "en" ? "en" : "zh";
-              notice = tr(locale, "⚠️ AI 回复出错：") + failure;
+              notice = tr(locale, "reply.aiError") + failure;
             } else {
               logger.warn(`[dsh-qqbot] AI 报错（限流窗口内未重复提示）: ${failure}`);
             }

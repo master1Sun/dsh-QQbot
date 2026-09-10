@@ -4,11 +4,10 @@
  * 挂载即拉取日期列表并选中最新一天。
  */
 import * as React from "react";
-import { h } from "../i18n.js";
+import { fmt, h, t } from "../i18n/index.js";
 import { looksLikeMarkdown, renderMarkdown } from "../md.js";
 import type { RpcCall } from "../types.js";
 import { confirmDlg, errText, formatTime, val } from "../ui.js";
-import { localizeText } from "../i18n.js";
 
 export function ArchiveDialog(props: {
   rpcCall: RpcCall;
@@ -83,7 +82,7 @@ export function ArchiveDialog(props: {
 
   /** 删除某天归档：仅清除当前机器人该天的记录（其他机器人的记录保留）。 */
   const removeArchiveDayFile = async (day: string) => {
-    if (!(await confirmDlg({ message: localizeText(`确定删除 ${day} 的归档记录？此机器人该天的记录将被清除，其他机器人的记录保留。`), danger: true }))) return;
+    if (!(await confirmDlg({ message: fmt("archive.deleteConfirm", day), danger: true }))) return;
     const res = await rpcCall("archive.removeDay", { day, ...(detailAppId ? { appId: detailAppId } : {}) });
     if (!res.ok) {
       setArchiveModal((prev) => (prev ? { ...prev, error: errText(res.error) } : prev));
@@ -104,50 +103,50 @@ export function ArchiveDialog(props: {
   }, []);
 
     return h("div", { className: "qbot-modalOverlay" },
-          h("div", { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": "消息归档" },
+          h("div", { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": t("archive.tab") },
             h("div", { className: "qbot-modalHead" },
               h("div", null,
-                h("strong", null, "消息归档"),
-                h("p", null, "本地落盘的收发记录（按当前机器人过滤）：左栏选日期查看内容，× 删除该天归档")),
-              h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: onClose }, "×")),
+                h("strong", null, t("archive.tab")),
+                h("p", null, t("archive.subtitle2"))),
+              h("button", { className: "qbot-modalClose", type: "button", "aria-label": t("common.close"), onClick: onClose }, "×")),
             // 报错固定条：常驻弹窗头部下方（读取/删除失败时不随内容滚动）。
             archiveModal.error
               ? h("div", { className: "qbot-modalAlert", role: "alert" }, archiveModal.error)
               : null,
             h("div", { className: `qbot-archSplit${archiveModal.loading && archiveModal.records.length > 0 ? " is-refreshing" : ""}` },
               // 左栏：归档日期文件（点击切换内容，× 删除该天归档）
-              h("div", { className: "qbot-archSide", "aria-label": "归档日期文件" },
+              h("div", { className: "qbot-archSide", "aria-label": t("archive.dateFiles") },
                 archiveModal.days.length === 0 && !archiveModal.loading
-                  ? h("div", { className: "qbot-archSideEmpty" }, "暂无归档文件")
+                  ? h("div", { className: "qbot-archSideEmpty" }, t("archive.noFiles"))
                   : archiveModal.days.map((d) => {
                       const active = d.day === archiveModal.activeDay;
                       return h("div", { key: d.day, className: `qbot-archMonth${active ? " is-active" : ""}` },
                         h("button", {
                           type: "button", className: "qbot-archMonthBtn",
                           onClick: () => void loadArchiveRecords(d.day),
-                          title: `${d.count} 条记录`,
+                          title: fmt("archive.recordCount", d.count),
                         },
                           h("span", { className: "qbot-archMonthName" }, d.day),
                           h("span", { className: "qbot-archMonthCount" }, `${d.count}`)),
                         h("button", {
                           type: "button", className: "qbot-archMonthDel",
-                          "aria-label": `删除 ${d.day} 归档`, title: "删除该天归档（仅此机器人的记录）",
+                          "aria-label": fmt("archive.deleteLabel", d.day), title: t("archive.deleteHint"),
                           onClick: () => void removeArchiveDayFile(d.day),
                         }, "×"));
                     })),
               // 右栏：选中日期的记录内容
               h("div", { className: "qbot-archMain" },
                 archiveModal.loading && archiveModal.records.length === 0
-                  ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), "正在读取归档…")
+                  ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), t("archive.loading"))
                   : archiveModal.records.length === 0
-                      ? h("div", { className: "qbot-modalState" }, "该天没有记录。开启「消息本地归档」并收到消息后，这里会出现记录。")
+                      ? h("div", { className: "qbot-modalState" }, t("archive.empty"))
                       : h("div", { className: "qbot-timeline" },
                           archiveModal.records.map((r: any, i: number) => {
                             const key = `${r.ts ?? ""}-${i}`;
                             // 会话事件：不进气泡，作居中系统节点；note（如引用降级原因）一并显示。
                             if (r.kind === "session") {
                               return h("div", { key, className: "qbot-tlSystem" },
-                                `会话 ${formatTime(r.ts)}${r.content ? ` · ${String(r.content)}` : ""}${r.note ? ` · ${String(r.note)}` : ""}`);
+                                fmt("archive.sessionLine", formatTime(r.ts), r.content ? ` · ${String(r.content)}` : "", r.note ? ` · ${String(r.note)}` : ""));
                             }
                             const isUser = r.kind === "inbound";
                             const content = String(r.content ?? "");
@@ -157,7 +156,7 @@ export function ArchiveDialog(props: {
                               h("span", { className: "qbot-tlDot", "aria-hidden": "true" }),
                               h("div", { className: "qbot-tlBody" },
                                 h("div", { className: "qbot-tlMeta" },
-                                  h("span", { className: "qbot-tlRole" }, isUser ? "用户" : "机器人"),
+                                  h("span", { className: "qbot-tlRole" }, isUser ? t("idpick.user") : t("idpick.bot")),
                                   (r.senderName || r.sender)
                                     ? h("span", { className: "qbot-mono" }, String(r.senderName || r.sender))
                                     : null,
@@ -175,9 +174,9 @@ export function ArchiveDialog(props: {
             h("div", { className: "qbot-modalFoot" },
               h("span", { className: "qbot-hint" },
                 archiveModal.moreAvailable
-                  ? `已显示最近 ${archiveModal.records.length} 条（更早记录仍在归档文件里）`
-                  : `共 ${archiveModal.records.length} 条记录`),
+                  ? fmt("archive.showingLatest", archiveModal.records.length)
+                  : fmt("archive.totalRecords", archiveModal.records.length)),
               h("div", { className: "qbot-viewActions" },
-                h("button", { className: "qbot-btn", type: "button", disabled: archiveModal.loading, onClick: () => void loadArchiveDays(archiveModal.activeDay) }, "刷新"),
-                h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: onClose }, "关闭")))));
+                h("button", { className: "qbot-btn", type: "button", disabled: archiveModal.loading, onClick: () => void loadArchiveDays(archiveModal.activeDay) }, t("common.refresh")),
+                h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: onClose }, t("common.close"))))));
 }

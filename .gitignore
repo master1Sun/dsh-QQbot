@@ -2,7 +2,3 @@ node_modules/
 *.log
 .DS_Store
 /.workbuddy
-/.verify-tmp
-/oc-src
-/oc-outbound.tmp.ts
-/oc-src.tgz

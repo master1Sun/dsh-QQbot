@@ -22,6 +22,7 @@ import { QrLoginManager } from "./qq/qr-login.js";
 import { createQqRule } from "./messaging/rule.js";
 import { installReplyPump } from "./messaging/reply.js";
 import { makeQqbotRoutes } from "./admin/routes.js";
+import { registerRpcChannel, type RpcFence, type RpcChannelOptions } from "./admin/rpc-channel.js";
 import { BotRuntimeManager, type BotRuntime } from "./bots.js";
 import { loadGlobalConfig, saveCredentials, upsertBot, type StoredBot, type StoredCredentials } from "./infra/store-file.js";
 import {
@@ -204,8 +205,12 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     getLlm: getHostLlm,
     logger,
   });
-  // 主动消息每日配额（以主机器人配置为准）。
-  const quota = new QuotaTracker(logger, () => bots.primary()?.config.quotaPerDay ?? 50);
+  // 主动消息每日配额：**按机器人分池**（各机器人独立额度与用量，互不挤占）。
+  // 未指定 appId 时回落主机器人（与 quota.ts 的 __primary__ 池语义一致）。
+  const quota = new QuotaTracker(logger, (appId) => {
+    const bot = (appId ? bots.get(appId) : undefined) ?? bots.primary();
+    return bot?.config.quotaPerDay ?? 50;
+  });
   /**
    * 定时任务派发时的提示词前缀。
    * 关键作用是把身份讲对：定时任务是「到点自动触发的自主任务」，
@@ -320,7 +325,11 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       logger.info(`[dsh-qqbot] 定时任务命令已按扩展名自动改写：${raw} → ${command}`);
       entry.command = command;
     }
-    const result = await runCommand(command, { cwd: entry.cwd });
+    const result = await runCommand(command, {
+      cwd: entry.cwd,
+      ...(entry.timeoutMs ? { timeoutMs: entry.timeoutMs } : {}),
+      ...(entry.env ? { env: entry.env } : {}),
+    });
     logger.info(
       `[dsh-qqbot] 定时任务命令执行完毕 ok=${result.ok} exit=${result.exitCode ?? "-"} ${Math.round(result.durationMs)}ms → ${entry.scope}:${entry.openid}`
     );
@@ -387,7 +396,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     void outbox.flush(async (item) => {
       const bot = bots.get(item.appId);
       if (!bot) throw new Error(`机器人 ${item.appId} 不可用`);
-      if (!(await quota.tryConsume())) throw new Error("主动消息配额不足，稍后重试");
+      if (!(await quota.tryConsume(1, item.appId))) throw new Error("主动消息配额不足，稍后重试");
       await bot.client.sendText({ scope: item.scope, openid: item.openid }, item.content);
       bot.state.counters.proactive += 1;
     }).then(({ sent }) => {
@@ -603,22 +612,21 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   }).webServer.register(route);
 
   // 设置界面 RPC：dsh 设置页「QQ 机器人」通过 connection.rpc 调用。
-  let disposeRpc: (() => void) | undefined;
+  //
+  // 不用 `ctx.connection.rpc.handle(...)`：当前 dsh 版本里该 API 以
+  // `HostConnectionService` 的 `this.ctx`（client-connection 插件自身的 context，
+  // inject 只有 ["credentials"]）作为 owner，`owner.webServer` 解析必然失败，
+  // 通道注册不上且异常会被静默吞掉，前端表现为 HTTP 405。
+  // 这里对齐框架挂 `/api` 的写法，自己在具备 webServer 的 context 上注册 prefix 路由。
   try {
-    const connection = (ctx as unknown as {
-      connection?: { rpc?: { handle(channel: string, handler: (endpoint: string, payload?: Record<string, unknown>) => Promise<unknown>): () => void } };
-    }).connection;
-    const handle = connection?.rpc?.handle;
-    if (typeof handle === "function") {
-      const dispose = handle.call(connection!.rpc!, "/qqbot-settings", (endpoint, payload) =>
-        admin.handle(endpoint, payload),
-      );
-      disposeRpc = () => dispose();
-    } else {
-      logger.warn("[dsh-qqbot] connection.rpc 不可用，设置界面将无法连接（HTTP 管理端点仍可用）");
-    }
+    const connection = (ctx as unknown as { connection?: RpcFence }).connection;
+    registerRpcChannel({
+      ctx: ctx as unknown as RpcChannelOptions["ctx"],
+      fence: connection,
+      dispatch: (endpoint, payload) => admin.handle(endpoint, payload),
+    });
   } catch (error) {
-    logger.warn("[dsh-qqbot] RPC 注册失败:", error);
+    logger.warn("[dsh-qqbot] RPC 通道注册失败，设置界面将无法连接（HTTP 管理端点仍可用）:", error);
   }
 
   // 启动时按 bots.json 重建所有已启用机器人的连接（不阻塞 dsh 启动，结果看日志）。
@@ -641,7 +649,6 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     } catch { /* 已卸载 */ }
     clearInterval(outboxTimer);
     disposePump();
-    disposeRpc?.();
     disposeTools();
     scheduler.stop();
     qr.dispose();

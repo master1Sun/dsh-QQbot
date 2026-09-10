@@ -4,7 +4,7 @@
  * 由父组件负责保存配置、提示并关闭弹窗。
  */
 import * as React from "react";
-import { h } from "../i18n.js";
+import { h, t } from "../i18n/index.js";
 import type { RpcCall } from "../types.js";
 import { FolderGlyph, FolderUpGlyph } from "../glyphs.js";
 import { errText, val } from "../ui.js";
@@ -63,46 +63,46 @@ export function WorkspacePickerDialog(props: {
   }, []);
 
     return h("div", { className: "qbot-modalOverlay" },
-          h("div", { className: "qbot-modal", role: "dialog", "aria-modal": "true", "aria-label": "选择工作区目录" },
+          h("div", { className: "qbot-modal", role: "dialog", "aria-modal": "true", "aria-label": t("picker.title") },
             h("div", { className: "qbot-modalHead" },
               h("div", null,
-                h("strong", null, "选择工作区目录"),
-                h("p", null, "逐级浏览并选定机器人读取文件的文件夹")),
-              h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: onClose }, "×")),
+                h("strong", null, t("picker.title")),
+                h("p", null, t("picker.subtitle"))),
+              h("button", { className: "qbot-modalClose", type: "button", "aria-label": t("common.close"), onClick: onClose }, "×")),
             h("div", { className: "qbot-modalPath qbot-mono" },
               picker.loading
-                ? "加载中…"
+                ? t("common.loading")
                 : (picker.selected || picker.path || "—")),
             h("div", { className: `qbot-modalList${picker.loading && picker.dirs.length > 0 ? " is-refreshing" : ""}` },
               picker.error
                 ? h("div", { className: "qbot-modalState qbot-modalError" }, picker.error)
                 : picker.loading && picker.dirs.length === 0
-                  ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), "正在读取目录…")
+                  ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), t("picker.loading"))
                   : [
                       picker.parent
                         ? h("button", { key: "__up", type: "button", className: "qbot-dirRow", onClick: () => void browseTo(picker.parent ?? undefined) },
-                            h(FolderUpGlyph), "上一级")
+                            h(FolderUpGlyph), t("picker.upOneLevel"))
                         : null,
                       picker.dirs.map((d) =>
                         h("button", {
                           key: d.path, type: "button",
                           className: `qbot-dirRow${picker.selected === d.path ? " is-selected" : ""}`,
-                          title: "单击选中，双击进入",
+                          title: t("picker.rowHint"),
                           onClick: () => setPicker((prev) => (prev ? { ...prev, selected: d.path } : prev)),
                           onDoubleClick: () => void browseTo(d.path),
                         },
                           h(FolderGlyph), d.name)),
                       !picker.loading && picker.dirs.length === 0
-                        ? h("div", { className: "qbot-modalState" }, "该目录下没有子文件夹")
+                        ? h("div", { className: "qbot-modalState" }, t("picker.emptyDirs"))
                         : null,
                     ]),
             h("div", { className: "qbot-modalFoot" },
-              h("span", { className: "qbot-hint" }, "单击选中，双击进入；未选中时选定当前浏览的目录"),
+              h("span", { className: "qbot-hint" }, t("picker.footerHint")),
               h("div", { className: "qbot-viewActions" },
-                h("button", { className: "qbot-btn", type: "button", onClick: onClose }, "取消"),
+                h("button", { className: "qbot-btn", type: "button", onClick: onClose }, t("common.cancel")),
                 h("button", {
                   className: "qbot-btn qbot-btnPrimary", type: "button",
                   disabled: picker.loading || !picker.path,
                   onClick: pickDirectory,
-                }, "选定此文件夹")))));
+                }, t("picker.chooseFolder"))))));
 }

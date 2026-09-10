@@ -51,8 +51,9 @@ export async function handleRawEvent(bot: BotRuntime, eventType: string, data: u
     const targetOpenid = eventType === "FRIEND_ADD" ? openid : (member.group_openid ?? "");
     if (!targetOpenid) return { handled: false };
     const locale: ReplyLocale = config.replyLocale === "en" ? "en" : "zh";
-    const nick = openid || tr(locale, "新朋友");
-    const text = tr(locale, config.welcomeMessage || "欢迎 {nick}！@我即可与我对话。").replaceAll("{nick}", nick);
+    const nick = openid || tr(locale, "welcome.newFriend");
+    const template = config.welcomeMessage || tr(locale, "welcome.default");
+    const text = template.replaceAll("{nick}", nick);
     try {
       const id = await bot.client.sendText({ scope, openid: targetOpenid }, text);
       if (id) rememberSent(bot.state, `${scope}:${targetOpenid}`, id);

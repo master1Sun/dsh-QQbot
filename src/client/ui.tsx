@@ -4,7 +4,7 @@
  */
 import * as React from "react";
 import { SHANGHAI_TZ } from "../shared/time.js";
-import { h, localizeText } from "./i18n.js";
+import { h, t } from "./i18n/index.js";
 import type { Option, Reply, Tone } from "./types.js";
 
 /** 在线状态胶囊 */
@@ -81,7 +81,7 @@ export function countdownBadge(left: number) {
  * 统一转成可安全渲染的字符串，避免把对象当 React 子节点（React #31）。
  */
 export function errText(err: unknown): string {
-  if (err == null) return "未知错误";
+  if (err == null) return t("common.unknownError");
   if (typeof err === "string") return err;
   if (typeof err === "object") {
     const e = err as { message?: unknown; code?: unknown };
@@ -117,7 +117,7 @@ export function formatRemaining(ms: number): string {
 }
 
 export const presetOptions = (list: Array<{ id: string; label: string }>): Option[] => [
-    { value: "", label: "跟随 Host 默认" },
+    { value: "", label: t("session.followHostDefault") },
     ...list
       .filter((p) => p && typeof p.id === "string" && p.id)
       .map((p) => ({ value: p.id, label: typeof p.label === "string" && p.label ? p.label : p.id })),
@@ -182,16 +182,16 @@ export function ConfirmHost() {
     setPending(null);
     pending.resolve(ok);
   };
-  return h("div", { className: "qbot-confirmOverlay", role: "alertdialog", "aria-modal": "true", "aria-label": localizeText("确认操作") },
+  return h("div", { className: "qbot-confirmOverlay", role: "alertdialog", "aria-modal": "true", "aria-label": t("common.confirmTitle") },
     h("div", { className: "qbot-confirmBox" },
       h("div", { className: "qbot-confirmMsg" }, pending.message),
       h("div", { className: "qbot-confirmFoot" },
         h("button", { type: "button", className: "qbot-btn", onClick: () => done(false) },
-          pending.cancelLabel ?? localizeText("取消")),
+          pending.cancelLabel ?? t("common.cancel")),
         h("button", {
           type: "button",
           autoFocus: true,
           className: `qbot-btn ${pending.danger ? "qbot-btnDanger" : "qbot-btnPrimary"}`,
           onClick: () => done(true),
-        }, pending.confirmLabel ?? localizeText(pending.danger ? "确认删除" : "确定")))));
+        }, pending.confirmLabel ?? t(pending.danger ? "common.confirmDelete" : "common.ok")))));
 }

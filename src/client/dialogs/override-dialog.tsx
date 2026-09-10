@@ -4,7 +4,7 @@
  * 整份 groupOverrides 并回调 onSave(next, openid)，由父组件落盘并提示。
  */
 import * as React from "react";
-import { h } from "../i18n.js";
+import { fmt, h, t } from "../i18n/index.js";
 import { COOLDOWN_OPTIONS, cooldownLabel } from "../meta.js";
 import { TextArea, editRow } from "../ui.js";
 import { OpenIdPicker, useArchiveChats } from "../id-picker.js";
@@ -90,7 +90,7 @@ export function OverrideDialog(props: {
     const d = draft;
     const openid = d.openid.trim();
     if (!openid) {
-      setError("请填写群 openid");
+      setError(t("group.required"));
       return;
     }
     // 只写入用户显式设置的字段，其余保持跟随机器人默认（原 saveOverride 逻辑）。
@@ -113,7 +113,7 @@ export function OverrideDialog(props: {
       // 新增时一个字段都没设：若照旧「删除该键」，保存会静默无效果（列表不出现、
       // 也无任何提示），用户只会看到「保存不成功」。这里显式拦截并说明该怎么做。
       if (!editOpenid) {
-        setError("请至少设置一个覆盖字段：全部「跟随默认」等同于不添加该群覆盖。");
+        setError(t("group.overrideRequired"));
         return;
       }
       delete next[openid];
@@ -125,7 +125,7 @@ export function OverrideDialog(props: {
       const r = await onSave(next, openid);
       // 失败时保持弹窗打开，错误内联显示在底部（顶部提示条在长页面滚动后可能不可见）。
       if (r && r.ok === false) {
-        setError(r.error || "保存失败，请稍后重试");
+        setError(r.error || t("common.saveFailed"));
         return;
       }
       onClose();
@@ -137,15 +137,15 @@ export function OverrideDialog(props: {
   };
 
     return h("div", { className: "qbot-modalOverlay" },
-          h("div", { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": "按群配置" },
+          h("div", { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": t("group.title") },
             h("div", { className: "qbot-modalHead" },
               h("div", null,
-                h("strong", null, editOpenid ? "编辑群覆盖" : "添加群覆盖"),
-                h("p", null, "留空/选择「跟随默认」的字段继续使用机器人级配置，仅此群生效")),
-              h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: onClose }, "×")),
+                h("strong", null, editOpenid ? t("group.edit") : t("group.add")),
+                h("p", null, t("group.dialogHint"))),
+              h("button", { className: "qbot-modalClose", type: "button", "aria-label": t("common.close"), onClick: onClose }, "×")),
             h("div", { className: "qbot-modalList" },
               h("div", { className: "qbot-editForm" },
-                editRow("群 openid", "要单独配置的群 openid（o 开头的长串）。点击输入框可从消息归档下拉选择，候选标注「群 id」；也可直接粘贴。",
+                editRow(t("group.openid"), t("group.openidHintPicker"),
                   h(OpenIdPicker, {
                     chats: archiveChats.chats,
                     scope: "group",
@@ -153,97 +153,97 @@ export function OverrideDialog(props: {
                     readOnly: Boolean(editOpenid),
                     loading: archiveChats.loading,
                     error: archiveChats.error,
-                    placeholder: "群 openid",
+                    placeholder: t("group.openid"),
                     onChange: (v: string) => setOverrideField("openid", v),
-                    ariaLabel: "群 openid",
+                    ariaLabel: t("group.openid"),
                   })),
-                editRow("群全量回复", "该群非 @ 消息是否参与价值评分并回复。",
+                editRow(t("group.fullReply"), t("group.fullReplyHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.groupFullReply),
                     onChange: (ev: any) => setOverrideField("groupFullReply", ev.target.value),
-                    "aria-label": "群全量回复",
+                    "aria-label": t("group.fullReply"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
-                    h("option", { value: "on" }, "启用"),
-                    h("option", { value: "off" }, "停用"))),
-                editRow("价值阈值", "仅群全量回复开启时有效：0-10 分，达到阈值才回复。",
+                    h("option", { value: "" }, t("group.followDefault")),
+                    h("option", { value: "on" }, t("conn.enable")),
+                    h("option", { value: "off" }, t("conn.disable")))),
+                editRow(t("group.valueThreshold"), t("group.valueThresholdHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.valueThreshold),
                     onChange: (ev: any) => setOverrideField("valueThreshold", ev.target.value),
-                    "aria-label": "价值阈值",
+                    "aria-label": t("group.valueThreshold"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "" }, t("group.followDefault")),
                     [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) =>
-                      h("option", { key: n, value: String(n) }, `${n} 分`)))),
-                editRow("@ 上下文条数", "@ 机器人时附带的本群最近消息条数。",
+                      h("option", { key: n, value: String(n) }, fmt("override.scoreOption", n))))),
+                editRow(t("group.atContext"), t("group.atContextHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.atContextMessages),
                     onChange: (ev: any) => setOverrideField("atContextMessages", ev.target.value),
-                    "aria-label": "@ 上下文条数",
+                    "aria-label": t("group.atContext"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "" }, t("group.followDefault")),
                     [0, 2, 4, 6, 8, 10, 15, 20, 30, 50].map((n) =>
-                      h("option", { key: n, value: String(n) }, n === 0 ? "0（关闭）" : `${n} 条`)))),
-                editRow("同群冷却", "该群两次全量回复的最小间隔（@ 回复不受限）。",
+                      h("option", { key: n, value: String(n) }, n === 0 ? t("tune.offZero") : fmt("override.countOption", n))))),
+                editRow(t("group.groupCooldown"), t("group.groupCooldownHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.groupCooldownMs),
                     onChange: (ev: any) => setOverrideField("groupCooldownMs", ev.target.value),
-                    "aria-label": "同群冷却",
+                    "aria-label": t("group.groupCooldown"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "" }, t("group.followDefault")),
                     COOLDOWN_OPTIONS.map((n) => h("option", { key: n, value: String(n) }, cooldownLabel(n))))),
-                editRow("同人冷却", "同一人在该群两次被回复的最小间隔。",
+                editRow(t("group.senderCooldown"), t("group.senderCooldownHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.senderCooldownMs),
                     onChange: (ev: any) => setOverrideField("senderCooldownMs", ev.target.value),
-                    "aria-label": "同人冷却",
+                    "aria-label": t("group.senderCooldown"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "" }, t("group.followDefault")),
                     COOLDOWN_OPTIONS.map((n) => h("option", { key: n, value: String(n) }, cooldownLabel(n))))),
-                editRow("分片长度", "单条回复的最大字符数，超过会拆成多条发送。",
+                editRow(t("group.chunkLength"), t("group.chunkLengthHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.replyChunkChars),
                     onChange: (ev: any) => setOverrideField("replyChunkChars", ev.target.value),
-                    "aria-label": "分片长度",
+                    "aria-label": t("group.chunkLength"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
+                    h("option", { value: "" }, t("group.followDefault")),
                     [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000].map((n) =>
                       h("option", { key: n, value: String(n) }, `${n}`)))),
-                editRow("每条消息回复上限", "该群每条用户消息最多被动回复几条（平台上限 5）。",
+                editRow(t("group.maxReplies"), t("group.maxRepliesHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.maxRepliesPerMessage),
                     onChange: (ev: any) => setOverrideField("maxRepliesPerMessage", ev.target.value),
-                    "aria-label": "每条消息回复上限",
+                    "aria-label": t("group.maxReplies"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
-                    [1, 2, 3, 4, 5].map((n) => h("option", { key: n, value: String(n) }, `${n} 条`)))),
-                editRow("Markdown 回复", "该群回复是否优先使用 QQ Markdown。",
+                    h("option", { value: "" }, t("group.followDefault")),
+                    [1, 2, 3, 4, 5].map((n) => h("option", { key: n, value: String(n) }, fmt("override.countOption", n))))),
+                editRow(t("policy.markdown"), t("group.markdownHint"),
                   h("select", {
                     className: "qbot-settingSelect", value: String(draft.markdownReply),
                     onChange: (ev: any) => setOverrideField("markdownReply", ev.target.value),
-                    "aria-label": "Markdown 回复",
+                    "aria-label": t("policy.markdown"),
                   },
-                    h("option", { value: "" }, "跟随默认"),
-                    h("option", { value: "on" }, "启用"),
-                    h("option", { value: "off" }, "停用"))),
+                    h("option", { value: "" }, t("group.followDefault")),
+                    h("option", { value: "on" }, t("conn.enable")),
+                    h("option", { value: "off" }, t("conn.disable")))),
                 // 长期记忆（memoryEnabled）与聊天 Preset（agentPresetChat）已从界面移除
                 //（默认常开/留空跟随 Agent Preset，仅 bots.json 可配）；
                 // 草稿仍读取/回写这两个字段，避免保存时丢掉配置文件里已设置的值。
-                editRow("敏感词列表", "仅该群生效的敏感词（逗号分隔），命中即撤回并跳过回复；与机器人级敏感词叠加。",
+                editRow(t("feature.bannedWords"), t("group.bannedWordsHint"),
                   TextArea({
                     rows: 2, value: String(draft.bannedWords ?? ""),
-                    placeholder: "词1, 词2（留空跟随默认）",
+                    placeholder: t("group.bannedWordsPlaceholder"),
                     onChange: (ev: any) => setOverrideField("bannedWords", ev.target.value),
-                    "aria-label": "敏感词列表",
+                    "aria-label": t("feature.bannedWords"),
                   })))),
             h("div", { className: "qbot-modalFoot" },
               error
                 ? h("p", { className: "qbot-footError", role: "alert" }, error)
-                : h("span", { className: "qbot-hint" }, "保存后立即生效，无需重启"),
+                : h("span", { className: "qbot-hint" }, t("group.saveHint")),
               h("div", { className: "qbot-viewActions" },
-                h("button", { className: "qbot-btn", type: "button", disabled: saving, onClick: onClose }, "取消"),
+                h("button", { className: "qbot-btn", type: "button", disabled: saving, onClick: onClose }, t("common.cancel")),
                 h("button", {
                   className: "qbot-btn qbot-btnPrimary", type: "button", disabled: saving,
                   onClick: () => void saveOverride(),
-                }, saving ? "保存中…" : "保存")))));
+                }, saving ? t("common.saving") : t("common.save"))))));
 }

@@ -363,6 +363,8 @@ export function createAdminService(ctx: AdminServiceContext) {
       content: typeof payload.content === "string" ? payload.content : undefined,
       command: typeof payload.command === "string" ? payload.command : undefined,
       cwd: typeof payload.cwd === "string" ? payload.cwd : undefined,
+      timeoutMs: payload.timeoutMs === undefined ? undefined : Number(payload.timeoutMs),
+      env: payload.env && typeof payload.env === "object" && !Array.isArray(payload.env) ? payload.env as Record<string, string> : undefined,
       resultMode: payload.resultMode === "ai" || payload.resultMode === "raw" ? payload.resultMode : undefined,
       parsePrompt: typeof payload.parsePrompt === "string" ? payload.parsePrompt : undefined,
       gate: typeof payload.gate === "string" ? payload.gate : undefined,

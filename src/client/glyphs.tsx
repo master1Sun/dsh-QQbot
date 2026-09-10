@@ -1,7 +1,7 @@
 /**
  * SVG 图标组件：QQ 企鹅 / 目录 / 上一级 / QQ 机器人品牌 glyph。
  */
-import { h } from "./i18n.js";
+import { h } from "./i18n/index.js";
 
 /** QQ 企鹅 glyph */
 export function QqLogoGlyph() {

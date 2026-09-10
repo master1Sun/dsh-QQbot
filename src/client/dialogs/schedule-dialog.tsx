@@ -15,11 +15,11 @@
  *    （resultMode=ai 时先把输出交给 AI 整理成播报，再推送）
  */
 import * as React from "react";
-import { h } from "../i18n.js";
+import { fmt, h, t } from "../i18n/index.js";
 import type { RpcCall } from "../types.js";
 import { TextInput, TextArea, confirmDlg, editRow, errText, formatTime, val } from "../ui.js";
 import { OpenIdPicker, useArchiveChats } from "../id-picker.js";
-import { isEnglish, localizeText } from "../i18n.js";
+import { isEnglish } from "../i18n/index.js";
 import { isValidCron, nextCronRun, tzOffsetMs, wallToEpoch } from "../../shared/cron.js";
 
 /**
@@ -27,13 +27,13 @@ import { isValidCron, nextCronRun, tzOffsetMs, wallToEpoch } from "../../shared/
  * 不能把单个汉字当字典 key（「日」「一」…易与其它词条冲突），故按语言直接取值。
  */
 const WEEKDAYS = [
-  { v: 0, label: "日", en: "Su" },
-  { v: 1, label: "一", en: "Mo" },
-  { v: 2, label: "二", en: "Tu" },
-  { v: 3, label: "三", en: "We" },
-  { v: 4, label: "四", en: "Th" },
-  { v: 5, label: "五", en: "Fr" },
-  { v: 6, label: "六", en: "Sa" },
+  { v: 0, label: t("weekday.sun"), en: "Su" },
+  { v: 1, label: t("weekday.mon"), en: "Mo" },
+  { v: 2, label: t("weekday.tue"), en: "Tu" },
+  { v: 3, label: t("weekday.wed"), en: "We" },
+  { v: 4, label: t("weekday.thu"), en: "Th" },
+  { v: 5, label: t("weekday.fri"), en: "Fr" },
+  { v: 6, label: t("weekday.sat"), en: "Sa" },
 ];
 
 /** 周几按钮当前语言下的短标签。 */
@@ -44,25 +44,25 @@ export function wdLabel(v: number): string {
 
 /** 常用时区（下拉选择，避免手输 IANA 出错）。 */
 const TZ_LIST: Array<{ value: string; label: string }> = [
-  { value: "Asia/Shanghai", label: "中国标准时间 · Asia/Shanghai（UTC+8）" },
-  { value: "Asia/Hong_Kong", label: "中国香港 · Asia/Hong_Kong（UTC+8）" },
-  { value: "Asia/Taipei", label: "中国台湾 · Asia/Taipei（UTC+8）" },
-  { value: "Asia/Singapore", label: "新加坡 · Asia/Singapore（UTC+8）" },
-  { value: "Asia/Tokyo", label: "日本 · Asia/Tokyo（UTC+9）" },
-  { value: "Asia/Seoul", label: "韩国 · Asia/Seoul（UTC+9）" },
-  { value: "Asia/Kolkata", label: "印度 · Asia/Kolkata（UTC+5:30）" },
-  { value: "Asia/Dubai", label: "阿联酋 · Asia/Dubai（UTC+4）" },
-  { value: "Europe/Moscow", label: "俄罗斯 · Europe/Moscow（UTC+3）" },
-  { value: "Europe/Berlin", label: "中欧 · Europe/Berlin（UTC+1/+2）" },
-  { value: "Europe/London", label: "英国 · Europe/London（UTC+0/+1）" },
-  { value: "America/Sao_Paulo", label: "巴西 · America/Sao_Paulo（UTC-3）" },
-  { value: "America/New_York", label: "美国东部 · America/New_York（UTC-5/-4）" },
-  { value: "America/Chicago", label: "美国中部 · America/Chicago（UTC-6/-5）" },
-  { value: "America/Denver", label: "美国山地 · America/Denver（UTC-7/-6）" },
-  { value: "America/Los_Angeles", label: "美国西部 · America/Los_Angeles（UTC-8/-7）" },
-  { value: "Australia/Sydney", label: "澳大利亚 · Australia/Sydney（UTC+10/+11）" },
-  { value: "Pacific/Auckland", label: "新西兰 · Pacific/Auckland（UTC+12/+13）" },
-  { value: "UTC", label: "协调世界时 · UTC（UTC+0）" },
+  { value: "Asia/Shanghai", label: t("tz.shanghai") },
+  { value: "Asia/Hong_Kong", label: t("tz.hongkong") },
+  { value: "Asia/Taipei", label: t("tz.taipei") },
+  { value: "Asia/Singapore", label: t("tz.singapore") },
+  { value: "Asia/Tokyo", label: t("tz.tokyo") },
+  { value: "Asia/Seoul", label: t("tz.seoul") },
+  { value: "Asia/Kolkata", label: t("tz.kolkata") },
+  { value: "Asia/Dubai", label: t("tz.dubai") },
+  { value: "Europe/Moscow", label: t("tz.moscow") },
+  { value: "Europe/Berlin", label: t("tz.berlin") },
+  { value: "Europe/London", label: t("tz.london") },
+  { value: "America/Sao_Paulo", label: t("tz.saopaulo") },
+  { value: "America/New_York", label: t("tz.newyork") },
+  { value: "America/Chicago", label: t("tz.chicago") },
+  { value: "America/Denver", label: t("tz.denver") },
+  { value: "America/Los_Angeles", label: t("tz.losangeles") },
+  { value: "Australia/Sydney", label: t("tz.sydney") },
+  { value: "Pacific/Auckland", label: t("tz.auckland") },
+  { value: "UTC", label: t("tz.utc") },
 ];
 
 const DEFAULT_TZ = "Asia/Shanghai";
@@ -81,7 +81,7 @@ function localTimeZone(): string {
 const CMD_TEMPLATES: Array<{ label: string; cmd: string }> = [
   { label: "Python", cmd: "python C:/scripts/report.py" },
   { label: "PowerShell", cmd: "powershell -ExecutionPolicy Bypass -File C:/scripts/check.ps1" },
-  { label: "bat 批处理", cmd: "C:/scripts/backup.bat" },
+  { label: t("sched.form.templateBat"), cmd: "C:/scripts/backup.bat" },
   { label: "Node", cmd: "node C:/scripts/sync.mjs" },
   { label: "VBS", cmd: "cscript //Nologo C:/scripts/task.vbs" },
   { label: "Perl", cmd: "perl C:/scripts/task.pl" },
@@ -89,15 +89,15 @@ const CMD_TEMPLATES: Array<{ label: string; cmd: string }> = [
 
 /** 间隔快捷值（分钟）。 */
 const INTERVAL_PRESETS: Array<{ v: number; label: string }> = [
-  { v: 5, label: "5 分" },
-  { v: 10, label: "10 分" },
-  { v: 15, label: "15 分" },
-  { v: 30, label: "30 分" },
-  { v: 60, label: "1 小时" },
-  { v: 120, label: "2 小时" },
-  { v: 360, label: "6 小时" },
-  { v: 720, label: "12 小时" },
-  { v: 1440, label: "24 小时" },
+  { v: 5, label: t("sched.form.quick5m") },
+  { v: 10, label: t("sched.form.quick10m") },
+  { v: 15, label: t("sched.form.quick15m") },
+  { v: 30, label: t("sched.form.quick30m") },
+  { v: 60, label: t("sched.form.quick1h") },
+  { v: 120, label: t("sched.form.quick2h") },
+  { v: 360, label: t("sched.form.quick6h") },
+  { v: 720, label: t("sched.form.quick12h") },
+  { v: 1440, label: t("sched.form.quick24h") },
 ];
 
 /** datetime-local 字符串（按 tz 墙钟解释）→ ISO 即时。 */
@@ -109,8 +109,7 @@ function datetimeLocalToInstant(local: string, tz: string): string | null {
   return new Date(epoch).toISOString();
 }
 
-/** ISO 即时（按 tz 墙钟解释）→ datetime-local 字符串。 */
-function instantToDatetimeLocal(iso: string, tz: string): string {
+/** ISO 即时（按 tz 墙钟解释）→ datetime-local 字符串。 */function instantToDatetimeLocal(iso: string, tz: string): string {
   const epoch = new Date(iso).getTime();
   if (!Number.isFinite(epoch)) return "";
   const wd = new Date(epoch + tzOffsetMs(epoch, tz));
@@ -118,9 +117,26 @@ function instantToDatetimeLocal(iso: string, tz: string): string {
   return `${wd.getUTCFullYear()}-${p(wd.getUTCMonth() + 1)}-${p(wd.getUTCDate())}T${p(wd.getUTCHours())}:${p(wd.getUTCMinutes())}`;
 }
 
+/**
+ * 解析「每行 KEY=VALUE」格式的环境变量文本为对象。
+ * 忽略空行、注释行（# 开头）与不合法的键名；无有效项返回 undefined。
+ */
+function parseEnvText(text: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const k = line.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
+    out[k] = line.slice(eq + 1).trim();
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** 分区容器：标题 + 说明 + 内容，提供视觉层次。 */
-function section(title: string, desc: string, children: any) {
-  return h(
+function section(title: string, desc: string, children: any) {  return h(
     "section",
     { className: "qbot-schedSection" },
     h(
@@ -151,6 +167,8 @@ function blankEntry(detailAppId: string) {
     command: "",
     genPrompt: "",
     cwd: "",
+    timeoutSec: 120,
+    envText: "",
     resultMode: "raw",
     parsePrompt: "",
     gate: "always",
@@ -248,11 +266,11 @@ export function ScheduleDialog(props: {
       const next = nextCronRun(String(e.cron), String(e.tz || DEFAULT_TZ), new Date());
       setCronPreview(
         next
-          ? { ok: true, text: `下次运行：${formatTime(next.toISOString())}` }
-          : { ok: false, text: "未来 5 年内无匹配，请检查表达式" },
+          ? { ok: true, text: fmt("sched.nextRun", formatTime(next.toISOString())) }
+          : { ok: false, text: t("sched.form.cronNoMatch") },
       );
     } else if (e && e.type === "cron" && String(e.cron ?? "").trim()) {
-      setCronPreview({ ok: false, text: "表达式还不完整或非法（应为 5 段：分 时 日 月 周）" });
+      setCronPreview({ ok: false, text: t("sched.form.cronIncomplete") });
     } else {
       setCronPreview(null);
     }
@@ -286,6 +304,12 @@ export function ScheduleDialog(props: {
               genStatus: String(entry.genStatus ?? ""),
               genError: String(entry.genError ?? ""),
               cwd: String(entry.cwd ?? ""),
+              // 超时以「秒」编辑（后端存毫秒），便于非技术用户理解。
+              timeoutSec: entry.timeoutMs ? Math.round(Number(entry.timeoutMs) / 1000) : 120,
+              // 环境变量：每行 KEY=VALUE，提交时解析成对象。
+              envText: entry.env && typeof entry.env === "object"
+                ? Object.entries(entry.env as Record<string, string>).map(([k, v]) => `${k}=${v}`).join("\n")
+                : "",
               resultMode: entry.resultMode === "ai" ? "ai" : "raw",
               parsePrompt: String(entry.parsePrompt ?? ""),
               gate: entry.gate === "nonempty" ? "nonempty" : entry.gate === "changed" ? "changed" : "always",
@@ -329,51 +353,51 @@ export function ScheduleDialog(props: {
     const e = scheduleModal?.editing;
     if (!e) return;
     if (!String(e.openid ?? "").trim()) {
-      setScheduleModal((prev) => (prev ? { ...prev, editError: "请填写接收方 openid（群或用户）" } : prev));
+      setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.recipientRequired") } : prev));
       return;
     }
     if (e.type === "daily" && !/^\d{1,2}:\d{2}$/.test(String(e.time ?? ""))) {
-      setScheduleModal((prev) => (prev ? { ...prev, editError: "时间格式应为 HH:mm（如 09:30）" } : prev));
+      setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.timeInvalid") } : prev));
       return;
     }
     if (e.type === "interval" && !(Number(e.minutes) >= 5)) {
-      setScheduleModal((prev) => (prev ? { ...prev, editError: "间隔不能小于 5 分钟" } : prev));
+      setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.intervalTooSmall") } : prev));
       return;
     }
     if (e.type === "cron" && !isValidCron(String(e.cron ?? ""))) {
-      setScheduleModal((prev) => (prev ? { ...prev, editError: "cron 表达式非法（标准 5 段，如 0 9 * * 1-5）" } : prev));
+      setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.cronInvalid") } : prev));
       return;
     }
     let atInstant: string | null = null;
     if (e.type === "at") {
       atInstant = datetimeLocalToInstant(String(e.atLocal ?? ""), String(e.tz || DEFAULT_TZ));
       if (!atInstant) {
-        setScheduleModal((prev) => (prev ? { ...prev, editError: "请选择有效的 at 时间" } : prev));
+        setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.atInvalid") } : prev));
         return;
       }
       if (new Date(atInstant).getTime() <= Date.now()) {
-        setScheduleModal((prev) => (prev ? { ...prev, editError: "at 时间必须晚于当前时间" } : prev));
+        setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.atMustBeFuture") } : prev));
         return;
       }
     }
     const tz = String(e.tz || DEFAULT_TZ).trim() || DEFAULT_TZ;
     if ((e.type === "cron" || e.type === "at") && !/^[A-Za-z]+(\/[A-Za-z_+-]+)?$|^UTC$/.test(tz)) {
-      setScheduleModal((prev) => (prev ? { ...prev, editError: "时区格式不正确（应为 IANA 时区，如 Asia/Shanghai）" } : prev));
+      setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.tzInvalid") } : prev));
       return;
     }
     if (e.mode === "tool") {
       const aiMode = String(e._cmdMode ?? "manual") === "ai";
       if (aiMode) {
         if (!String(e.genPrompt ?? "").trim()) {
-          setScheduleModal((prev) => (prev ? { ...prev, editError: "请填写 AI 脚本描述词（如：抓取某网页今日价格并输出）" } : prev));
+          setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.aiScriptRequired") } : prev));
           return;
         }
       } else if (!String(e.command ?? "").trim()) {
-        setScheduleModal((prev) => (prev ? { ...prev, editError: "请填写要执行的命令（如 python C:/scripts/report.py）" } : prev));
+        setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.commandRequired") } : prev));
         return;
       }
     } else if (!String(e.content ?? "").trim()) {
-      setScheduleModal((prev) => (prev ? { ...prev, editError: "内容不能为空" } : prev));
+      setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.contentRequired") } : prev));
       return;
     }
 
@@ -397,6 +421,8 @@ export function ScheduleDialog(props: {
               : {
                   command: String(e.command ?? "").trim(),
                   ...(String(e.cwd ?? "").trim() ? { cwd: String(e.cwd).trim() } : {}),
+                  ...(Number(e.timeoutSec) > 0 ? { timeoutMs: Math.round(Number(e.timeoutSec) * 1000) } : {}),
+                  ...(parseEnvText(String(e.envText ?? "")) ? { env: parseEnvText(String(e.envText ?? "")) } : {}),
                 }),
             // 「加工 → 门控」两段对两种生成方式都生效（脚本生成完成后走同一条流水线）。
             resultMode: e.resultMode === "ai" ? "ai" : "raw",
@@ -424,7 +450,7 @@ export function ScheduleDialog(props: {
   };
 
   const removeSchedule = async (id: string) => {
-    if (!(await confirmDlg({ message: localizeText("确定删除这条定时任务？删除后立即停止发送。"), danger: true }))) return;
+    if (!(await confirmDlg({ message: t("sched.removeTaskConfirm"), danger: true }))) return;
     setScheduleRemoving(id);
     const scopeNow = scheduleModal?.botScope ?? "current";
     try {
@@ -440,8 +466,8 @@ export function ScheduleDialog(props: {
   const toggleSchedule = async (id: string, currentlyEnabled: boolean) => {
     if (currentlyEnabled) {
       const ok = await confirmDlg({
-        message: localizeText("确定禁用这条定时任务？禁用后不再执行，可随时重新启用。"),
-        confirmLabel: localizeText("确认禁用"),
+        message: t("sched.disableConfirm"),
+        confirmLabel: t("common.confirmDisable"),
         danger: true,
       });
       if (!ok) return;
@@ -466,7 +492,7 @@ export function ScheduleDialog(props: {
     setScheduleTesting("");
     if (res.ok) {
       const v = val(res) ?? {};
-      setSchedNotice({ ok: true, text: typeof v.message === "string" ? v.message : "已测试发送一次" });
+      setSchedNotice({ ok: true, text: typeof v.message === "string" ? v.message : t("sched.testSent") });
     } else {
       setSchedNotice({ ok: false, text: errText(res.error) });
     }
@@ -481,17 +507,17 @@ export function ScheduleDialog(props: {
     const hit = archiveChats.chats.find((c) => c.openid === openid);
     const name = hit ? (hit.scope === "c2c" ? hit.name : hit.lastSenderName) : "";
     if (!name) return short;
-    return hit && hit.scope === "group" ? `${short}（成员 ${name}）` : `${short}（${name}）`;
+    return hit && hit.scope === "group" ? fmt("idpick.memberSuffix", short, name) : `${short}（${name}）`;
   };
 
   const summarizeType = (e: Record<string, any>): string => {
     if (e.type === "cron") return `cron ${e.cron ?? ""}${e.tz && e.tz !== DEFAULT_TZ ? ` · ${e.tz}` : ""}`;
-    if (e.type === "at") return `一次性 ${e.at ? formatTime(e.at) : localizeText("待补算")}`;
+    if (e.type === "at") return fmt("sched.form.onceAt", e.at ? formatTime(e.at) : t("sched.pending"));
     if (e.type === "interval") {
       const m = Number(e.minutes ?? 0);
-      return m >= 60 && m % 60 === 0 && m < 1440 ? `每 ${m / 60} 小时` : m === 1440 ? "每 24 小时" : `每 ${m} 分钟`;
+      return m >= 60 && m % 60 === 0 && m < 1440 ? fmt("sched.form.everyHours", m / 60) : m === 1440 ? t("sched.form.every24h") : fmt("sched.form.everyMinutes", m);
     }
-    return `每天 ${e.time ?? "--:--"}`;
+    return fmt("sched.form.dailyAt", e.time ?? "--:--");
   };
 
   /**
@@ -499,9 +525,9 @@ export function ScheduleDialog(props: {
    * 走显式拼接而非「周」+ 汉字字典，避免英文下出现半中半英。
    */
   const weekdayText = (list: number[]): string => {
-    if (!list || list.length === 0 || list.length === 7) return localizeText("每天");
+    if (!list || list.length === 0 || list.length === 7) return t("sched.form.dailyShort");
     if (isEnglish()) return list.map((w) => WEEKDAYS.find((x) => x.v === w)?.en ?? String(w)).join(", ");
-    return `周${list.map((w) => WEEKDAYS.find((x) => x.v === w)?.label ?? String(w)).join("、")}`;
+    return fmt("sched.form.weekdayPrefix", list.map((w) => WEEKDAYS.find((x) => x.v === w)?.label ?? String(w)).join("、"));
   };
 
   /** 时区下拉：本机时区置顶，末项「自定义」展开手输。 */
@@ -509,7 +535,7 @@ export function ScheduleDialog(props: {
     const local = localTimeZone();
     const options: Array<{ value: string; label: string }> = [];
     if (!TZ_LIST.some((t) => t.value === local)) {
-      options.push({ value: local, label: `本机时区 · ${local}` });
+      options.push({ value: local, label: fmt("sched.form.localTz", local) });
     }
     options.push(...TZ_LIST);
     const isKnown = options.some((o) => o.value === current);
@@ -525,16 +551,16 @@ export function ScheduleDialog(props: {
             const v = String(ev.target.value);
             setEditField("tz", v === TZ_CUSTOM ? local : v);
           },
-          "aria-label": "时区",
+          "aria-label": t("sched.form.timezone"),
         },
         ...options.map((o) =>
           h(
             "option",
             { key: o.value, value: o.value },
-            o.value === local && o.label.startsWith("本机时区") ? o.label : o.label,
+            o.value === local && o.label.startsWith(t("status.localTimeZone")) ? o.label : o.label,
           ),
         ),
-        h("option", { value: TZ_CUSTOM }, "自定义（手动输入 IANA 时区）"),
+        h("option", { value: TZ_CUSTOM }, t("sched.form.tzCustomOption")),
       ),
       !isKnown
         ? TextInput({
@@ -542,7 +568,7 @@ export function ScheduleDialog(props: {
             value: String(current ?? ""),
             placeholder: "Asia/Shanghai",
             onChange: (ev: any) => setEditField("tz", ev.target.value),
-            "aria-label": "自定义时区",
+            "aria-label": t("sched.form.tzCustom"),
           })
         : null,
     );
@@ -556,7 +582,7 @@ export function ScheduleDialog(props: {
       { className: "qbot-weekdayPicker" },
       h(
         "div",
-        { className: "qbot-weekdayRow", role: "group", "aria-label": "星期过滤" },
+        { className: "qbot-weekdayRow", role: "group", "aria-label": t("sched.form.weekdayFilterShort") },
         WEEKDAYS.map((w) =>
           h(
             "button",
@@ -574,10 +600,10 @@ export function ScheduleDialog(props: {
       h(
         "div",
         { className: "qbot-weekdayQuick" },
-        h("button", { type: "button", className: "qbot-miniBtn", onClick: () => setWeekdays([]) }, "每天"),
-        h("button", { type: "button", className: "qbot-miniBtn", onClick: () => setWeekdays([1, 2, 3, 4, 5]) }, "工作日"),
-        h("button", { type: "button", className: "qbot-miniBtn", onClick: () => setWeekdays([0, 6]) }, "周末"),
-        h("span", { className: "qbot-weekdayHint" }, `当前：${weekdayText(list)}`),
+        h("button", { type: "button", className: "qbot-miniBtn", onClick: () => setWeekdays([]) }, t("sched.form.dailyShort")),
+        h("button", { type: "button", className: "qbot-miniBtn", onClick: () => setWeekdays([1, 2, 3, 4, 5]) }, t("sched.form.weekdays")),
+        h("button", { type: "button", className: "qbot-miniBtn", onClick: () => setWeekdays([0, 6]) }, t("sched.form.weekend")),
+        h("span", { className: "qbot-weekdayHint" }, fmt("sched.current", weekdayText(list))),
       ),
     );
   };
@@ -589,17 +615,17 @@ export function ScheduleDialog(props: {
         "div",
         { className: "qbot-schedFieldRow" },
         editRow(
-          "每天发送时间",
-          "按所选时区解释；点击输入框可用时间选择器。",
+          t("sched.form.dailyTime"),
+          t("sched.form.timeHint"),
           h("input", {
             type: "time",
             className: "qbot-input qbot-mono",
             value: String(e.time ?? ""),
             onChange: (ev: any) => setEditField("time", ev.target.value),
-            "aria-label": "每天发送时间",
+            "aria-label": t("sched.form.dailyTime"),
           }),
         ),
-        editRow("时区", "daily 默认按中国标准时间发送；如需按其他时区，请改用 cron。", tzSelect(String(e.tz || DEFAULT_TZ))),
+        editRow(t("sched.form.timezone"), t("sched.form.tzDailyHint"), tzSelect(String(e.tz || DEFAULT_TZ))),
       );
     }
     if (e.type === "interval") {
@@ -607,8 +633,8 @@ export function ScheduleDialog(props: {
         "div",
         { className: "qbot-schedFieldRow" },
         editRow(
-          "间隔分钟",
-          "两次发送之间的间隔，最小 5 分钟。间隔越小消耗的主动消息配额越多。",
+          t("sched.form.intervalMinutes"),
+          t("sched.form.intervalHint"),
           h(
             "div",
             { className: "qbot-schedNumber" },
@@ -619,15 +645,15 @@ export function ScheduleDialog(props: {
               step: 1,
               value: String(e.minutes ?? 30),
               onChange: (ev: any) => setEditField("minutes", Number(ev.target.value)),
-              "aria-label": "间隔分钟",
+              "aria-label": t("sched.form.intervalMinutes"),
             }),
-            h("span", { className: "qbot-schedUnit" }, "分钟"),
+            h("span", { className: "qbot-schedUnit" }, t("sched.form.minutesUnit")),
           ),
         ),
         h(
           "div",
           { className: "qbot-schedPresets" },
-          h("span", { className: "qbot-schedPresetLabel" }, "快捷"),
+          h("span", { className: "qbot-schedPresetLabel" }, t("sched.form.quick")),
           INTERVAL_PRESETS.map((p) =>
             h(
               "button",
@@ -648,67 +674,67 @@ export function ScheduleDialog(props: {
         "div",
         { className: "qbot-schedFieldRow" },
         editRow(
-          "cron 表达式",
-          "标准 5 段：分 时 日 月 周（如 0 9 * * 1-5 = 工作日 9 点）。支持 */步长、范围、列表、月份与星期英文名。",
+          t("sched.form.cron"),
+          t("sched.form.cronHint"),
           TextInput({
             className: "qbot-input qbot-mono",
             value: String(e.cron ?? ""),
             placeholder: "0 9 * * 1-5",
             onChange: (ev: any) => setEditField("cron", ev.target.value),
-            "aria-label": "cron 表达式",
+            "aria-label": t("sched.form.cron"),
           }),
         ),
-        editRow("时区", "cron 表达式按该时区解释。", tzSelect(String(e.tz || DEFAULT_TZ))),
+        editRow(t("sched.form.timezone"), t("sched.form.tzCronHint"), tzSelect(String(e.tz || DEFAULT_TZ))),
       );
     }
     return h(
       "div",
       { className: "qbot-schedFieldRow" },
       editRow(
-        "at 时间",
-        "一次性触发时间，到点执行一次后自动删除。",
+        t("sched.form.atTime"),
+        t("sched.form.atHint"),
         h("input", {
           type: "datetime-local",
           className: "qbot-input qbot-mono",
           value: String(e.atLocal ?? ""),
           onChange: (ev: any) => setEditField("atLocal", ev.target.value),
-          "aria-label": "at 时间",
+          "aria-label": t("sched.form.atTime"),
         }),
       ),
-      editRow("时区", "at 时间按该时区解释。", tzSelect(String(e.tz || DEFAULT_TZ))),
+      editRow(t("sched.form.timezone"), t("sched.form.tzAtHint"), tzSelect(String(e.tz || DEFAULT_TZ))),
     );
   };
 
   /** 任务契约（ai / tool 通用）：目标 + 通知条件 + 发送前自校验。 */
   const contractFields = (e: Record<string, any>) => [
     editRow(
-      "任务目标（可选）",
-      "一句话说明这条任务服务于什么判断，供 AI 分诊时理解意图。",
+      t("sched.form.goal"),
+      t("sched.form.goalHint"),
       TextInput({
         className: "qbot-input",
         value: String(e.goal ?? ""),
-        placeholder: "例如：盯住竞品价格波动",
+        placeholder: t("sched.form.goalPlaceholder"),
         onChange: (ev: any) => setEditField("goal", ev.target.value),
-        "aria-label": "任务目标",
+        "aria-label": t("sched.form.goalShort"),
       }),
     ),
     editRow(
-      "通知条件（可选）",
-      "用自然语言写明「什么时候才值得打扰大家」。不满足时本次静默不发，也不占主动消息配额。",
+      t("sched.form.notifyWhen"),
+      t("sched.form.notifyWhenHint"),
       TextArea({
         rows: 2,
         value: String(e.notifyWhen ?? ""),
-        placeholder: "例如：只有涨幅超过 5%、或出现异常时才提醒",
+        placeholder: t("sched.form.notifyWhenPlaceholder"),
         onChange: (ev: any) => setEditField("notifyWhen", ev.target.value),
-        "aria-label": "通知条件",
+        "aria-label": t("sched.form.notifyWhenShort"),
       }),
     ),
     editRow(
-      "发送前自校验",
-      "开启后，投递前再复核一次草稿是否满足上面的目标与通知条件，不达标就不发。tool 模式为独立模型二次复核，ai 模式为强化自查。",
+      t("sched.form.selfCheck"),
+      t("sched.form.selfCheckHint"),
       h(
         "div",
-        { className: "qbot-schedSeg", role: "group", "aria-label": "发送前自校验" },
+        { className: "qbot-schedSeg", role: "group", "aria-label": t("sched.form.selfCheck") },
         h(
           "button",
           {
@@ -717,7 +743,7 @@ export function ScheduleDialog(props: {
             "aria-pressed": e.verify !== true,
             onClick: () => setEditField("verify", false),
           },
-          "关闭校验",
+          t("sched.form.checkOff"),
         ),
         h(
           "button",
@@ -727,7 +753,7 @@ export function ScheduleDialog(props: {
             "aria-pressed": e.verify === true,
             onClick: () => setEditField("verify", true),
           },
-          "开启校验",
+          t("sched.form.checkOn"),
         ),
       ),
     ),
@@ -741,11 +767,11 @@ export function ScheduleDialog(props: {
         "div",
         { className: "qbot-schedFieldCol" },
         editRow(
-          "命令来源",
-          "手写命令=自己写完整命令行；AI 生成脚本=只写任务描述，保存后由 AI 后台生成脚本并自动回填命令。",
+          t("sched.commandSource"),
+          t("sched.commandSourceHint"),
           h(
             "div",
-            { className: "qbot-schedSeg", role: "group", "aria-label": "命令来源" },
+            { className: "qbot-schedSeg", role: "group", "aria-label": t("sched.commandSource") },
             h(
               "button",
               {
@@ -754,7 +780,7 @@ export function ScheduleDialog(props: {
                 "aria-pressed": !aiMode,
                 onClick: () => setEditField("_cmdMode", "manual"),
               },
-              "手写命令",
+              t("sched.commandManual"),
             ),
             h(
               "button",
@@ -764,37 +790,37 @@ export function ScheduleDialog(props: {
                 "aria-pressed": aiMode,
                 onClick: () => setEditField("_cmdMode", "ai"),
               },
-              "AI 生成脚本",
+              t("sched.commandAiScript"),
             ),
           ),
         ),
         aiMode
           ? [
               editRow(
-                "AI 脚本描述词",
-                "描述这个定时任务要做的事（如「抓取某网页今日价格并输出一行文本」）。保存后 AI 后台生成脚本：生成期间任务不执行；完成后自动按计划执行（已过的触发时刻不补跑）。",
+                t("sched.aiScriptPrompt"),
+                t("sched.aiScriptPromptHint"),
                 TextArea({
                   rows: 3,
                   value: String(e.genPrompt ?? ""),
-                  placeholder: "例如：访问 https://example.com/price 抓取今日价格，输出一行「今日价格：xx 元」",
+                  placeholder: t("sched.aiScriptPlaceholder"),
                   onChange: (ev: any) => setEditField("genPrompt", ev.target.value),
-                  "aria-label": "AI 脚本描述词",
+                  "aria-label": t("sched.aiScriptPrompt"),
                 }),
               ),
               e.id && String(e.genStatus ?? "") === "pending"
-                ? h("div", { className: "qbot-schedGen is-pending" }, "脚本生成中…完成后自动回填命令并按计划执行。")
+                ? h("div", { className: "qbot-schedGen is-pending" }, t("sched.scriptGeneratingHint"))
                 : null,
               e.id && String(e.genStatus ?? "") === "done"
-                ? h("div", { className: "qbot-schedGen is-done" }, `已生成脚本：${String(e.command ?? "")}。修改描述词并保存会重新生成。`)
+                ? h("div", { className: "qbot-schedGen is-done" }, fmt("notice.scriptGenerated", String(e.command ?? "")))
                 : null,
               e.id && String(e.genStatus ?? "") === "error"
-                ? h("div", { className: "qbot-schedGen is-error" }, `上次生成失败：${String(e.genError ?? "未知错误")}。重新保存即重试。`)
+                ? h("div", { className: "qbot-schedGen is-error" }, fmt("notice.lastGenFailedRetry", String(e.genError ?? t("common.unknownError"))))
                 : null,
             ]
           : [
               editRow(
-                "要执行的命令",
-                "到点由服务端执行这条命令行，捕获 stdout/stderr 与退出码后推送给用户。支持 python / powershell -File / .bat / node / vbs(cscript //Nologo) / perl / php / ruby 等。",
+                t("sched.form.command"),
+                t("sched.form.commandHint"),
                 h(
                   "div",
                   { className: "qbot-schedCmd" },
@@ -804,12 +830,12 @@ export function ScheduleDialog(props: {
                     value: String(e.command ?? ""),
                     placeholder: "python C:/scripts/report.py",
                     onChange: (ev: any) => setEditField("command", ev.target.value),
-                    "aria-label": "要执行的命令",
+                    "aria-label": t("sched.form.command"),
                   }),
                   h(
                     "div",
                     { className: "qbot-schedPresets" },
-                    h("span", { className: "qbot-schedPresetLabel" }, "模板"),
+                    h("span", { className: "qbot-schedPresetLabel" }, t("sched.form.templates")),
                     CMD_TEMPLATES.map((t) =>
                       h("button", { key: t.label, type: "button", className: "qbot-miniBtn", onClick: () => setEditField("command", t.cmd) }, t.label),
                     ),
@@ -817,75 +843,101 @@ export function ScheduleDialog(props: {
                 ),
               ),
               editRow(
-                "工作目录（可选）",
-                "命令的工作目录；留空则使用插件进程目录。脚本里用相对路径时建议填写。",
+                t("sched.form.cwd"),
+                t("sched.form.cwdHint"),
                 TextInput({
                   className: "qbot-input qbot-mono",
                   value: String(e.cwd ?? ""),
-                  placeholder: "例如 C:/scripts",
+                  placeholder: t("sched.form.cwdPlaceholder"),
                   onChange: (ev: any) => setEditField("cwd", ev.target.value),
-                  "aria-label": "工作目录",
+                  "aria-label": t("sched.form.cwdShort"),
+                }),
+              ),
+              editRow(
+                t("sched.form.timeout"),
+                t("sched.form.timeoutHint"),
+                TextInput({
+                  className: "qbot-input",
+                  type: "number",
+                  min: 1,
+                  max: 600,
+                  value: String(e.timeoutSec ?? 120),
+                  placeholder: "120",
+                  onChange: (ev: any) => setEditField("timeoutSec", ev.target.value),
+                  "aria-label": t("sched.form.timeout"),
+                }),
+              ),
+              editRow(
+                t("sched.form.env"),
+                t("sched.form.envHint"),
+                TextArea({
+                  rows: 2,
+                  className: "qbot-textarea qbot-mono",
+                  value: String(e.envText ?? ""),
+                  placeholder: "API_KEY=xxxx\nREPORT_DIR=D:/reports",
+                  onChange: (ev: any) => setEditField("envText", ev.target.value),
+                  "aria-label": t("sched.form.envShort"),
                 }),
               ),
             ],
         editRow(
-          "结果处理",
-          "raw = 直接把命令输出推送给用户；ai = 先按「数据加工指令」把输出整理后推送（输出很长或含噪音时推荐）。",
+          t("sched.form.resultMode"),
+          t("sched.form.resultModeHint"),
           h(
             "select",
             {
               className: "qbot-settingSelect",
               value: e.resultMode === "ai" ? "ai" : "raw",
               onChange: (ev: any) => setEditField("resultMode", ev.target.value),
-              "aria-label": "结果处理",
+              "aria-label": t("sched.form.resultMode"),
             },
-            h("option", { value: "raw" }, "raw：直接推送原始输出"),
-            h("option", { value: "ai" }, "ai：交给 AI 加工后推送"),
+            h("option", { value: "raw" }, t("sched.form.resultRaw")),
+            h("option", { value: "ai" }, t("sched.form.resultAi")),
           ),
         ),
         e.resultMode === "ai"
           ? editRow(
-              "数据加工指令（可选）",
-              "规定把命令输出处理成什么样再发：筛选、排序、限行、固定格式都写在这里。留空则用内置的「整理成一段简洁播报」要求。",
+              t("sched.form.dataInstruction"),
+              t("sched.form.dataInstructionHint"),
               TextArea({
                 rows: 3,
                 value: String(e.parsePrompt ?? ""),
-                placeholder: "例如：只保留今天新增的订单，按金额从高到低排列，最多 5 条；没有新增就什么都别发",
+                placeholder: t("sched.form.dataInstructionPlaceholder"),
                 onChange: (ev: any) => setEditField("parsePrompt", ev.target.value),
-                "aria-label": "数据加工指令",
+                "aria-label": t("sched.form.dataInstructionShort"),
               }),
             )
           : null,
         editRow(
-          "发送门控",
-          "投递到 QQ 前的最后一道判断：changed 适合「有变化才播报」，nonempty 适合「有异常才报警」。被拦下时不投递，也不消耗主动消息配额。",
+          t("sched.form.gate"),
+          t("sched.form.gateHint"),
           h(
             "select",
             {
               className: "qbot-settingSelect",
               value: e.gate === "nonempty" ? "nonempty" : e.gate === "changed" ? "changed" : "always",
               onChange: (ev: any) => setEditField("gate", ev.target.value),
-              "aria-label": "发送门控",
+              "aria-label": t("sched.form.gate"),
             },
-            h("option", { value: "always" }, "always：每次都发（默认）"),
-            h("option", { value: "nonempty" }, "nonempty：没有实质输出就跳过"),
-            h("option", { value: "changed" }, "changed：与上次内容相同就跳过"),
+            h("option", { value: "always" }, t("sched.form.gateAlways")),
+            h("option", { value: "nonempty" }, t("sched.form.gateNonempty")),
+            h("option", { value: "changed" }, t("sched.form.gateChanged")),
           ),
         ),
         ...contractFields(e),
       );
     }
     const contentRow = editRow(
-      "内容",
+      t("sched.form.content"),
       e.mode === "ai"
-        ? "给 AI 的任务指令（如「总结昨天群聊的重点」「价格低于 100 再提醒我」）。到点 AI 会自己调用工具取数、加工，再决定发什么；若判断无事可报会自动静默——不打扰大家，也不占主动消息配额。"
-        : "到点直接发送的文本，上限 2000 字。",
+        ? t("sched.form.aiTaskContentHint")
+        : t("sched.form.textContentHint"),
       TextArea({
         rows: 3,
         value: String(e.content ?? ""),
-        placeholder: e.mode === "ai" ? "例如：总结昨天群聊的重点；没有重点就别发" : "例如：记得喝水",
+        placeholder: e.mode === "ai" ? t("sched.form.aiTaskPlaceholder") : t("sched.form.legacyPlaceholder2"),
         onChange: (ev: any) => setEditField("content", ev.target.value),
-        "aria-label": "定时任务内容",
+        "aria-label": t("sched.content"),
       }),
     );
     // text 模式是固定句子直发，无分诊/校验，只渲染内容；ai 模式追加任务契约。
@@ -898,17 +950,17 @@ export function ScheduleDialog(props: {
     { className: "qbot-modalOverlay" },
     h(
       "div",
-      { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": "定时任务管理" },
+      { className: "qbot-modal qbot-modalWide", role: "dialog", "aria-modal": "true", "aria-label": t("sched.title") },
       h(
         "div",
         { className: "qbot-modalHead" },
         h(
           "div",
           null,
-          h("strong", null, "定时任务管理"),
-          h("p", null, "支持 daily / interval / cron / at 四种触发条件，以及 文本 / AI 智能任务 / 执行命令 三种执行方式。"),
+          h("strong", null, t("sched.title")),
+          h("p", null, t("sched.hint")),
         ),
-        h("button", { className: "qbot-modalClose", type: "button", "aria-label": "关闭", onClick: onClose }, "×"),
+        h("button", { className: "qbot-modalClose", type: "button", "aria-label": t("common.close"), onClick: onClose }, "×"),
       ),
       ed
         ? [
@@ -919,14 +971,14 @@ export function ScheduleDialog(props: {
                 "div",
                 { className: "qbot-editForm qbot-schedForm" },
                 section(
-                  "① 发送给谁",
-                  "决定这条任务往哪个群或哪个用户发。",
+                  t("sched.form.stepRecipient"),
+                  t("sched.form.stepRecipientHint"),
                   h(
                     "div",
                     { className: "qbot-editGrid" },
                     editRow(
-                      "发送范围",
-                      "群聊或单聊；改动范围后请确认下方 openid 与之匹配。",
+                      t("sched.form.scope"),
+                      t("sched.form.scopeHint2"),
                       h(
                         "select",
                         {
@@ -938,15 +990,15 @@ export function ScheduleDialog(props: {
                             setEditField("openid", "");
                             setEditField("scope", ev.target.value);
                           },
-                          "aria-label": "发送范围",
+                          "aria-label": t("sched.form.scope"),
                         },
-                        h("option", { value: "group" }, "群聊"),
-                        h("option", { value: "c2c" }, "单聊"),
+                        h("option", { value: "group" }, t("sched.form.scopeGroup")),
+                        h("option", { value: "c2c" }, t("sched.form.scopeDm")),
                       ),
                     ),
                     editRow(
-                      "接收方 openid",
-                      "接收消息的群或用户 openid。点击输入框可从消息归档下拉选择：群聊候选显示群 id，单聊候选显示用户 id 与昵称；也可直接粘贴。",
+                      t("sched.form.recipient"),
+                      t("sched.form.recipientHintPicker"),
                       h(OpenIdPicker, {
                         chats: archiveChats.chats,
                         scope: ed.scope === "group" ? "group" : "c2c",
@@ -954,29 +1006,29 @@ export function ScheduleDialog(props: {
                         loading: archiveChats.loading,
                         error: archiveChats.error,
                         onChange: (v: string) => setEditField("openid", v),
-                        ariaLabel: "接收方 openid",
+                        ariaLabel: t("sched.form.recipient"),
                       }),
                     ),
                   ),
                 ),
                 section(
-                  "② 什么时候触发",
-                  "选择触发条件并填写对应参数。",
+                  t("sched.form.stepTrigger"),
+                  t("sched.form.stepTriggerHint"),
                   h(
                     "div",
                     { className: "qbot-schedFieldCol" },
                     editRow(
-                      "触发条件",
-                      "每天=指定时刻；间隔=按分钟循环；cron=标准表达式（可带时区）；一次性 at=绝对时间，到点后自动删除。",
+                      t("sched.form.trigger"),
+                      t("sched.form.triggerHint"),
                       h(
                         "div",
-                        { className: "qbot-schedSeg", role: "group", "aria-label": "触发条件" },
+                        { className: "qbot-schedSeg", role: "group", "aria-label": t("sched.form.trigger") },
                         (
                           [
-                            { v: "daily", label: "每天" },
-                            { v: "interval", label: "间隔" },
+                            { v: "daily", label: t("sched.form.dailyShort") },
+                            { v: "interval", label: t("sched.form.interval") },
                             { v: "cron", label: "cron" },
-                            { v: "at", label: "一次性 at" },
+                            { v: "at", label: t("sched.form.at") },
                           ] as const
                         ).map((t) =>
                           h(
@@ -1007,33 +1059,33 @@ export function ScheduleDialog(props: {
                       : null,
                     ed.type === "daily" || ed.type === "interval"
                       ? editRow(
-                          "星期过滤（可选）",
-                          "仅在这些星期触发；不选 = 每天。0=周日。",
+                          t("sched.form.weekdayFilter"),
+                          t("sched.form.weekdayHint"),
                           weekdayPicker(ed.weekdays),
                         )
                       : null,
                   ),
                 ),
                 section(
-                  "③ 到点做什么",
-                  "选择执行方式；除「直接发送文本」外，都能在「执行」与「发送」之间插入加工与判断。",
+                  t("sched.form.stepAction"),
+                  t("sched.form.stepActionHint"),
                   h(
                     "div",
                     { className: "qbot-schedFieldCol" },
                     editRow(
-                      "执行方式",
-                      "文本=到点原样发送；AI 智能任务=把内容当任务指令，到点 AI 自己取数、加工、决定发不发；执行命令=确定性跑一条命令，再按加工指令与发送门控推送给用户。",
+                      t("sched.form.action"),
+                      t("sched.form.actionHint"),
                       h(
                         "select",
                         {
                           className: "qbot-settingSelect",
                           value: String(ed.mode ?? "text"),
                           onChange: (ev: any) => setEditField("mode", ev.target.value),
-                          "aria-label": "执行方式",
+                          "aria-label": t("sched.form.action"),
                         },
-                        h("option", { value: "text" }, "直接发送文本"),
-                        h("option", { value: "ai" }, "AI 智能任务（自主取数并决定发不发）"),
-                        h("option", { value: "tool" }, "执行命令并推送结果"),
+                        h("option", { value: "text" }, t("sched.form.text")),
+                        h("option", { value: "ai" }, t("sched.form.aiTask")),
+                        h("option", { value: "tool" }, t("sched.form.tool")),
                       ),
                     ),
                     actionField(ed),
@@ -1048,8 +1100,8 @@ export function ScheduleDialog(props: {
                 "span",
                 { className: "qbot-hint" },
                 ed.appId && ed.appId !== detailAppId
-                  ? `该任务归属机器人 ${ed.appId.slice(0, 4)}••••${ed.appId.slice(-4)}`
-                  : "保存后立即生效并重新计算下次触发时间",
+                  ? fmt("sched.ownerBot", `${ed.appId.slice(0, 4)}••••${ed.appId.slice(-4)}`)
+                  : t("sched.saveHint"),
               ),
               h(
                 "div",
@@ -1062,7 +1114,7 @@ export function ScheduleDialog(props: {
                     disabled: scheduleModal.saving,
                     onClick: () => setScheduleModal((prev) => (prev ? { ...prev, editing: null, editError: "" } : prev)),
                   },
-                  "取消",
+                  t("common.cancel"),
                 ),
                 h(
                   "button",
@@ -1072,7 +1124,7 @@ export function ScheduleDialog(props: {
                     disabled: scheduleModal.saving,
                     onClick: () => void saveScheduleEdit(),
                   },
-                  scheduleModal.saving ? "保存中…" : ed.id ? "保存修改" : "创建",
+                  scheduleModal.saving ? t("common.saving") : ed.id ? t("sched.saveChanges") : t("common.create"),
                 ),
               ),
             ),
@@ -1100,7 +1152,7 @@ export function ScheduleDialog(props: {
                     className: `qbot-schedTab${scheduleModal.botScope === "current" ? " is-active" : ""}`,
                     onClick: () => switchScheduleScope("current"),
                   },
-                  "当前机器人",
+                  t("sched.scopeCurrentBot"),
                 ),
                 h(
                   "button",
@@ -1111,12 +1163,12 @@ export function ScheduleDialog(props: {
                     className: `qbot-schedTab${scheduleModal.botScope === "all" ? " is-active" : ""}`,
                     onClick: () => switchScheduleScope("all"),
                   },
-                  "所有机器人",
+                  t("sched.scopeAllBots"),
                 ),
                 h(
                   "button",
-                  { type: "button", className: "qbot-btn qbot-btnPrimary qbot-schedAdd", onClick: openScheduleCreate, "aria-label": "新增定时任务" },
-                  "＋ 新增",
+                  { type: "button", className: "qbot-btn qbot-btnPrimary qbot-schedAdd", onClick: openScheduleCreate, "aria-label": t("sched.newTask") },
+                  t("sched.addNew"),
                 ),
               ),
               // 吸顶：tabs 与 notice 固定在面板头部，仅此内层滚动。
@@ -1131,14 +1183,14 @@ export function ScheduleDialog(props: {
                         "div",
                         { key: "loading", className: "qbot-modalState" },
                         h("span", { className: "qbot-spinner", "aria-hidden": "true" }),
-                        "正在读取定时任务…",
+                        t("sched.loadingTasks"),
                       )
                     : h(
                         "div",
                         { key: "empty", className: "qbot-modalState" },
-                        "还没有定时任务。可在聊天里发 /定时 每天 09:00 内容、让 AI 帮你设置，或点上方「＋ 新增」。",
+                        t("sched.emptyTasks"),
                       )
-                  : ([{ scope: "group", title: "群聊任务" }, { scope: "c2c", title: "单聊任务" }] as const).map((g) => {
+                  : ([{ scope: "group", title: t("sched.groupTasks") }, { scope: "c2c", title: t("sched.dmTasks") }] as const).map((g) => {
                       const rows = scheduleModal.items.filter((e: any) => e.scope === g.scope);
                       if (rows.length === 0) return null;
                       return h(
@@ -1160,42 +1212,42 @@ export function ScheduleDialog(props: {
                               h(
                                 "div",
                                 { className: "qbot-schedTop" },
-                                e.enabled === false ? h("span", { className: "qbot-chip qbot-chipOff" }, "已禁用") : null,
+                                e.enabled === false ? h("span", { className: "qbot-chip qbot-chipOff" }, t("sched.disabled")) : null,
                                 h("span", { className: "qbot-chip is-active" }, summarizeType(e)),
-                                e.mode === "ai" ? h("span", { className: "qbot-chip" }, "AI 智能任务") : null,
+                                e.mode === "ai" ? h("span", { className: "qbot-chip" }, t("sched.form.aiTaskShort")) : null,
                                 e.mode === "tool"
                                   ? h(
                                       "span",
                                       { className: "qbot-chip" },
-                                      e.resultMode === "ai" ? "命令 → AI 加工" : "命令 → 原始输出",
+                                      e.resultMode === "ai" ? t("sched.form.summaryCommandToAiProcess") : t("sched.form.summaryCommandToRaw"),
                                     )
                                   : null,
                                 e.mode === "tool" && e.gate && e.gate !== "always"
                                   ? h(
                                       "span",
                                       { className: "qbot-chip" },
-                                      e.gate === "nonempty" ? "门控：无输出不发" : "门控：无变化不发",
+                                      e.gate === "nonempty" ? t("sched.gateEmpty") : t("sched.gateUnchanged"),
                                     )
                                   : null,
                                 (e.mode === "ai" || e.mode === "tool") && e.notifyWhen
-                                  ? h("span", { className: "qbot-chip" }, "条件触发")
+                                  ? h("span", { className: "qbot-chip" }, t("sched.form.conditional"))
                                   : null,
                                 (e.mode === "ai" || e.mode === "tool") && e.verify === true
-                                  ? h("span", { className: "qbot-chip" }, "发送前自校验")
+                                  ? h("span", { className: "qbot-chip" }, t("sched.form.selfCheck"))
                                   : null,
                                 Array.isArray(e.weekdays) && e.weekdays.length
                                   ? h("span", { className: "qbot-chip" }, weekdayText(e.weekdays as number[]))
                                   : null,
-                                e.lastError ? h("span", { className: "qbot-chip qbot-chipError" }, "执行失败") : null,
-                                e.lastSkipAt ? h("span", { className: "qbot-chip qbot-chipInfo" }, "上次已跳过发送") : null,
-                                e.genStatus === "pending" ? h("span", { className: "qbot-chip qbot-chipInfo" }, "脚本生成中…") : null,
-                                e.genStatus === "error" ? h("span", { className: "qbot-chip qbot-chipError" }, "脚本生成失败") : null,
+                                e.lastError ? h("span", { className: "qbot-chip qbot-chipError" }, t("common.runFailed")) : null,
+                                e.lastSkipAt ? h("span", { className: "qbot-chip qbot-chipInfo" }, t("sched.lastSkipped")) : null,
+                                e.genStatus === "pending" ? h("span", { className: "qbot-chip qbot-chipInfo" }, t("sched.scriptGenerating")) : null,
+                                e.genStatus === "error" ? h("span", { className: "qbot-chip qbot-chipError" }, t("sched.scriptFailed")) : null,
                               ),
                               h(
                                 "div",
                                 { className: "qbot-schedContent" },
                                 e.mode === "tool" && e.genStatus === "pending"
-                                  ? `（AI 生成中）${String(e.genPrompt ?? "")}`
+                                  ? fmt("sched.aiGenerating", String(e.genPrompt ?? ""))
                                   : e.mode === "tool"
                                     ? String(e.command ?? e.content ?? "")
                                     : String(e.content ?? ""),
@@ -1206,31 +1258,31 @@ export function ScheduleDialog(props: {
                                 h(
                                   "span",
                                   null,
-                                  `${e.scope === "group" ? "群" : "用户"} ${chatLabel(String(e.openid ?? ""))}`,
+                                  `${t(e.scope === "group" ? "sched.form.scopeGroup" : "idpick.user")} ${chatLabel(String(e.openid ?? ""))}`,
                                 ),
                                 h(
                                   "span",
                                   null,
-                                  e.createdBy === "settings" ? "来自设置页" : e.createdBy === "ai" ? "来自 AI" : "来自聊天命令",
+                                  e.createdBy === "settings" ? t("sched.sourceSettings") : e.createdBy === "ai" ? t("sched.sourceAi") : t("sched.sourceCommand"),
                                 ),
                                 h(
                                   "span",
                                   null,
                                   e.enabled === false
-                                    ? localizeText("已禁用，不会执行")
+                                    ? t("sched.disabledNoRun")
                                     : e.genStatus === "pending"
-                                      ? localizeText("生成完成后开始执行；已过的触发时刻不补跑")
-                                      : `下次 ${e.nextRunAt ? formatTime(e.nextRunAt) : localizeText("待补算")}`,
+                                      ? t("sched.scriptReadyHint")
+                                      : fmt("sched.next", e.nextRunAt ? formatTime(e.nextRunAt) : t("sched.pending")),
                                 ),
                                 e.lastError ? h("span", { className: "qbot-schedError" }, String(e.lastError)) : null,
                                 e.lastSkipAt
                                   ? h(
                                       "span",
                                       null,
-                                      "上次跳过（",
+                                      t("sched.lastSkippedPrefix"),
                                       formatTime(e.lastSkipAt),
                                       "）：",
-                                      String(e.lastSkipReason ?? "本次无需发送"),
+                                      String(e.lastSkipReason ?? t("sched.nothingToSend")),
                                     )
                                   : null,
                               ),
@@ -1243,11 +1295,11 @@ export function ScheduleDialog(props: {
                                 {
                                   className: "qbot-btn qbot-schedTest",
                                   type: "button",
-                                  title: "测试发送一次（不计入主动消息配额）",
+                                  title: t("sched.testSendHint"),
                                   disabled: scheduleTesting === String(e.id),
                                   onClick: () => void runOnceSchedule(String(e.id)),
                                 },
-                                scheduleTesting === String(e.id) ? "测试中…" : "测试",
+                                scheduleTesting === String(e.id) ? t("common.testing") : t("common.test"),
                               ),
                               h(
                                 "button",
@@ -1260,13 +1312,13 @@ export function ScheduleDialog(props: {
                                 },
                                 scheduleToggling === String(e.id)
                                   ? e.enabled === false
-                                    ? "启用中…"
-                                    : "禁用中…"
+                                    ? t("sched.enabling")
+                                    : t("sched.disabling")
                                   : e.enabled === false
-                                    ? "启用"
-                                    : "禁用",
+                                    ? t("conn.enable")
+                                    : t("sched.disable"),
                               ),
-                              h("button", { className: "qbot-btn qbot-schedEdit", type: "button", onClick: () => openScheduleEdit(e) }, "编辑"),
+                              h("button", { className: "qbot-btn qbot-schedEdit", type: "button", onClick: () => openScheduleEdit(e) }, t("common.edit")),
                               h(
                                 "button",
                                 {
@@ -1275,7 +1327,7 @@ export function ScheduleDialog(props: {
                                   disabled: scheduleRemoving === String(e.id),
                                   onClick: () => void removeSchedule(String(e.id)),
                                 },
-                                scheduleRemoving === String(e.id) ? "删除中…" : "删除",
+                                scheduleRemoving === String(e.id) ? t("sched.removing") : t("common.delete"),
                               ),
                             ),
                           ),
@@ -1294,17 +1346,17 @@ export function ScheduleDialog(props: {
               { className: "qbot-hint" },
               scheduleModal.maxPerChat > 0
                 ? (scheduleModal.botScope === "all"
-                  ? `所有机器人共 ${scheduleModal.items.length} 条（每个群/单聊最多 ${scheduleModal.maxPerChat} 条）`
-                  : `共 ${scheduleModal.items.length} 条（每个群/单聊最多 ${scheduleModal.maxPerChat} 条）`)
+                  ? fmt("sched.allBotsCountPerChatMax", scheduleModal.items.length, scheduleModal.maxPerChat)
+                  : fmt("sched.totalCountPerChatMax", scheduleModal.items.length, scheduleModal.maxPerChat))
                 : (scheduleModal.botScope === "all"
-                  ? `所有机器人共 ${scheduleModal.items.length} 条`
-                  : `共 ${scheduleModal.items.length} 条`),
+                  ? fmt("sched.allBotsTotalCount", scheduleModal.items.length)
+                  : fmt("sched.totalCount", scheduleModal.items.length)),
             ),
             h(
               "div",
               { className: "qbot-viewActions" },
-              h("button", { className: "qbot-btn", type: "button", disabled: scheduleModal.loading, onClick: () => void loadSchedules(scheduleModal.botScope) }, "刷新"),
-              h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: onClose }, "关闭"),
+              h("button", { className: "qbot-btn", type: "button", disabled: scheduleModal.loading, onClick: () => void loadSchedules(scheduleModal.botScope) }, t("common.refresh")),
+              h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: onClose }, t("common.close")),
             ),
           )
         : null,
