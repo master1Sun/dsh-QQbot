@@ -1,6 +1,6 @@
 {
   "name": "@sunjuntao/dsh-qqbot",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "把 QQ 官方机器人（Webhook 回调）接入本机 DeepSeek Harness：QQ 群/单聊消息（含群全量消息上下文）→ DSH 会话 → 回复发回 QQ，支持被动回复与群主动消息。Connect the official QQ bot (webhook callback) to a local DeepSeek Harness.",
   "type": "module",
   "main": "./lib/index.js",
