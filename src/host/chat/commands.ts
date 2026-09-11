@@ -284,12 +284,16 @@ export async function runCommand(
         }
         const wantEnabled = sub === "启用" || sub === "enable";
         const result = await ctx.schedules.setEnabled(hit.id, wantEnabled);
-        await reply(result.ok
-          ? T(
-              wantEnabled ? "schedule.enabled" : "schedule.disabled",
-              describe(result.entry!, mine.indexOf(hit) + 1).replace(/^\d+\.\s*/, ""),
-            )
-          : trScheduleError(locale, result.error ?? ""));
+        if (!result.ok) {
+          await reply(trScheduleError(locale, result.error ?? ""));
+          return { handled: true };
+        }
+        const line = describe(result.entry!, mine.indexOf(hit) + 1).replace(/^\d+\.\s*/, "");
+        // 重新启用只排到下一个触发点（不补发禁用期间错过的），所以必须回显下次时间。
+        const next = wantEnabled ? result.entry?.nextRunAt?.slice(0, 16).replace("T", " ") : "";
+        await reply(next
+          ? T("schedule.enabledNext", line, next)
+          : T(wantEnabled ? "schedule.enabled" : "schedule.disabled", line));
         return { handled: true };
       }
 

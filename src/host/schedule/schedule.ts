@@ -199,6 +199,16 @@ function joinPath(dir: string, name: string): string {
   return dir.endsWith("\\") || dir.endsWith("/") ? dir + name : `${dir}/${name}`;
 }
 
+/**
+ * nextRunAt 是否已过期 / 无法解析。
+ * 解析失败（NaN）也按「需要重算」处理：直接写回的坏字符串会让任务永远排不上队。
+ */
+function isPastOrInvalid(value: string | undefined, now = Date.now()): boolean {
+  if (!value) return true;
+  const ms = new Date(value).getTime();
+  return !Number.isFinite(ms) || ms <= now;
+}
+
 export class ScheduleStore {
   #entries: ScheduleEntry[] = [];
   #loaded = false;
@@ -632,6 +642,8 @@ export class ScheduleStore {
    * 启用 / 禁用定时任务（设置页「禁用」按钮 + AI 工具）。
    * 禁用后 dueEntries 不再返回该条目，调度器不会执行它（也不占用主动消息配额）。
    * 重新启用时按当前时刻重算下次运行，避免把禁用期间累积的过期时刻一次性补发。
+   * 因此**启用不会立即执行**：daily/cron 会排到下一个触发点（可能要等到第二天），
+   * 调用方应把返回的 entry.nextRunAt 回显给用户，否则会被当成「开关没生效」。
    *
    * 一次性（at）任务的特别处理：
    *   `nextRunFor` 对 at 恒返回固定的 `entry.at`，因此「在触发时刻之前禁用、之后再启用」
@@ -653,8 +665,29 @@ export class ScheduleStore {
     entry.enabled = enabled;
     if (!enabled) {
       entry.nextRunAt = void 0;
-    } else if (!wasEnabled || !entry.nextRunAt || new Date(entry.nextRunAt).getTime() <= Date.now()) {
-      entry.nextRunAt = toShanghaiISOOrNull(nextRunFor(entry, new Date()));
+      await this.save();
+      return { ok: true, entry };
+    }
+    if (!wasEnabled || !entry.nextRunAt || isPastOrInvalid(entry.nextRunAt)) {
+      const next = nextRunFor(entry, new Date());
+      // 算不出下次运行时刻 = 触发配置残缺（如 interval 丢了 minutes、at 丢了时间）。
+      // 必须如实报错：静默留空会让任务永远排不上队，界面只显示「待补算」。
+      if (!next) {
+        entry.nextRunAt = void 0;
+        entry.lastError = "无法计算下次运行时间，请检查该任务的触发配置（时间 / 间隔 / cron）";
+        await this.save();
+        return { ok: false, error: entry.lastError };
+      }
+      entry.nextRunAt = toShanghaiISOOrNull(next);
+      entry.lastError = void 0;
+    }
+    // 重新启用时救活「脚本生成失败」的任务：清掉错误态交回后台重新生成，
+    // 否则 genStatus=error 会被 dueEntries 永久跳过（禁用/启用也跑不起来）。
+    if (entry.genStatus === "error" && entry.genPrompt) {
+      entry.genStatus = "pending";
+      entry.genError = void 0;
+      entry.genStartedAt = toShanghaiISO();
+      entry.command = void 0;
     }
     await this.save();
     return { ok: true, entry };
@@ -703,7 +736,9 @@ export class ScheduleStore {
   /** 到达执行时间的条目（now 之前）。AI 脚本生成中/失败的任务不执行（等生成完成后按计划继续）。 */
   dueEntries(now: Date): ScheduleEntry[] {
     return this.#entries.filter((e) => {
-      if (!e.enabled) return false;
+      // 只有显式 false 才算禁用：历史数据缺 enabled 字段时按启用处理，
+      // 否则这类任务会被静默跳过、永远不执行。
+      if (e.enabled === false) return false;
       if (e.genStatus === "pending" || e.genStatus === "error") return false;
       if (!e.nextRunAt) return false;
       return new Date(e.nextRunAt).getTime() <= now.getTime();
@@ -828,19 +863,45 @@ export class Scheduler {
 
   start(): void {
     if (this.#timer) return;
-    void this.#ctx.store.load().then((entries) => {
+    void this.#ctx.store.load().then(async (entries) => {
       const now = new Date();
       let changed = false;
+      const expired: string[] = [];
       for (const entry of entries) {
-        if (!entry.enabled) continue;
-        const next = new Date(entry.nextRunAt ?? 0);
-        if (!entry.nextRunAt || next.getTime() <= now.getTime()) {
-          const computed = nextRunFor(entry, now);
-          entry.nextRunAt = toShanghaiISOOrNull(computed);
-          changed = true;
+        if (entry.enabled === false) continue;
+        // 一次性任务：停机期间触发时刻已过 → 直接清理，绝不补发一条过期提醒
+        //（与 setEnabled 重新启用时的策略保持一致）。
+        if (entry.type === "at") {
+          const atMs = entry.at ? new Date(entry.at).getTime() : NaN;
+          if (!Number.isFinite(atMs) || atMs <= now.getTime()) {
+            expired.push(entry.id);
+            changed = true;
+          } else {
+            entry.nextRunAt = toShanghaiISOOrNull(new Date(atMs));
+            changed = true;
+          }
+          continue;
         }
+        if (!isPastOrInvalid(entry.nextRunAt, now.getTime())) continue;
+        const computed = nextRunFor(entry, now);
+        if (!computed) {
+          // 触发配置残缺：记下原因，避免「界面显示待补算、实际永不执行」的黑洞。
+          entry.nextRunAt = void 0;
+          entry.lastError = "无法计算下次运行时间，请检查该任务的触发配置（时间 / 间隔 / cron）";
+          this.#ctx.logger.warn(`[dsh-qqbot] 定时任务 ${entry.id} 无法计算下次运行时间，已暂停调度`);
+        } else {
+          entry.nextRunAt = toShanghaiISOOrNull(computed);
+        }
+        changed = true;
       }
+      for (const id of expired) await this.#ctx.store.removeById(id);
       if (changed) void this.#ctx.store.save();
+      if (expired.length) {
+        this.#ctx.logger.info(`[dsh-qqbot] ${expired.length} 条已过期的一次性定时任务已清理（未补发）`);
+      }
+    }).catch((error) => {
+      // 启动补算失败不能变成未处理的 Promise 拒绝（可能拖垮宿主进程）。
+      this.#ctx.logger.error("[dsh-qqbot] 定时任务启动补算失败:", error);
     });
     this.#timer = setInterval(() => {
       void this.tick();
@@ -858,11 +919,22 @@ export class Scheduler {
     this.#running = true;
     try {
       await this.#ctx.store.load();
+      // 排下一次运行；算不出时如实记录原因，避免任务静默变「待补算」而永不执行。
+      const scheduleNext = (entry: ScheduleEntry): void => {
+        const next = nextRunFor(entry, now);
+        if (next) {
+          entry.nextRunAt = toShanghaiISOOrNull(next);
+          return;
+        }
+        entry.nextRunAt = void 0;
+        entry.lastError = "无法计算下次运行时间，请检查该任务的触发配置（时间 / 间隔 / cron）";
+        this.#ctx.logger.warn(`[dsh-qqbot] 定时任务 ${entry.id} 无法计算下次运行时间，已暂停调度`);
+      };
       for (const entry of this.#ctx.store.dueEntries(now)) {
         const bot = this.#ctx.resolveBot(entry.appId);
         if (!bot) {
           entry.lastError = `机器人 ${entry.appId ?? "(未指定)"} 不可用（已删除或未启用）`;
-          entry.nextRunAt = toShanghaiISOOrNull(nextRunFor(entry, now));
+          scheduleNext(entry);
           continue;
         }
         if (this.#ctx.quota && !(await this.#ctx.quota.tryConsume(1, bot.appId))) {
@@ -876,7 +948,7 @@ export class Scheduler {
           const wd = new Date(now.getTime() + off).getUTCDay();
           const allowed = new Set(entry.weekdays.map((w) => ((w % 7) + 7) % 7));
           if (!allowed.has(wd)) {
-            entry.nextRunAt = toShanghaiISOOrNull(nextRunFor(entry, now));
+            scheduleNext(entry);
             continue;
           }
         }
@@ -916,15 +988,15 @@ export class Scheduler {
             this.#ctx.logger.info(`[dsh-qqbot] 一次性定时任务已完成并删除 → ${entry.id}`);
             continue;
           }
-          const next = nextRunFor(entry, now);
-          entry.nextRunAt = toShanghaiISOOrNull(next);
+          scheduleNext(entry);
           this.#ctx.logger.info(
             `[dsh-qqbot] 定时任务已发送（机器人 ${bot.appId}，type=${entry.type}，mode=${entry.mode ?? "text"}）→ ${entry.scope}:${entry.openid}`
           );
         } catch (error) {
-          entry.lastError = error instanceof Error ? error.message : String(error);
-          const next = nextRunFor(entry, now);
-          entry.nextRunAt = toShanghaiISOOrNull(next);
+          const message = error instanceof Error ? error.message : String(error);
+          scheduleNext(entry);
+          // 排程成功 → 保留本次执行失败的原因；排不出来 → 保留配置错误（得先修配置）。
+          if (entry.nextRunAt) entry.lastError = message;
           this.#ctx.logger.error("[dsh-qqbot] 定时任务执行失败:", error);
         }
         void bot.archiver.append({

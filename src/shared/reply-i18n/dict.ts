@@ -71,6 +71,7 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "schedule.createdAt": "已设置：{0}（上海时间）发送「{1}」",
   "schedule.enabled": "已启用：{0}",
   "schedule.disabled": "已禁用：{0}",
+  "schedule.enabledNext": "已启用：{0}\n下次运行：{1}（禁用期间错过的触发不补发）",
   "schedule.removed": "已删除：{0}",
   "schedule.emptyWithMax": "当前聊天还没有定时消息。用法：/定时 每天 09:00 内容 或 /定时 间隔 30 内容（每聊天最多 {0} 条）。",
 
@@ -203,6 +204,7 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "schedule.createdAt": "Scheduled: one-off at {0} (Asia/Shanghai) sending \"{1}\"",
   "schedule.enabled": "Enabled: {0}",
   "schedule.disabled": "Disabled: {0}",
+  "schedule.enabledNext": "Enabled: {0}\nNext run: {1} (missed triggers are not sent retroactively)",
   "schedule.removed": "Removed: {0}",
   "schedule.emptyWithMax": "No scheduled messages in this chat yet. Usage: /schedule daily 09:00 text or /schedule interval 30 text (max {0} per chat).",
 

@@ -394,6 +394,9 @@ export function createAdminService(ctx: AdminServiceContext) {
     if (typeof payload.enabled !== "boolean") return { ok: false, error: "enabled 必须是布尔值" };
     const res = await schedules.setEnabled(id, payload.enabled);
     if (!res.ok) return { ok: false, error: res.error };
+    // 重新启用时若脚本需要（重新）生成（新任务或上次生成失败被复位），交给后台生成器，
+    // 否则 genStatus=pending 的任务会一直排队、永远不执行。
+    if (res.entry?.genStatus === "pending") scriptGen?.enqueue(res.entry);
     logger.info(`[dsh-qqbot] 定时任务 ${id} 已${payload.enabled ? "启用" : "禁用"}`);
     return { ok: true, data: { schedule: res.entry } };
   };

@@ -12,7 +12,7 @@
  * 所有可枚举配置（工作区 / 模型 / Preset / 数值参数）均为下拉选择。
  *
  * 通过 connection.rpc 与 host 管理服务通信（/qqbot-settings 通道）。
- * 模块契约对齐 dsh-im / dsh 0.1.2-rc.1：导出 name/apply/inject，
+ * 模块契约对齐 dsh-im / dsh 0.1.5-rc.1：导出 name/apply/inject，
  * ctx.slots.inject("settings.section", () => ctx.slots.register(spec, 函数组件))。
  *
  * 模块拆分（单一入口不变：src/client/index.tsx，esbuild 打包为 lib/client.js）：
@@ -33,7 +33,7 @@ import {
   type Tone,
 } from "./types.js";
 import { COOLDOWN_OPTIONS, FIELD_HELP, FIELD_LABELS, SWITCH_DEFS, cooldownLabel } from "./meta.js";
-import { QqBotGlyph, QqLogoGlyph } from "./glyphs.js";
+import { QqBotGlyph, QqBotGuideIcon, QqLogoGlyph } from "./glyphs.js";
 import {
   ConfirmHost,
   OnlineBadge,
@@ -54,14 +54,23 @@ import { ArchiveDialog } from "./dialogs/archive-dialog.js";
 import { OverrideDialog } from "./dialogs/override-dialog.js";
 import { ScheduleDialog } from "./dialogs/schedule-dialog.js";
 import { WorkspacePickerDialog } from "./dialogs/workspace-picker.js";
+import { setRpcCall } from "./right-panel/api.js";
+import { ScheduleTab } from "./right-panel/ScheduleTab.js";
+import { TitleView } from "./right-panel/TitleView.js";
 
 export const name = "qqbot-settings";
 // locale：宿主语言服务（ctx.locale.register/bind），支撑设置界面双语。
-export const inject = ["slots", "connection", "locale"];
+// sidebarRightTabs / sidebarRight：新版右侧面板（定时消息 tab）。
+export const inject = ["slots", "connection", "locale", "sidebarRightTabs", "sidebarRight"];
 
 declare const __PLUGIN_VERSION__: string;
 
 const RPC_CHANNEL = "/qqbot-settings";
+
+/** 右侧面板 tab 的身份（包名）；也是主体/标题注册时用的 key。 */
+const QQBOT_PANEL_ID = "@sunjuntao/dsh-qqbot";
+/** tab 的 kind（sidebarRight.openTab(kind) 用）。 */
+const QQBOT_PANEL_KIND = "qqbot-sched";
 
 /** 提示条自动消失时长（秒）：倒计时归零后清空并隐藏。 */
 const NOTICE_TTL_SECONDS = 8;
@@ -880,6 +889,9 @@ export function apply(ctx: any) {
     return raw as Reply;
   };
 
+  // 把 rpc 调用能力桥接给右侧面板组件（组件层拿不到 ctx）。
+  setRpcCall(rpcCall);
+
   ctx.effect(() => installStyles(), "qqbot-settings: styles");
   ctx.slots.inject("settings.section", () =>
     ctx.slots.register(
@@ -894,6 +906,50 @@ export function apply(ctx: any) {
       },
       QqbotSettingsTab,
     ));
+
+  // ── 右侧面板 tab（定时消息）：三段式注册 ───────────────────────────────────
+  // ① 类型：声明 kind、chip 标题，并在 guide 里给出一个入口说明。
+  ctx.effect(
+    () =>
+      (ctx.sidebarRightTabs as { register: (d: Record<string, unknown>) => () => void }).register({
+        id: QQBOT_PANEL_ID,
+        kind: QQBOT_PANEL_KIND,
+        // title / guide 由宿主在打开面板时求值，这里每次调用都走 i18n，切换语言后即为当前语言。
+        title: () => t("panel.title"),
+        guide: [
+          {
+            order: 100,
+            title: () => t("panel.title"),
+            description: () => t("panel.subtitle"),
+            // 入口胶囊的图标；不传则宿主画占位方块。用插件统一的 QQ 机器人 glyph。
+            icon: QqBotGuideIcon,
+          },
+        ],
+      }),
+    "qqbot: right-panel tab type",
+  );
+
+  // ② 主体（keyed by 包名）：嵌入完整 CRUD+测试能力的 ScheduleManager。
+  ctx.effect(
+    () =>
+      ctx.slots.inject("sidebar.right.pane.tab", () =>
+        ctx.slots.register(
+          { name: "sidebar.right.pane.tab", key: QQBOT_PANEL_ID },
+          ScheduleTab as (props: unknown) => React.ReactNode,
+        )),
+    "qqbot: right-panel tab body",
+  );
+
+  // ③ chip 标题（keyed by 包名）。
+  ctx.effect(
+    () =>
+      ctx.slots.inject("sidebar.right.pane.tab.title", () =>
+        ctx.slots.register(
+          { name: "sidebar.right.pane.tab.title", key: QQBOT_PANEL_ID },
+          TitleView as (props: unknown) => React.ReactNode,
+        )),
+    "qqbot: right-panel tab title",
+  );
 }
 
 function installStyles(): () => void {

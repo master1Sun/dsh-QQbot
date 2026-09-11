@@ -68,6 +68,19 @@ export function subscribe(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
+/**
+ * React 侧语言订阅钩子：宿主切换语言后强制当前组件重渲染。
+ *
+ * 设置页由宿主在语言变化时整体重渲染，但右侧面板这类独立挂载的组件不在该链路内，
+ * 必须在组件内自行订阅，否则 chip 标题 / 工具栏文案会停留在切换前的语言。
+ * 返回当前语言，可用于同时依赖语言值的渲染分支。
+ */
+export function useLocale(): "cn" | "en" {
+  const [loc, setLoc] = React.useState<"cn" | "en">(getLocale());
+  React.useEffect(() => subscribe(() => setLoc(getLocale())), []);
+  return loc;
+}
+
 function emit() {
   for (const fn of listeners) fn();
 }
