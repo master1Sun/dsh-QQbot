@@ -54,7 +54,7 @@ import { ArchiveDialog } from "./dialogs/archive-dialog.js";
 import { OverrideDialog } from "./dialogs/override-dialog.js";
 import { ScheduleDialog } from "./dialogs/schedule-dialog.js";
 import { WorkspacePickerDialog } from "./dialogs/workspace-picker.js";
-import { setRpcCall } from "./right-panel/api.js";
+import { notifyBotsChanged, onBotsChanged, setRpcCall } from "./right-panel/api.js";
 import { ScheduleTab } from "./right-panel/ScheduleTab.js";
 import { TitleView } from "./right-panel/TitleView.js";
 
@@ -114,6 +114,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         setForm({ ...stored });
       }
       if (b.ok) setBots(val(b) ?? null);
+      // 广播机器人列表可能已变化：右侧面板 tab 的显隐立即同步（不等轮询）。
+      notifyBotsChanged();
       if (cat.ok) setCatalogs({ ...EMPTY_CATALOGS, ...(val(cat) ?? {}) });
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -907,10 +909,14 @@ export function apply(ctx: any) {
       QqbotSettingsTab,
     ));
 
-  // ── 右侧面板 tab（定时消息）：三段式注册 ───────────────────────────────────
-  // ① 类型：声明 kind、chip 标题，并在 guide 里给出一个入口说明。
-  ctx.effect(
-    () =>
+  // ── 右侧面板 tab（定时消息）：按登录状态动态注册 ──────────────────────────
+  // QQ 未登录（没有任何 ws=connected 的机器人）时不出现面板入口；
+  // 轮询 bots.list 检测连接状态变化，动态注册 / 注销 tab 类型。
+  // ② 主体与 ③ 标题是 keyed slot，常驻无害——只有 ① 决定 chip 是否显示。
+  let disposePanelTab: (() => void) | null = null;
+  const registerPanelTab = () => {
+    if (disposePanelTab) return;
+    disposePanelTab =
       (ctx.sidebarRightTabs as { register: (d: Record<string, unknown>) => () => void }).register({
         id: QQBOT_PANEL_ID,
         kind: QQBOT_PANEL_KIND,
@@ -925,8 +931,36 @@ export function apply(ctx: any) {
             icon: QqBotGuideIcon,
           },
         ],
-      }),
-    "qqbot: right-panel tab type",
+      });
+  };
+  const unregisterPanelTab = () => {
+    try { disposePanelTab?.(); } catch { /* 已被宿主回收时忽略 */ }
+    disposePanelTab = null;
+  };
+
+  const syncPanelTab = async () => {
+    try {
+      const res = await rpcCall("bots.list");
+      const bots = res.ok ? (val(res) as { bots?: unknown[] } | null)?.bots : undefined;
+      const anyConnected = Array.isArray(bots)
+        && bots.some((b: any) => b?.ws?.state === "connected");
+      if (anyConnected) registerPanelTab();
+      else unregisterPanelTab();
+    } catch { /* RPC 暂不可用时保持现状，等下一轮轮询 */ }
+  };
+
+  // 初次检测 + 定时轮询（登录 / 掉线后最迟一个周期内更新入口）。
+  // 设置页的增删 / 启停 / 重连等动作会通过 notifyBotsChanged() 即时触发同步，不等轮询。
+  void syncPanelTab();
+  const offBotsChanged = onBotsChanged(() => void syncPanelTab());
+  const panelTabTimer = setInterval(() => void syncPanelTab(), 15_000);
+  ctx.effect(
+    () => () => {
+      clearInterval(panelTabTimer);
+      offBotsChanged();
+      unregisterPanelTab();
+    },
+    "qqbot: right-panel tab lifecycle",
   );
 
   // ② 主体（keyed by 包名）：嵌入完整 CRUD+测试能力的 ScheduleManager。
