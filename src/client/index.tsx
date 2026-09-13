@@ -54,7 +54,7 @@ import { ArchiveDialog } from "./dialogs/archive-dialog.js";
 import { OverrideDialog } from "./dialogs/override-dialog.js";
 import { ScheduleDialog } from "./dialogs/schedule-dialog.js";
 import { WorkspacePickerDialog } from "./dialogs/workspace-picker.js";
-import { notifyBotsChanged, onBotsChanged, setRpcCall } from "./right-panel/api.js";
+import { getPanelVisible, notifyBotsChanged, onBotsChanged, setPanelVisible, setRpcCall } from "./right-panel/api.js";
 import { ScheduleTab } from "./right-panel/ScheduleTab.js";
 import { TitleView } from "./right-panel/TitleView.js";
 
@@ -93,6 +93,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [loadError, setLoadError] = React.useState("");
   const [refreshing, setRefreshing] = React.useState(false);
   const [reconnecting, setReconnecting] = React.useState(false);
+  // 右侧面板显隐开关：客户端本地偏好（localStorage），与 host 配置无关。
+  const [panelVisible, setPanelVisibleState] = React.useState<boolean>(() => getPanelVisible());
   const [update, setUpdate] = React.useState<{ busy: boolean; message: string; done: boolean }>({
     busy: false,
     message: "",
@@ -423,7 +425,26 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                 h("h3", null, t("list.empty")),
                 h("p", null, t("list.emptyHint")))))
         : null,
-      h("p", { className: "qbot-hint" }, t("list.cardHint"))));
+      h("p", { className: "qbot-hint" }, t("list.cardHint"))),
+    // ── 界面偏好：右侧面板「QQ 定时消息」入口开关（客户端本地设置） ──
+    h("div", { className: "qbot-surfaceCard" },
+      h("div", { className: "qbot-surfaceBody" },
+        h("label", { className: "qbot-switchRow" },
+          h("span", { className: "qbot-switchText" },
+            h("strong", null, t("ui.panelSwitchTitle")),
+            h("p", { style: { margin: "2px 0 0", fontSize: "12px", color: "var(--dsw-alias-label-tertiary, #8f959e)" } },
+              t("ui.panelSwitchDesc"))),
+          h("input", {
+            type: "checkbox",
+            className: "qbot-switch",
+            checked: panelVisible,
+            onChange: (e: any) => {
+              const v = Boolean(e.target.checked);
+              setPanelVisibleState(v);
+              setPanelVisible(v); // 写 localStorage 并广播，tab 显隐立即重判
+            },
+            "aria-label": t("ui.panelSwitchTitle"),
+          })))))
 
 
   const wsInfo = detailBot ? {
@@ -944,7 +965,8 @@ export function apply(ctx: any) {
       const bots = res.ok ? (val(res) as { bots?: unknown[] } | null)?.bots : undefined;
       const anyConnected = Array.isArray(bots)
         && bots.some((b: any) => b?.ws?.state === "connected");
-      if (anyConnected) registerPanelTab();
+      // 显示条件 = 至少一个机器人已连接 **且** 设置页开关允许。
+      if (anyConnected && getPanelVisible()) registerPanelTab();
       else unregisterPanelTab();
     } catch { /* RPC 暂不可用时保持现状，等下一轮轮询 */ }
   };

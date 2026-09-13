@@ -39,3 +39,20 @@ export function notifyBotsChanged(): void {
     try { fn(); } catch { /* 单个监听者异常不影响其余 */ }
   }
 }
+
+/* ── 右侧面板显隐开关（客户端本地偏好，localStorage 持久化） ─────────────────
+ * 设置页的开关写这里，apply() 的 syncPanelTab 读取；写入后复用广播通道
+ * 让 tab 显隐立即重判，无需等轮询。 */
+
+const PANEL_VISIBLE_KEY = "dsh-qqbot.panel.visible";
+
+/** 右侧面板是否允许显示（默认开）。 */
+export function getPanelVisible(): boolean {
+  try { return localStorage.getItem(PANEL_VISIBLE_KEY) !== "0"; } catch { return true; }
+}
+
+/** 写入显隐开关并广播重判。 */
+export function setPanelVisible(v: boolean): void {
+  try { localStorage.setItem(PANEL_VISIBLE_KEY, v ? "1" : "0"); } catch { /* 存储不可用时仅本次会话生效 */ }
+  notifyBotsChanged();
+}
