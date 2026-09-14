@@ -9,6 +9,9 @@ import type { RpcCall } from "../types.js";
 import { FolderGlyph, FolderUpGlyph } from "../glyphs.js";
 import { errText, val } from "../ui.js";
 
+/** 「此电脑」虚拟层哨兵路径（宿主 workspaceBrowse 同名约定，两侧必须一致）。 */
+const COMPUTER_PATH = "__computer__";
+
 interface PickerState {
   path: string;
   parent: string | null;
@@ -72,37 +75,44 @@ export function WorkspacePickerDialog(props: {
             h("div", { className: "qbot-modalPath qbot-mono" },
               picker.loading
                 ? t("common.loading")
-                : (picker.selected || picker.path || "—")),
+                : (picker.selected
+                    || (picker.path === COMPUTER_PATH ? t("picker.computer") : picker.path)
+                    || "—")),
+            // 目录行包一层滚动容器：外层 .qbot-modalList 是 overflow:hidden 的定高框，
+            // 不包内层 .qbot-modalListScroll(overflow-y:auto) 时内容超长会被裁掉、无滚动条。
             h("div", { className: `qbot-modalList${picker.loading && picker.dirs.length > 0 ? " is-refreshing" : ""}` },
-              picker.error
-                ? h("div", { className: "qbot-modalState qbot-modalError" }, picker.error)
-                : picker.loading && picker.dirs.length === 0
-                  ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), t("picker.loading"))
-                  : [
-                      picker.parent
-                        ? h("button", { key: "__up", type: "button", className: "qbot-dirRow", onClick: () => void browseTo(picker.parent ?? undefined) },
-                            h(FolderUpGlyph), t("picker.upOneLevel"))
-                        : null,
-                      picker.dirs.map((d) =>
-                        h("button", {
-                          key: d.path, type: "button",
-                          className: `qbot-dirRow${picker.selected === d.path ? " is-selected" : ""}`,
-                          title: t("picker.rowHint"),
-                          onClick: () => setPicker((prev) => (prev ? { ...prev, selected: d.path } : prev)),
-                          onDoubleClick: () => void browseTo(d.path),
-                        },
-                          h(FolderGlyph), d.name)),
-                      !picker.loading && picker.dirs.length === 0
-                        ? h("div", { className: "qbot-modalState" }, t("picker.emptyDirs"))
-                        : null,
-                    ]),
+              h("div", { className: "qbot-modalListScroll" },
+                picker.error
+                  ? h("div", { className: "qbot-modalState qbot-modalError" }, picker.error)
+                  : picker.loading && picker.dirs.length === 0
+                    ? h("div", { className: "qbot-modalState" }, h("span", { className: "qbot-spinner", "aria-hidden": "true" }), t("picker.loading"))
+                    : [
+                        picker.parent
+                          ? h("button", { key: "__up", type: "button", className: "qbot-dirRow", onClick: () => void browseTo(picker.parent ?? undefined) },
+                              h(FolderUpGlyph), t("picker.upOneLevel"))
+                          : null,
+                        picker.dirs.map((d) =>
+                          h("button", {
+                            key: d.path, type: "button",
+                            className: `qbot-dirRow${picker.selected === d.path ? " is-selected" : ""}`,
+                            title: t("picker.rowHint"),
+                            onClick: () => setPicker((prev) => (prev ? { ...prev, selected: d.path } : prev)),
+                            onDoubleClick: () => void browseTo(d.path),
+                          },
+                            h(FolderGlyph), d.name)),
+                        !picker.loading && picker.dirs.length === 0
+                          ? h("div", { className: "qbot-modalState" }, t("picker.emptyDirs"))
+                          : null,
+                      ])),
             h("div", { className: "qbot-modalFoot" },
               h("span", { className: "qbot-hint" }, t("picker.footerHint")),
               h("div", { className: "qbot-viewActions" },
                 h("button", { className: "qbot-btn", type: "button", onClick: onClose }, t("common.cancel")),
                 h("button", {
                   className: "qbot-btn qbot-btnPrimary", type: "button",
-                  disabled: picker.loading || !picker.path,
+                  // 「此电脑」虚拟层本身不可选定：未点选某个盘符时禁用「选定此文件夹」。
+                  disabled: picker.loading || !picker.path
+                    || (picker.path === COMPUTER_PATH && !picker.selected),
                   onClick: pickDirectory,
                 }, t("picker.chooseFolder"))))));
 }

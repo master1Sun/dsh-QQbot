@@ -277,10 +277,46 @@ export function createAdminService(ctx: AdminServiceContext) {
     };
   };
 
-  /** 目录浏览：列出指定目录下的子文件夹（仅目录，不做任何写操作）。 */
+  /**
+   * 目录浏览：列出指定目录下的子文件夹（仅目录，不做任何写操作）。
+   *
+   * 「此电脑」虚拟层：Windows 各盘符之间没有文件系统父目录（dirname("C:\\")==="C:\\"），
+   * 浏览到盘符根后再往上一级就到不了其他盘。约定哨兵路径 COMPUTER_PATH 表示虚拟的
+   * 「此电脑」层级——返回本机所有盘符作为可进入的子目录；盘符根目录的 parent 也指向它。
+   * （客户端 workspace-picker.tsx 持有同名哨兵常量，两侧必须一致。）
+   */
+  const COMPUTER_PATH = "__computer__";
+  const isDriveRoot = (p: string) => /^[a-zA-Z]:[\\/]?$/.test(p);
+
+  /** 枚举本机盘符（仅 Windows）：逐个 stat A:\–Z:\，存在的即为可用盘。 */
+  const listWindowsDrives = async (): Promise<Array<{ path: string; name: string }>> => {
+    if (process.platform !== "win32") return [];
+    const probes: Array<Promise<{ path: string; name: string } | null>> = [];
+    for (let code = 65; code <= 90; code++) {
+      const letter = String.fromCharCode(code);
+      const root = `${letter}:\\`;
+      probes.push(
+        stat(root).then(
+          () => ({ path: root, name: `${letter}:` }),
+          () => null,
+        ),
+      );
+    }
+    const found = await Promise.all(probes);
+    return found.filter((d): d is { path: string; name: string } => d !== null);
+  };
+
   const workspaceBrowse = async (payload: { path?: unknown }) => {
     const root = path.join(homedir(), ".dsh", "file");
     const requested = typeof payload.path === "string" && payload.path.trim() ? payload.path.trim() : root;
+    // 「此电脑」虚拟层：列出所有盘符，parent 为 null（不能再往上）。
+    if (requested === COMPUTER_PATH) {
+      const drives = await listWindowsDrives();
+      return {
+        ok: true,
+        data: { path: COMPUTER_PATH, parent: null, isDefault: false, dirs: drives },
+      };
+    }
     const target = path.resolve(requested);
     let info;
     try {
@@ -302,11 +338,14 @@ export function createAdminService(ctx: AdminServiceContext) {
       return { ok: false, error: `无法读取目录: ${error instanceof Error ? error.message : String(error)}` };
     }
     dirs.sort((a, b) => a.name.localeCompare(b.name));
+    // 盘符根目录（如 C:\）的上一级是「此电脑」虚拟层，保证可以跨盘浏览；
+    // 非 Windows 的文件系统根（/）没有上级，仍返回 null。
+    const atDriveRoot = process.platform === "win32" && isDriveRoot(target);
     return {
       ok: true,
       data: {
         path: target,
-        parent: parent === target ? null : parent,
+        parent: parent === target ? (atDriveRoot ? COMPUTER_PATH : null) : parent,
         isDefault: target === path.resolve(root),
         dirs,
       },

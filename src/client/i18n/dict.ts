@@ -327,6 +327,7 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "picker.emptyDirs": "该目录下没有子文件夹",
   "picker.footerHint": "单击选中，双击进入；未选中时选定当前浏览的目录",
   "picker.chooseFolder": "选定此文件夹",
+  "picker.computer": "此电脑（选择磁盘）",
 
   // ── sched ──
   "sched.tabScheduled": "定时消息",
@@ -1092,6 +1093,7 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "picker.emptyDirs": "No subfolders in this directory",
   "picker.footerHint": "Click to select, double-click to enter; with nothing selected, the currently browsed directory is chosen",
   "picker.chooseFolder": "Choose this folder",
+  "picker.computer": "This PC (choose a drive)",
 
   // ── sched ──
   "sched.tabScheduled": "Scheduled",
