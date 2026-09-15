@@ -23,6 +23,7 @@ import { createQqRule } from "./messaging/rule.js";
 import { installReplyPump } from "./messaging/reply.js";
 import { makeQqbotRoutes } from "./admin/routes.js";
 import { registerRpcChannel, type RpcFence, type RpcChannelOptions } from "./admin/rpc-channel.js";
+import { createSseHub, SSE_EVENT_BOTS_CHANGED } from "./admin/sse-hub.js";
 import { BotRuntimeManager, type BotRuntime } from "./bots.js";
 import { loadGlobalConfig, saveCredentials, upsertBot, type StoredBot, type StoredCredentials } from "./infra/store-file.js";
 import {
@@ -408,6 +409,9 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   // webhook 运行时（先占位，机器人事件回调里使用；稍后赋值）。
   let runtime: WebhookRuntimeLike | null = null;
 
+  // SSE 推送中枢：机器人增删 / 连接状态变化时通知设置界面（替代客户端轮询）。
+  const sseHub = createSseHub({ logger });
+
   // 多机器人运行时管理器：所有机器人 / 连接 / 状态的中枢。
   const bots = new BotRuntimeManager({
     logger,
@@ -415,6 +419,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     adminToken,
     resolveSecret,
     resolvePresets,
+    onBotsChanged: () => sseHub.broadcast(SSE_EVENT_BOTS_CHANGED),
     onEvent: (bot, eventType, payload, deliveryId) => {
       if (!runtime) {
         logger.warn("[dsh-qqbot] webhook 运行时不可用，事件已丢弃");
@@ -624,6 +629,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       ctx: ctx as unknown as RpcChannelOptions["ctx"],
       fence: connection,
       dispatch: (endpoint, payload) => admin.handle(endpoint, payload),
+      onSseOpen: (req, res) => sseHub.open(req, res),
     });
   } catch (error) {
     logger.warn("[dsh-qqbot] RPC 通道注册失败，设置界面将无法连接（HTTP 管理端点仍可用）:", error);
@@ -652,6 +658,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     disposeTools();
     scheduler.stop();
     qr.dispose();
+    sseHub.dispose();
     await bots.stopAll();
     if (disposeRule) {
       try {

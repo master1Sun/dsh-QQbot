@@ -72,6 +72,11 @@ export interface BotRuntimeManagerOptions {
   onRawEvent?: (bot: BotRuntime, eventType: string, data: unknown) => void;
   /** 按钮回调（INTERACTION_CREATE）出口，由 index.ts 分派给审批管理器。 */
   onInteraction?: (bot: BotRuntime, event: unknown) => void;
+  /**
+   * 机器人集合或连接状态变化出口（增删 / 启停 / ws 状态迁移）。
+   * 已做 300ms 去抖合并，供 SSE 推送等订阅方即时感知；通知失败不影响运行。
+   */
+  onBotsChanged?: () => void;
 }
 
 /** delivery 归属表的容量上限（超出后丢弃最旧的一半，防止长期运行泄漏）。 */
@@ -92,6 +97,8 @@ export class BotRuntimeManager {
   #statsTimer: ReturnType<typeof setInterval> | null = null;
   #syncing: Promise<void> | null = null;
   #primaryAppId = "";
+  /** onBotsChanged 去抖定时器：窗口内的多次状态变化合并成一次通知。 */
+  #notifyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: BotRuntimeManagerOptions) {
     this.#options = options;
@@ -167,6 +174,22 @@ export class BotRuntimeManager {
     }
   }
 
+  // ── 变更通知（SSE 推送等订阅方） ───────────────────────────────────────────
+
+  /** 去抖通知：300ms 窗口内的多次变化（sync 收尾 + 各 ws 状态迁移）合并为一次。 */
+  #notifyChanged(): void {
+    if (this.#notifyTimer) return;
+    this.#notifyTimer = setTimeout(() => {
+      this.#notifyTimer = null;
+      try {
+        this.#options.onBotsChanged?.();
+      } catch {
+        /* 通知失败不影响机器人运行 */
+      }
+    }, 300);
+    this.#notifyTimer.unref?.();
+  }
+
   // ── 同步：把 bots.json 应用到运行时 ────────────────────────────────────────
 
   /**
@@ -239,6 +262,7 @@ export class BotRuntimeManager {
       this.#bots.delete(appId);
       this.#options.logger.info(`[dsh-qqbot] 机器人 ${appId} 已移除，连接已断开`);
     }
+    this.#notifyChanged();
   }
 
   #buildConfig(stored: StoredBot, secret: string): QqbotConfig {
@@ -306,6 +330,9 @@ export class BotRuntimeManager {
       },
       onInteraction: (event) => {
         this.#options.onInteraction?.(bot, event);
+      },
+      onStatusChange: () => {
+        this.#notifyChanged();
       },
     });
     return bot;

@@ -77,6 +77,11 @@ export interface RpcChannelOptions {
   fence?: RpcFence;
   /** RPC 分发：endpoint → 结果。 */
   dispatch(endpoint: string, payload: Record<string, unknown>): Promise<unknown>;
+  /**
+   * `GET <channel>/events` 的 SSE 推送端点：通过鉴权栅栏后由调用方接管
+   * res（长连接）。未提供时该端点按普通 404 处理（与旧行为一致）。
+   */
+  onSseOpen?: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void;
 }
 
 /** 读取完整请求体。 */
@@ -100,7 +105,7 @@ async function readRawBody(req: import("node:http").IncomingMessage): Promise<Bu
  * 的子作用域里 `webServer` 才可解析（框架挂 `/api` 也是同一写法）。
  * 卸载由该 inject 作用域的生命周期负责。
  */
-export function registerRpcChannel({ ctx, fence, dispatch }: RpcChannelOptions): void {
+export function registerRpcChannel({ ctx, fence, dispatch, onSseOpen }: RpcChannelOptions): void {
   ctx.inject(["webServer"], (webCtxUnknown) => {
     const webCtx = webCtxUnknown as {
       webServer: { register(route: WebRoute): () => void };
@@ -125,7 +130,13 @@ export function registerRpcChannel({ ctx, fence, dispatch }: RpcChannelOptions):
         }
 
         const endpoint = endpointFromPath(RPC_CHANNEL, new URL(req.url ?? "/", "http://localhost").pathname);
-        if ((req.method ?? "GET").toUpperCase() !== "POST" || endpoint === undefined) {
+        const method = (req.method ?? "GET").toUpperCase();
+        // SSE 推送端点：与 RPC 同前缀、同鉴权栅栏，长连接交给调用方接管。
+        if (endpoint === "events" && method === "GET" && onSseOpen) {
+          onSseOpen(req, res);
+          return;
+        }
+        if (method !== "POST" || endpoint === undefined) {
           res.writeHead(404);
           res.end("not found");
           return;

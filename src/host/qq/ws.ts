@@ -31,6 +31,11 @@ export interface QqWsSourceOptions {
   onRawEvent?: (eventType: string, data: unknown) => void;
   /** 按钮回调（INTERACTION_CREATE，SDK 单独封装为 interaction 事件）出口。 */
   onInteraction?: (event: unknown) => void;
+  /**
+   * 连接状态变化出口（state / lastError 实际变化时触发）。
+   * 收到事件的 events 计数递增不触发——那是每条消息都发生的高频变化。
+   */
+  onStatusChange?: (appId: string, status: WsStatus) => void;
 }
 
 /** 连接就绪超时（毫秒）：token 换取 + wss 握手 + READY。 */
@@ -41,6 +46,7 @@ export class QqWsSource {
   readonly #onEvent: QqWsSourceOptions["onEvent"];
   readonly #onRawEvent: QqWsSourceOptions["onRawEvent"];
   readonly #onInteraction: QqWsSourceOptions["onInteraction"];
+  readonly #onStatusChange: QqWsSourceOptions["onStatusChange"];
   #bot: QQBot | null = null;
   #abort: AbortController | null = null;
   #starting: Promise<void> | null = null;
@@ -51,10 +57,27 @@ export class QqWsSource {
     this.#onEvent = options.onEvent;
     this.#onRawEvent = options.onRawEvent;
     this.#onInteraction = options.onInteraction;
+    this.#onStatusChange = options.onStatusChange;
   }
 
   get status(): WsStatus {
     return { ...this.#status };
+  }
+
+  /**
+   * 统一的状态赋值入口：实际发生 state / lastError 变化时触发 onStatusChange。
+   * events 计数递增走裸赋值（#accept），不经过这里。
+   */
+  #setStatus(status: WsStatus): void {
+    const prev = this.#status;
+    this.#status = status;
+    if (prev.state !== status.state || prev.lastError !== status.lastError) {
+      try {
+        this.#onStatusChange?.(status.appId, { ...status });
+      } catch {
+        /* 通知失败不影响连接生命周期 */
+      }
+    }
   }
 
   /** 底层 SDK 实例（已连接后可用），供媒体上传 / 撤回 / 原生 API 调用。 */
@@ -66,13 +89,13 @@ export class QqWsSource {
   async start(config: QqbotConfig): Promise<void> {
     await this.stop();
     if (!config.appId || !config.appSecret) {
-      this.#status = { ...this.#status, state: "idle", appId: config.appId, lastError: null };
+      this.#setStatus({ ...this.#status, state: "idle", appId: config.appId, lastError: null });
       this.#logger.warn("[dsh-qqbot] WebSocket 未启动：凭据不完整（请扫码登录或填写 AppID/AppSecret）");
       return;
     }
     const run = this.#start(config).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
-      this.#status = { ...this.#status, state: "failed", lastError: message };
+      this.#setStatus({ ...this.#status, state: "failed", lastError: message });
       this.#logger.error("[dsh-qqbot] WebSocket 连接失败:", error);
     });
     this.#starting = run;
@@ -95,7 +118,7 @@ export class QqWsSource {
     } catch {
       /* 已停止 */
     }
-    this.#status = { ...this.#status, state: "idle" };
+    this.#setStatus({ ...this.#status, state: "idle" });
   }
 
   async #start(config: QqbotConfig): Promise<void> {
@@ -115,19 +138,19 @@ export class QqWsSource {
     const abort = new AbortController();
     this.#bot = bot;
     this.#abort = abort;
-    this.#status = { state: "connecting", appId: config.appId, lastConnectedAt: null, lastError: null, events: 0 };
+    this.#setStatus({ state: "connecting", appId: config.appId, lastConnectedAt: null, lastError: null, events: 0 });
 
     bot.on("ready", () => {
-      this.#status = { ...this.#status, state: "connected", lastConnectedAt: Date.now(), lastError: null };
+      this.#setStatus({ ...this.#status, state: "connected", lastConnectedAt: Date.now(), lastError: null });
       this.#logger.info(`[dsh-qqbot] QQ WebSocket 已连接（AppID ${config.appId}），开始接收消息`);
     });
     bot.on("resumed", () => {
-      this.#status = { ...this.#status, state: "connected", lastError: null };
+      this.#setStatus({ ...this.#status, state: "connected", lastError: null });
       this.#logger.info("[dsh-qqbot] QQ WebSocket 会话已恢复（RESUME）");
     });
     bot.on("error", (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      this.#status = { ...this.#status, lastError: message };
+      this.#setStatus({ ...this.#status, lastError: message });
       if (this.#status.state === "connected") {
         this.#logger.warn("[dsh-qqbot] QQ WebSocket 连接错误（SDK 将自动重连）:", error);
       }
@@ -178,7 +201,7 @@ export class QqWsSource {
     const runTask = Promise.resolve().then(() => bot.start(abort.signal));
     runTask.catch((error) => {
       if (abort.signal.aborted) return;
-      this.#status = { ...this.#status, state: "failed", lastError: error instanceof Error ? error.message : String(error) };
+      this.#setStatus({ ...this.#status, state: "failed", lastError: error instanceof Error ? error.message : String(error) });
       this.#logger.error("[dsh-qqbot] QQ WebSocket 连接停止:", error);
     });
 

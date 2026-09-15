@@ -932,7 +932,7 @@ export function apply(ctx: any) {
 
   // ── 右侧面板 tab（定时消息）：按登录状态动态注册 ──────────────────────────
   // QQ 未登录（没有任何 ws=connected 的机器人）时不出现面板入口；
-  // 轮询 bots.list 检测连接状态变化，动态注册 / 注销 tab 类型。
+  // 宿主经 SSE 推送 bots-changed 事件驱动重检，动态注册 / 注销 tab 类型。
   // ② 主体与 ③ 标题是 keyed slot，常驻无害——只有 ① 决定 chip 是否显示。
   let disposePanelTab: (() => void) | null = null;
   const registerPanelTab = () => {
@@ -968,17 +968,26 @@ export function apply(ctx: any) {
       // 显示条件 = 至少一个机器人已连接 **且** 设置页开关允许。
       if (anyConnected && getPanelVisible()) registerPanelTab();
       else unregisterPanelTab();
-    } catch { /* RPC 暂不可用时保持现状，等下一轮轮询 */ }
+    } catch { /* RPC 暂不可用时保持现状，等下一次推送触发 */ }
   };
 
-  // 初次检测 + 定时轮询（登录 / 掉线后最迟一个周期内更新入口）。
-  // 设置页的增删 / 启停 / 重连等动作会通过 notifyBotsChanged() 即时触发同步，不等轮询。
+  // 初次检测一次；此后由 SSE 推送驱动（宿主在机器人增删 / 连接状态变化时广播）。
+  // 设置页的增删 / 启停 / 重连等动作仍走 notifyBotsChanged() 即时同步；
+  // SSE 连接由 EventSource 自带重连（宿主 retry: 3000），无需客户端定时轮询。
   void syncPanelTab();
   const offBotsChanged = onBotsChanged(() => void syncPanelTab());
-  const panelTabTimer = setInterval(() => void syncPanelTab(), 15_000);
+  let sseSource: EventSource | null = null;
+  try {
+    sseSource = new EventSource("/qqbot-settings/events");
+    sseSource.addEventListener("bots-changed", () => notifyBotsChanged());
+  } catch (error) {
+    // EventSource 不可用（极老环境）时退化为仅靠设置页动作触发的进程内广播。
+    console?.debug?.("[dsh-qqbot] SSE 订阅失败，面板显隐依赖设置页动作触发:", error);
+  }
   ctx.effect(
     () => () => {
-      clearInterval(panelTabTimer);
+      sseSource?.close();
+      sseSource = null;
       offBotsChanged();
       unregisterPanelTab();
     },
