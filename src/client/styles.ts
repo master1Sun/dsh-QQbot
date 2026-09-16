@@ -80,6 +80,10 @@ export const CSS_TEXT = `
 .qbot-noticeCount { margin-left: auto; flex: none; align-self: flex-start; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; line-height: 1.4; padding: 1px 9px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--qbot-business) 14%, var(--dsw-alias-bg-layer-1, #fff)); border: 1px solid color-mix(in srgb, var(--qbot-business) 28%, var(--dsw-alias-border-l2, #dfe1e5)); }
 /* 页面级更新提示（qbot-page 是普通块布局，无 channelPage 的 flex gap，需自带下边距与面板隔开） */
 .qbot-updateNotice { margin: 0 0 18px; }
+/* 进行中：不吃 8s 淡出动画（更新可能耗时较久），并改为竖排以突出「请勿关闭」警示行。 */
+.qbot-updateNotice.is-busy { flex-direction: column; align-items: stretch; gap: 6px; animation: none; }
+.qbot-updateMsg { min-width: 0; overflow-wrap: anywhere; }
+.qbot-updateKeepOpen { color: var(--dsw-alias-state-error-primary, #d54941); font-size: 13px; font-weight: 650; line-height: 1.5; }
 
 /* ── 机器人卡片（dim-botCard）─────────────────────────────────────────── */
 .qbot-botList { min-width: 0; width: 100%; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }

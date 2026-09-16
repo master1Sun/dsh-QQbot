@@ -54,7 +54,7 @@ import { ArchiveDialog } from "./dialogs/archive-dialog.js";
 import { OverrideDialog } from "./dialogs/override-dialog.js";
 import { ScheduleDialog } from "./dialogs/schedule-dialog.js";
 import { WorkspacePickerDialog } from "./dialogs/workspace-picker.js";
-import { getPanelVisible, notifyBotsChanged, onBotsChanged, setPanelVisible, setRpcCall } from "./right-panel/api.js";
+import { PANEL_VISIBLE_KEY, getPanelVisible, notifyBotsChanged, onBotsChanged, setPanelVisible, setRpcCall } from "./right-panel/api.js";
 import { ScheduleTab } from "./right-panel/ScheduleTab.js";
 import { TitleView } from "./right-panel/TitleView.js";
 
@@ -67,6 +67,15 @@ declare const __PLUGIN_VERSION__: string;
 
 const RPC_CHANNEL = "/qqbot-settings";
 
+/**
+ * 宿主事件推送端点的 WebSocket 地址：与 RPC 同前缀下的 `events`。
+ * 页面走 https 时用 wss（反代场景），否则用 ws（本机 127.0.0.1 直连）。
+ */
+function eventsWsUrl(): string {
+  const scheme = typeof location !== "undefined" && location.protocol === "https:" ? "wss:" : "ws:";
+  return `${scheme}//${location.host}${RPC_CHANNEL}/events`;
+}
+
 /** 右侧面板 tab 的身份（包名）；也是主体/标题注册时用的 key。 */
 const QQBOT_PANEL_ID = "@sunjuntao/dsh-qqbot";
 /** tab 的 kind（sidebarRight.openTab(kind) 用）。 */
@@ -74,6 +83,48 @@ const QQBOT_PANEL_KIND = "qqbot-sched";
 
 /** 提示条自动消失时长（秒）：倒计时归零后清空并隐藏。 */
 const NOTICE_TTL_SECONDS = 8;
+
+/* ── 更新状态（模块级托管） ───────────────────────────────────────────────
+ * 设置页切到别的分区会卸载本组件，组件内 state 随之丢失，而宿主侧的
+ * update.apply（下载 → 备份 → 覆盖安装目录）仍在跑。这里把状态托管到模块级，
+ * 于是切回来时仍能显示「更新尚未执行完，请勿关闭本面板」。
+ *
+ * 只保留**进行中（busy）**的快照：终态（成功/失败/无新版本）是短提示，
+ * 按原样 8 秒后消失，不留 residue，避免下次进入设置页看到过期消息。 */
+
+interface UpdateState {
+  busy: boolean;
+  message: string;
+  done: boolean;
+}
+
+const UPDATE_IDLE: UpdateState = { busy: false, message: "", done: false };
+
+const updateStore = (() => {
+  let current: UpdateState = UPDATE_IDLE;
+  const listeners = new Set<(state: UpdateState) => void>();
+  return {
+    snapshot(): UpdateState {
+      return current;
+    },
+    publish(next: UpdateState): void {
+      // busy 结束即丢弃快照，只让当前挂载的组件把终态提示显示完。
+      current = next.busy ? next : UPDATE_IDLE;
+      for (const listener of [...listeners]) {
+        try { listener(next); } catch { /* 单个订阅者异常不影响其余 */ }
+      }
+    },
+    subscribe(listener: (state: UpdateState) => void): () => void {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+})();
+
+/** 写入更新状态并同步给所有挂载中的设置页实例。 */
+function publishUpdate(next: UpdateState): void {
+  updateStore.publish(next);
+}
 
 export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [status, setStatus] = React.useState<any>(null);
@@ -95,11 +146,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [reconnecting, setReconnecting] = React.useState(false);
   // 右侧面板显隐开关：客户端本地偏好（localStorage），与 host 配置无关。
   const [panelVisible, setPanelVisibleState] = React.useState<boolean>(() => getPanelVisible());
-  const [update, setUpdate] = React.useState<{ busy: boolean; message: string; done: boolean }>({
-    busy: false,
-    message: "",
-    done: false,
-  });
+  // 更新状态托管到模块级（见文件顶部 updateStore）：切走设置页再回来，
+  // 未执行完的更新仍显示「请勿关闭本面板」，而不是让人以为更新没发生。
+  const [update, setLocalUpdate] = React.useState<UpdateState>(() => updateStore.snapshot());
+  const setUpdate = publishUpdate;
+  React.useEffect(() => updateStore.subscribe(setLocalUpdate), []);
 
   const refresh = React.useCallback(async (appId?: string) => {
     try {
@@ -268,9 +319,9 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   // 进行中（busy）的进度提示保留，busy 结束后重新计时。
   React.useEffect(() => {
     if (!update.message || update.busy) return undefined;
-    const timer = setTimeout(() => setUpdate((u) => ({ ...u, message: "" })), 8000);
+    const timer = setTimeout(() => publishUpdate({ ...update, message: "" }), NOTICE_TTL_SECONDS * 1000);
     return () => clearTimeout(timer);
-  }, [update.message, update.busy]);
+  }, [update]);
 
   const groupOverrides = (form.groupOverrides && typeof form.groupOverrides === "object" && !Array.isArray(form.groupOverrides))
     ? form.groupOverrides as Record<string, Record<string, unknown>>
@@ -820,8 +871,20 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             }, update.busy ? t("conn.checking") : update.done ? t("update.updated") : t("update.check"))),
           h("p", null, t("app.subtitle")))),
       h("div", { className: "qbot-titleActions" }, globalBadge)),
+    // 更新期间（busy）的提示条不自动淡出，并额外给出「请勿关闭」警示：
+    // update.apply 会下载并覆盖安装目录，中途切走 / 关闭面板不影响宿主执行，
+    // 但用户看不到结果、也容易误以为卡死，所以显式告知。
     update.message
-      ? h("div", { className: "qbot-infoNotice qbot-updateNotice", role: "status" }, update.message)
+      ? h(
+          "div",
+          {
+            className: `qbot-infoNotice qbot-updateNotice${update.busy ? " is-busy" : ""}`,
+            role: "status",
+            "aria-busy": update.busy ? "true" : "false",
+          },
+          h("span", { className: "qbot-updateMsg" }, update.message),
+          update.busy ? h("strong", { className: "qbot-updateKeepOpen" }, t("update.keepOpen")) : null,
+        )
       : null,
       h("div", { className: "qbot-panel", id: "qbot-panel" },
         page === "list" ? listView : page === "add" ? addBotView : detailView),
@@ -930,10 +993,10 @@ export function apply(ctx: any) {
       QqbotSettingsTab,
     ));
 
-  // ── 右侧面板 tab（定时消息）：按登录状态动态注册 ──────────────────────────
-  // QQ 未登录（没有任何 ws=connected 的机器人）时不出现面板入口；
-  // 宿主经 SSE 推送 bots-changed 事件驱动重检，动态注册 / 注销 tab 类型。
-  // ② 主体与 ③ 标题是 keyed slot，常驻无害——只有 ① 决定 chip 是否显示。
+  // ── 右侧面板 tab（定时消息）：按持久化偏好注册 ────────────────────────────
+  // 入口默认关闭；用户在设置页开启一次后即常驻（写 localStorage），
+  // 不再随 QQ 连接状态反复出现 / 消失。② 主体与 ③ 标题是 keyed slot，
+  // 常驻无害——只有 ① 决定 chip 是否显示。
   let disposePanelTab: (() => void) | null = null;
   const registerPanelTab = () => {
     if (disposePanelTab) return;
@@ -959,35 +1022,90 @@ export function apply(ctx: any) {
     disposePanelTab = null;
   };
 
-  const syncPanelTab = async () => {
-    try {
-      const res = await rpcCall("bots.list");
-      const bots = res.ok ? (val(res) as { bots?: unknown[] } | null)?.bots : undefined;
-      const anyConnected = Array.isArray(bots)
-        && bots.some((b: any) => b?.ws?.state === "connected");
-      // 显示条件 = 至少一个机器人已连接 **且** 设置页开关允许。
-      if (anyConnected && getPanelVisible()) registerPanelTab();
-      else unregisterPanelTab();
-    } catch { /* RPC 暂不可用时保持现状，等下一次推送触发 */ }
+  // 显示条件**只有**持久化偏好：开启即常驻，不随机器人连接状态反复出现/消失。
+  // 因此这里不需要任何 RPC——读一次 localStorage 即可得出结论。
+  const syncPanelTab = () => {
+    if (getPanelVisible()) registerPanelTab();
+    else unregisterPanelTab();
   };
 
-  // 初次检测一次；此后由 SSE 推送驱动（宿主在机器人增删 / 连接状态变化时广播）。
-  // 设置页的增删 / 启停 / 重连等动作仍走 notifyBotsChanged() 即时同步；
-  // SSE 连接由 EventSource 自带重连（宿主 retry: 3000），无需客户端定时轮询。
-  void syncPanelTab();
+  syncPanelTab();
   const offBotsChanged = onBotsChanged(() => void syncPanelTab());
-  let sseSource: EventSource | null = null;
-  try {
-    sseSource = new EventSource("/qqbot-settings/events");
-    sseSource.addEventListener("bots-changed", () => notifyBotsChanged());
-  } catch (error) {
-    // EventSource 不可用（极老环境）时退化为仅靠设置页动作触发的进程内广播。
-    console?.debug?.("[dsh-qqbot] SSE 订阅失败，面板显隐依赖设置页动作触发:", error);
+  // 偏好写在 localStorage：另一个标签页改了开关时，本标签页立即跟上（storage
+  // 事件只在「其它」标签页触发，写入方自己靠 setPanelVisible 的广播同步）。
+  const onStorage = (event: StorageEvent) => {
+    if (event.storageArea === localStorage && (event.key === null || event.key === PANEL_VISIBLE_KEY)) {
+      syncPanelTab();
+    }
+  };
+  window.addEventListener("storage", onStorage);
+
+  // ── 宿主事件订阅（WebSocket，带重连） ────────────────────────────────────
+  // 入口显隐如今只取决于本地偏好，bots-changed 不再影响它；这条通道保留用于
+  // 宿主侧的其它状态同步（面板内容刷新等），断开后指数退避重连，无需轮询。
+  let wsSocket: WebSocket | null = null;
+  let wsRetry = 0;
+  let wsTimer: ReturnType<typeof setTimeout> | null = null;
+  let wsDisposed = false;
+
+  const scheduleWsReconnect = () => {
+    if (wsDisposed || wsTimer !== null) return;
+    // 1s → 2s → 4s → … → 上限 10s。
+    const delay = Math.min(1000 * 2 ** wsRetry, 10_000);
+    wsRetry = Math.min(wsRetry + 1, 10);
+    wsTimer = setTimeout(() => {
+      wsTimer = null;
+      connectWs();
+    }, delay);
+  };
+
+  function connectWs() {
+    if (wsDisposed || typeof WebSocket === "undefined") return;
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(eventsWsUrl());
+    } catch (error) {
+      // 构造即失败（极少见）：退化为仅靠设置页动作触发的进程内广播。
+      console?.debug?.("[dsh-qqbot] WebSocket 订阅失败，面板显隐依赖设置页动作触发:", error);
+      scheduleWsReconnect();
+      return;
+    }
+    wsSocket = socket;
+    socket.onopen = () => {
+      wsRetry = 0;
+      // 断开期间宿主状态可能已变化，重连成功先自愈一次。
+      syncPanelTab();
+    };
+    socket.onmessage = (event) => {
+      if (typeof event.data !== "string") return;
+      try {
+        const message = JSON.parse(event.data) as { event?: unknown };
+        if (message.event === "bots-changed") notifyBotsChanged();
+      } catch { /* 非 JSON 帧忽略 */ }
+    };
+    socket.onerror = () => { /* close 紧随其后，统一在 onclose 里重连 */ };
+    socket.onclose = () => {
+      if (wsSocket === socket) wsSocket = null;
+      scheduleWsReconnect();
+    };
   }
+
+  connectWs();
   ctx.effect(
     () => () => {
-      sseSource?.close();
-      sseSource = null;
+      wsDisposed = true;
+      if (wsTimer !== null) clearTimeout(wsTimer);
+      wsTimer = null;
+      try {
+        // 先摘回调再关，避免 close 触发重连调度。
+        const socket = wsSocket;
+        wsSocket = null;
+        if (socket) {
+          socket.onclose = null;
+          socket.close();
+        }
+      } catch { /* 已关闭 */ }
+      window.removeEventListener("storage", onStorage);
       offBotsChanged();
       unregisterPanelTab();
     },

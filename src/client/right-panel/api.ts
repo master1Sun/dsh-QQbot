@@ -42,13 +42,18 @@ export function notifyBotsChanged(): void {
 
 /* ── 右侧面板显隐开关（客户端本地偏好，localStorage 持久化） ─────────────────
  * 设置页的开关写这里，apply() 的 syncPanelTab 读取；写入后复用广播通道
- * 让 tab 显隐立即重判，无需等轮询。 */
+ * 让 tab 显隐立即重判。
+ *
+ * 语义：**默认关闭，显式开启才生效**。因此判定是「存的值 === "1"」而不是
+ *「不等于 "0"」——没写过的用户看到的是关闭，写过的用户不受影响。
+ * 该偏好同时也是入口显隐的**唯一**依据：一旦开启就常驻显示，不再随机器人
+ * 连接状态反复出现/消失（QQ 掉线、插件重载都不会把它关回去）。 */
 
-const PANEL_VISIBLE_KEY = "dsh-qqbot.panel.visible";
+export const PANEL_VISIBLE_KEY = "dsh-qqbot.panel.visible";
 
-/** 右侧面板是否允许显示（默认开）。 */
+/** 右侧面板入口是否显示（默认关闭）。 */
 export function getPanelVisible(): boolean {
-  try { return localStorage.getItem(PANEL_VISIBLE_KEY) !== "0"; } catch { return true; }
+  try { return localStorage.getItem(PANEL_VISIBLE_KEY) === "1"; } catch { return false; }
 }
 
 /** 写入显隐开关并广播重判。 */

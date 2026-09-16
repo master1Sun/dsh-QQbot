@@ -74,7 +74,7 @@ export interface BotRuntimeManagerOptions {
   onInteraction?: (bot: BotRuntime, event: unknown) => void;
   /**
    * 机器人集合或连接状态变化出口（增删 / 启停 / ws 状态迁移）。
-   * 已做 300ms 去抖合并，供 SSE 推送等订阅方即时感知；通知失败不影响运行。
+   * 已做 300ms 去抖合并，供 WebSocket 推送等订阅方即时感知；通知失败不影响运行。
    */
   onBotsChanged?: () => void;
 }
@@ -174,7 +174,7 @@ export class BotRuntimeManager {
     }
   }
 
-  // ── 变更通知（SSE 推送等订阅方） ───────────────────────────────────────────
+  // ── 变更通知（WebSocket 推送等订阅方） ─────────────────────────────────────
 
   /** 去抖通知：300ms 窗口内的多次变化（sync 收尾 + 各 ws 状态迁移）合并为一次。 */
   #notifyChanged(): void {

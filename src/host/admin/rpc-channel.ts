@@ -13,7 +13,7 @@
  * 本文件按同样方式自行注册 prefix 路由，并复刻 `rpcFetchHandler` 的报文校验与
  * `/api` 那层的浏览器鉴权栅栏（Host/Origin 检查 + 会话认证），保证行为等价。
  */
-import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
+import type { WebRoute, WebUpgradeRoute } from "@deepseek-ai/dsh-host-webserver";
 
 /** 与前端 `RPC_CHANNEL` 保持一致。 */
 export const RPC_CHANNEL = "/qqbot-settings";
@@ -78,10 +78,10 @@ export interface RpcChannelOptions {
   /** RPC 分发：endpoint → 结果。 */
   dispatch(endpoint: string, payload: Record<string, unknown>): Promise<unknown>;
   /**
-   * `GET <channel>/events` 的 SSE 推送端点：通过鉴权栅栏后由调用方接管
-   * res（长连接）。未提供时该端点按普通 404 处理（与旧行为一致）。
+   * `<channel>/events` 的 WebSocket 推送端点：通过鉴权栅栏后由调用方接管
+   * upgrade 后的 socket。未提供时不注册升级路由（升级请求直接被销毁）。
    */
-  onSseOpen?: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void;
+  onWsUpgrade?: (req: import("node:http").IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => void;
 }
 
 /** 读取完整请求体。 */
@@ -105,10 +105,13 @@ async function readRawBody(req: import("node:http").IncomingMessage): Promise<Bu
  * 的子作用域里 `webServer` 才可解析（框架挂 `/api` 也是同一写法）。
  * 卸载由该 inject 作用域的生命周期负责。
  */
-export function registerRpcChannel({ ctx, fence, dispatch, onSseOpen }: RpcChannelOptions): void {
+export function registerRpcChannel({ ctx, fence, dispatch, onWsUpgrade }: RpcChannelOptions): void {
   ctx.inject(["webServer"], (webCtxUnknown) => {
     const webCtx = webCtxUnknown as {
-      webServer: { register(route: WebRoute): () => void };
+      webServer: {
+        register(route: WebRoute): () => void;
+        registerUpgrade(route: WebUpgradeRoute): () => void;
+      };
       effect(callback: () => unknown, label?: string): unknown;
     };
     const route: WebRoute = {
@@ -131,11 +134,6 @@ export function registerRpcChannel({ ctx, fence, dispatch, onSseOpen }: RpcChann
 
         const endpoint = endpointFromPath(RPC_CHANNEL, new URL(req.url ?? "/", "http://localhost").pathname);
         const method = (req.method ?? "GET").toUpperCase();
-        // SSE 推送端点：与 RPC 同前缀、同鉴权栅栏，长连接交给调用方接管。
-        if (endpoint === "events" && method === "GET" && onSseOpen) {
-          onSseOpen(req, res);
-          return;
-        }
         if (method !== "POST" || endpoint === undefined) {
           res.writeHead(404);
           res.end("not found");
@@ -179,7 +177,47 @@ export function registerRpcChannel({ ctx, fence, dispatch, onSseOpen }: RpcChann
     };
 
     webCtx.effect(() => webCtx.webServer.register(route), `dsh-qqbot: ${RPC_CHANNEL} rpc channel`);
+
+    // WebSocket 推送端点：事件流不走请求通道，而是独占 `<channel>/events` 的
+    // HTTP upgrade（精确路径，与 RPC 前缀同名但互不干扰）。鉴权栅栏在这里手动
+    // 执行——upgrade 请求绕过 request 处理器，不会经过上面的自动栅栏。
+    if (!onWsUpgrade) return;
+    const upgradeRoute: WebUpgradeRoute = {
+      path: `${RPC_CHANNEL}/events`,
+      handler: (req, socket, head) => {
+        if (fence) {
+          try {
+            const rejection = fence.requestRejection({ headers: req.headers as Readonly<Record<string, string | string[] | undefined>> });
+            if (rejection !== undefined) {
+              rejectUpgrade(socket, rejection);
+              return;
+            }
+          } catch {
+            // 栅栏自身异常不应阻断本插件通道。
+          }
+        }
+        onWsUpgrade(req, socket, head);
+      },
+    };
+    webCtx.effect(() => {
+      try {
+        return webCtx.webServer.registerUpgrade(upgradeRoute);
+      } catch (error) {
+        // 路径重复（热重载旧路由未回收）等情况：仅失去跨进程推送，不影响 RPC。
+        console?.warn?.(`[dsh-qqbot] WebSocket 端点注册失败，面板显隐仅依赖设置页动作: ${String(error)}`);
+        return () => { /* 未注册成功，无需回收 */ };
+      }
+    }, `dsh-qqbot: ${RPC_CHANNEL} events websocket`);
   });
+}
+
+/** 在 upgrade 阶段的裸 socket 上写一个极简 HTTP 拒绝响应后断开。 */
+function rejectUpgrade(socket: import("node:stream").Duplex, status: 401 | 403): void {
+  const text = status === 401 ? "Unauthorized" : "Forbidden";
+  try {
+    socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  } catch { /* 对端已断开 */ }
+  socket.destroy();
 }
 
 async function writeJson(res: import("node:http").ServerResponse, response: Response): Promise<void> {

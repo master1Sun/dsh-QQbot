@@ -589,6 +589,7 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "update.noNewVersion": "暂无新版本（当前 v{0} 已是最新）",
   "update.found": "发现新版本 v{0}，正在自动更新…",
   "update.updatedTo": "已自动更新到 v{0}（备份于安装目录 .update-backup/），重启 DSH 后生效",
+  "update.keepOpen": "更新尚未执行完，请勿关闭本面板",
 
   // ── replyLocale ──
   "replyLocale.label": "回复语言（replyLocale）",
@@ -742,7 +743,7 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "panel.archiveAllHint": "所有机器人模式仅显示聚合条数；选择单个机器人可展开预览记录",
   "panel.tabId": "面板",
   "ui.panelSwitchTitle": "右侧面板「QQ 定时消息」入口",
-  "ui.panelSwitchDesc": "开启后，编辑器右侧栏显示 QQ 定时消息管理入口；关闭即隐藏（仍要求至少一个机器人已连接，且改动即时生效）",
+  "ui.panelSwitchDesc": "默认关闭。开启后，编辑器右侧栏显示 QQ 定时消息管理入口并记住该选择：刷新页面、重启 DSH、QQ 掉线都不会让它消失；关闭即隐藏（改动即时生效）",
   "sched.view": "查看",
   "sched.back": "返回",
   "sched.detailTitle": "执行逻辑详情",
@@ -1355,6 +1356,7 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "update.noNewVersion": "No new version (v{0} is the latest)",
   "update.found": "New version v{0} found; updating automatically…",
   "update.updatedTo": "Updated to v{0} (old files backed up in .update-backup/ inside the install directory). Restart DSH to take effect.",
+  "update.keepOpen": "Update still running — do not close this panel",
 
   // ── replyLocale ──
   "replyLocale.label": "Reply language (replyLocale)",
@@ -1508,7 +1510,7 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "panel.archiveAllHint": "All-bots mode shows aggregated counts only; pick a single bot to expand and preview records",
   "panel.tabId": "Tab",
   "ui.panelSwitchTitle": "Right panel \"QQ Scheduled Messages\" entry",
-  "ui.panelSwitchDesc": "When on, the QQ scheduled-messages manager appears in the right sidebar; off hides it (still requires at least one connected bot, and takes effect immediately)",
+  "ui.panelSwitchDesc": "Off by default. When on, the QQ scheduled-messages manager appears in the right sidebar and the choice is remembered: reloading, restarting DSH, or losing the QQ connection will not hide it; off hides it (takes effect immediately)",
   "sched.view": "View",
   "sched.back": "Back",
   "sched.detailTitle": "Execution details",
