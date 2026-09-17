@@ -985,9 +985,9 @@ export function apply(ctx: any) {
         name: "settings.section",
         id: "dsh-qqbot",
         order: 31,
-        label: () => h("span", { className: "qbot-navLabel" },
-          h(QqBotGlyph, { className: "qbot-navGlyph", uid: "nav" }),
-          h("span", { className: "qbot-navText" }, t("app.title"))),
+        // 宿主新版导航行自带系统图标（navIcon），label 契约是纯文本；
+        // 这里不再内嵌 QqBotGlyph，否则会和宿主图标重复。
+        label: () => t("app.title"),
         inject: () => ({ rpcCall }),
       },
       QqbotSettingsTab,
