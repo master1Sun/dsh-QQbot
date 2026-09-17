@@ -34,6 +34,7 @@ import {
 } from "./types.js";
 import { COOLDOWN_OPTIONS, FIELD_HELP, FIELD_LABELS, SWITCH_DEFS, cooldownLabel } from "./meta.js";
 import { QqBotGlyph, QqBotGuideIcon, QqLogoGlyph } from "./glyphs.js";
+import { QBOT_SETTINGS_NAV_CSS, registerQbotSettingsNavIcon } from "./settings-nav-icon.js";
 import {
   ConfirmHost,
   OnlineBadge,
@@ -979,6 +980,25 @@ export function apply(ctx: any) {
   setRpcCall(rpcCall);
 
   ctx.effect(() => installStyles(), "qqbot-settings: styles");
+  // 设置导航图标：宿主对外部 section 只画默认齿轮，这里按文本匹配导航行，
+  // 用 CSS mask 替换为机器人图标（隐藏齿轮，避免双图标）。
+  ctx.effect(
+    () => {
+      let style = document.getElementById("qbot-settings-nav-style") as HTMLStyleElement | null;
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "qbot-settings-nav-style";
+        style.textContent = QBOT_SETTINGS_NAV_CSS;
+        document.head.appendChild(style);
+      }
+      const disposeMarker = registerQbotSettingsNavIcon(() => t("app.title"));
+      return () => {
+        disposeMarker();
+        style?.remove();
+      };
+    },
+    "qqbot-settings: settings navigation icon",
+  );
   ctx.slots.inject("settings.section", () =>
     ctx.slots.register(
       {
