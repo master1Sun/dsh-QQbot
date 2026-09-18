@@ -30,15 +30,13 @@ export interface GroupOverrideConfig {
   markdownReply?: boolean;
   memoryEnabled?: boolean;
   bannedWords?: string[];
-  /** 该群全量（非 @）消息使用的聊天 Preset。 */
-  agentPresetChat?: string;
 }
 
 /** 群覆盖里允许出现的字段（写入/合并时的白名单，防止夹带系统级字段）。 */
 export const GROUP_OVERRIDE_FIELDS = [
   "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs",
   "atContextMessages", "replyChunkChars", "maxRepliesPerMessage",
-  "markdownReply", "memoryEnabled", "bannedWords", "agentPresetChat",
+  "markdownReply", "memoryEnabled", "bannedWords",
 ] as const satisfies ReadonlyArray<keyof GroupOverrideConfig>;
 
 export interface QqbotConfig {
@@ -51,8 +49,6 @@ export interface QqbotConfig {
   adminToken: string;
   workspacePath: string;
   agentPreset: string;
-  /** 群全量非 AT 消息使用的聊天 Preset（不执行工具）；留空跟随 agentPreset。 */
-  agentPresetChat: string;
   permissionPreset: string;
   model: QqbotModelSelection | null;
   allowC2c: boolean;
@@ -247,9 +243,6 @@ export function resolveGroupOverrides(raw: unknown): Record<string, GroupOverrid
               .map((w) => w.trim());
           }
           break;
-        case "agentPresetChat":
-          if (typeof v === "string") ov.agentPresetChat = v.trim();
-          break;
       }
     }
     if (Object.keys(ov).length > 0) out[id] = ov;
@@ -303,7 +296,6 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     adminToken: str(pick("adminToken") as string),
     workspacePath: str(pick("workspacePath") as string) || process.cwd(),
     agentPreset: str(pick("agentPreset") as string),
-    agentPresetChat: str(pick("agentPresetChat") as string),
     permissionPreset: str(pick("permissionPreset") as string),
     model: parseModelSelection(str(pick("model") as string)),
     allowC2c: boolOr(pick("allowC2c"), true),

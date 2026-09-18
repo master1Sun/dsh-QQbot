@@ -457,7 +457,6 @@ export function createQqRule({
           payload,
           msgId: payload.id ?? "",
           deliveryId: delivery.deliveryId,
-          allowTools: isAt,
           quoteContext: quoteContextOf(bot, groupChatKey, payload, sender, content),
           quoteMention: isAt,
           attachmentContext: attachCtx,
@@ -537,7 +536,6 @@ export function createQqRule({
         payload,
         msgId,
         deliveryId: delivery.deliveryId,
-        allowTools: true,
         quoteContext: quoteContextOf(bot, chatKey, payload, sender, content),
         quoteMention: true,
         attachmentContext: attachCtx,
@@ -557,8 +555,6 @@ interface EnterConversationArgs {
   target: { scope: "c2c" | "group"; openid: string };
   msgId: string;
   deliveryId: string;
-  /** 是否允许执行工具：群全量模式下仅 @ 机器人为 true。 */
-  allowTools: boolean;
   /** 用户引用了别人消息时恢复出的上下文（没有引用为 null）。 */
   quoteContext: string | null;
   /** 附件多模态上下文（图片/文件/语音说明，无附件为 null）。 */
@@ -577,17 +573,11 @@ function newMessageId(): MessageId {
   return randomUUID() as unknown as MessageId;
 }
 
-/**
- * 群全量非 @ 消息：仅这一句工具约束（不执行工具/不读写文件/不执行命令）。
- * 只加这一句，其它「提示」段（回复风格等）按需求不注入。
- */
-const CHAT_ONLY_HINT = "（群聊全量模式·非 @ 触发）不要调用任何工具、不要读写文件、不要执行命令。";
-
 /** 统一会话入口：复用已绑定会话（followup）或请求创建新会话。 */
 async function enterConversation(args: EnterConversationArgs): Promise<WebhookSessionRequest | null> {
   const {
     bot, agents, logger, payload, target, msgId, deliveryId,
-    allowTools, quoteContext, attachmentContext, memoryBlock, quoteMention, promptBuilder,
+    quoteContext, attachmentContext, memoryBlock, quoteMention, promptBuilder,
   } = args;
   const config = args.config;
   const state = bot.state;
@@ -633,8 +623,7 @@ async function enterConversation(args: EnterConversationArgs): Promise<WebhookSe
   // 提示词本体提前计算：文件等附件消息 content 为空，本体可能为空串——
   // 有附件上下文时用占位句代替（见下方组装处）；无文字也无可用附件则无事可做
   // （早退，避免启动 typing 后空等）。
-  // 非 @ 群消息只注入这一句工具约束（其余「提示」段均按需求去掉）。
-  const rawBody = allowTools ? promptBuilder() : `${CHAT_ONLY_HINT}\n\n${promptBuilder()}`;
+  const rawBody = promptBuilder();
   if (!rawBody.trim() && !attachmentContext) return null;
   // 单聊「正在输入」状态：AI 处理期间向用户显示（QQ 平台能力仅限单聊），
   // 由回复泵在回复发出时停止（typing.ts 内置最长保持时限兜底）。
@@ -682,7 +671,7 @@ async function enterConversation(args: EnterConversationArgs): Promise<WebhookSe
     workspacePath: config.workspacePath,
     title: `QQ: ${(payload.content ?? "").trim().slice(0, 40)}`,
     prompt,
-    agentPreset: allowTools ? presets.agentPreset : (config.agentPresetChat || presets.agentPreset),
+    agentPreset: presets.agentPreset,
     permissionPreset: presets.permissionPreset,
     ...(config.model ? { model: config.model } : {}),
   };

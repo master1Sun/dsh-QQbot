@@ -22,7 +22,6 @@ interface OverrideDraft {
   memoryEnabled: string;
   replyChunkChars: string;
   maxRepliesPerMessage: string;
-  agentPresetChat: string;
   bannedWords: string;
 }
 
@@ -42,7 +41,6 @@ function buildDraft(overrides: Record<string, Record<string, unknown>>, openid: 
     memoryEnabled: tri(ov.memoryEnabled),
     replyChunkChars: num(ov.replyChunkChars),
     maxRepliesPerMessage: num(ov.maxRepliesPerMessage),
-    agentPresetChat: typeof ov.agentPresetChat === "string" ? ov.agentPresetChat : "",
     bannedWords: Array.isArray(ov.bannedWords) ? (ov.bannedWords as string[]).join(", ") : "",
   };
 }
@@ -104,7 +102,6 @@ export function OverrideDialog(props: {
     if (d.memoryEnabled) ov.memoryEnabled = d.memoryEnabled === "on";
     if (d.replyChunkChars !== "") ov.replyChunkChars = Number(d.replyChunkChars);
     if (d.maxRepliesPerMessage !== "") ov.maxRepliesPerMessage = Number(d.maxRepliesPerMessage);
-    if (d.agentPresetChat.trim()) ov.agentPresetChat = d.agentPresetChat.trim();
     if (d.bannedWords.trim()) {
       ov.bannedWords = d.bannedWords.split(/[,，]/).map((w) => w.trim()).filter(Boolean);
     }
@@ -226,9 +223,8 @@ export function OverrideDialog(props: {
                     h("option", { value: "" }, t("group.followDefault")),
                     h("option", { value: "on" }, t("conn.enable")),
                     h("option", { value: "off" }, t("conn.disable")))),
-                // 长期记忆（memoryEnabled）与聊天 Preset（agentPresetChat）已从界面移除
-                //（默认常开/留空跟随 Agent Preset，仅 bots.json 可配）；
-                // 草稿仍读取/回写这两个字段，避免保存时丢掉配置文件里已设置的值。
+                // 长期记忆（memoryEnabled）已从界面移除（默认常开，仅 bots.json 可配）；
+                // 草稿仍读取/回写该字段，避免保存时丢掉配置文件里已设置的值。
                 editRow(t("feature.bannedWords"), t("group.bannedWordsHint"),
                   TextArea({
                     rows: 2, value: String(draft.bannedWords ?? ""),

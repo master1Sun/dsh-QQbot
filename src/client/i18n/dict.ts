@@ -74,7 +74,7 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "session.defaultWorkspace": "默认工作区（~/.dsh/file）",
   "session.modelHint": "这个机器人会话使用的模型；留空则跟随宿主默认模型。切换后已有会话需要重置才会生效。",
   "session.followDefaultModel": "跟随默认模型",
-  "session.presetHint": "决定机器人的行事风格与可用工具。@ 机器人和单聊消息都走这个 Preset；群里非 @ 的回复走聊天 Preset（默认跟随本 Preset，仅可在 bots.json 配置），不会执行工具。",
+  "session.presetHint": "决定机器人的行事风格与可用工具。@ 机器人、单聊、以及群里非 @ 的回复都走这个 Preset，群聊与私聊能力完全一致，均可调用工具。",
 
   // ── status ──
   "status.disabled": "已停用",
@@ -188,7 +188,7 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "policy.title": "消息与回复策略",
   "policy.hint": "控制这个机器人「听哪些消息、怎么回」，每个机器人彼此独立。所有开关改完立即生效，不需要重启。",
   "policy.fullGroupReply": "群全量消息回复",
-  "policy.fullGroupReplyHint": "开启后，群里没有 @ 机器人的消息也会参与价值评分，达到阈值才回复；@ 机器人的消息始终回复并可使用工具。关闭后，机器人只处理 @ 它的群消息。",
+  "policy.fullGroupReplyHint": "开启后，群里没有 @ 机器人的消息也会参与价值评分，达到阈值才回复（与 @、单聊一样可调用工具）；@ 机器人的消息始终回复。关闭后，机器人只处理 @ 它的群消息。",
   "policy.acceptDm": "接受单聊消息",
   "policy.acceptDmHint": "是否响应 QQ 私聊（C2C）消息。关闭后机器人只处理群消息，私聊一律忽略。",
   "policy.respondBots": "响应机器人消息",
@@ -203,8 +203,8 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "policy.quoteScopeAll": "all（群聊全部回复）",
   "policy.quoteLimit": "引用字数上限",
   "policy.quoteLimitHint": "文本引用最多显示多少字（仅主动消息回退为文本引用时使用；原生引用气泡由 QQ 客户端自行截断），超出部分以省略号结尾。",
-  "policy.chatPreset": "群聊聊天 Preset",
-  "policy.chatPresetHint": "群内非 @ 的全量消息（只聊天、不执行工具）使用的 Preset；留空则跟随上方 Agent Preset。用于让群全量回复风格与 @/单聊区分开。",
+  "policy.chatPreset": "群聊聊天 Preset（已停用）",
+  "policy.chatPresetHint": "群聊现已与单聊能力完全一致（均可调用工具），不再单独限制群全量消息。该选项已停用，仅供历史配置识别，新配置请勿使用。",
   "policy.followAgentPreset": "跟随 Agent Preset",
   "policy.secretEnv": "AppSecret 凭据引用（secretEnv）",
   "policy.secretEnvShort": "AppSecret 凭据引用",
@@ -653,7 +653,6 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "group.summaryMarkdown": "Markdown {0}",
   "group.summaryMemory": "记忆 {0}",
   "group.summaryBannedWords": "敏感词 {0} 个",
-  "group.summaryChatPreset": "聊天 Preset {0}",
 
   // ── tz ──
   "tz.shanghai": "中国标准时间 · Asia/Shanghai（UTC+8）",
@@ -848,7 +847,7 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "session.defaultWorkspace": "Default workspace (~/.dsh/file)",
   "session.modelHint": "The model used by this bot’s sessions; leave empty to follow the host default. Existing sessions need a reset for the change to apply.",
   "session.followDefaultModel": "Follow default model",
-  "session.presetHint": "Sets the bot’s behavior style and available tools. @-mentions and direct messages use this Preset; non-@ group replies use the chat preset (follows this Preset by default, configurable only in bots.json) and never run tools.",
+  "session.presetHint": "Sets the bot’s behavior style and available tools. @-mentions, direct messages, and non-@ group replies all use this Preset — group and direct chat now have identical capabilities and can both run tools.",
 
   // ── status ──
   "status.disabled": "Disabled",
@@ -962,7 +961,7 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "policy.title": "Message & reply policy",
   "policy.hint": "Controls which messages this bot listens to and how it replies; each bot is independent. Every switch takes effect immediately — no restart needed.",
   "policy.fullGroupReply": "Reply to all group messages",
-  "policy.fullGroupReplyHint": "When on, group messages that do not @ the bot also go through value scoring and get a reply only above the threshold; @-mentions are always answered and can use tools. When off, only messages that @ the bot are processed.",
+  "policy.fullGroupReplyHint": "When on, group messages that do not @ the bot also go through value scoring and get a reply only above the threshold (same tool capability as @-mentions and DMs); @-mentions are always answered. When off, only messages that @ the bot are processed.",
   "policy.acceptDm": "Accept direct messages",
   "policy.acceptDmHint": "Whether to respond to QQ direct (C2C) messages. When off, the bot processes group messages only and ignores DMs.",
   "policy.respondBots": "Respond to bot messages",
@@ -977,8 +976,8 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "policy.quoteScopeAll": "all (every group reply)",
   "policy.quoteLimit": "Quote preview length",
   "policy.quoteLimitHint": "How many characters of the quoted text to show when a reply falls back to a text quote (proactive messages only; native quote cards are truncated by the QQ client itself); longer text ends with an ellipsis.",
-  "policy.chatPreset": "Group chat preset",
-  "policy.chatPresetHint": "Preset used for full group messages that do not @ the bot (chat only, no tools); leave empty to follow the Agent Preset above. Use it to give group-wide replies a style distinct from @-mentions and DMs.",
+  "policy.chatPreset": "Group chat preset (retired)",
+  "policy.chatPresetHint": "Group chat now has identical capabilities to direct chat (both can run tools); the separate group-chat preset restriction is removed. This option is retired for historical config compatibility only — do not use it for new configs.",
   "policy.followAgentPreset": "Follow Agent Preset",
   "policy.secretEnv": "AppSecret credential reference (secretEnv)",
   "policy.secretEnvShort": "AppSecret credential reference",
@@ -1427,7 +1426,6 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "group.summaryMarkdown": "Markdown {0}",
   "group.summaryMemory": "Memory {0}",
   "group.summaryBannedWords": "{0} banned words",
-  "group.summaryChatPreset": "Chat preset {0}",
 
   // ── tz ──
   "tz.shanghai": "China Standard Time · Asia/Shanghai (UTC+8)",

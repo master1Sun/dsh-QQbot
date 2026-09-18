@@ -322,7 +322,6 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     if (ov.markdownReply !== undefined) parts.push(fmt("group.summaryMarkdown", ov.markdownReply ? t("sched.form.onShort") : t("sched.form.offShort")));
     if (ov.memoryEnabled !== undefined) parts.push(fmt("group.summaryMemory", ov.memoryEnabled ? t("sched.form.onShort") : t("sched.form.offShort")));
     if (Array.isArray(ov.bannedWords) && ov.bannedWords.length > 0) parts.push(fmt("group.summaryBannedWords", ov.bannedWords.length));
-    if (typeof ov.agentPresetChat === "string" && ov.agentPresetChat) parts.push(fmt("group.summaryChatPreset", ov.agentPresetChat));
     return parts.length > 0 ? parts.join(" · ") : t("group.noOverrides");
   };
 
@@ -660,8 +659,6 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           }, presetOptions(catalogs.agentPresets).map((o) =>
             h("option", { key: o.value, value: o.value }, o.label))),
         }),
-        // 群聊聊天 Preset（agentPresetChat）与 AppSecret 凭据引用（secretEnv）已从界面移除，
-        // 仅通过 bots.json 配置——默认 agentPresetChat 留空即跟随上方 Agent Preset（见 rule.ts）。
       )),
 
     // ── 消息与回复策略（开关） ──

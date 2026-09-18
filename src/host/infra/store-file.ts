@@ -63,8 +63,6 @@ export interface StoredBotConfig {
   workspacePath?: string;
   /** @ 与单聊消息使用的对话 Preset（可调用工具）。 */
   agentPreset?: string;
-  /** 群全量非 AT 消息使用的聊天 Preset（不执行工具）；留空跟随 agentPreset。 */
-  agentPresetChat?: string;
   /** 权限 Preset。 */
   permissionPreset?: string;
   /** 模型选择（设置页写入 { provider, model }）；兼容历史 "provider/model[:上限]" 字符串，留空跟随宿主默认模型。 */
@@ -168,7 +166,7 @@ export interface StoredBotConfig {
 
 /** 行为配置字段（config.get / config.save 序列化时统一引用，不含传输/凭据字段）。 */
 export const BOT_CONFIG_FIELDS = [
-  "workspacePath", "agentPreset", "agentPresetChat", "permissionPreset", "model", "secretEnv",
+  "workspacePath", "agentPreset", "permissionPreset", "model", "secretEnv",
   "allowC2c", "allowGroups", "allowUsers", "atContextMessages", "groupBufferMax",
   "replyChunkChars", "maxRepliesPerMessage", "proactiveFallback", "archiveEnabled",
   "markdownReply", "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs",
@@ -191,7 +189,6 @@ export const BOT_CONFIG_FIELDS = [
 export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   workspacePath: "",
   agentPreset: "",
-  agentPresetChat: "",
   permissionPreset: "",
   model: "",
   secretEnv: "",

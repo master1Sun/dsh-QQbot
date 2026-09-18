@@ -42,7 +42,7 @@ export const FIELD_HELP: Record<string, string> = {
  *   localPathWhitelist（默认关）· voiceTranscription（默认 note，平台转写）
  *   archiveEnabled（默认开）· memoryEnabled（默认开）· fileIngestion（默认开）
  * 另有以下**字段**（非开关）同样不出现在设置页：
- *   secretEnv（默认空，AppSecret 凭据引用）· agentPresetChat（默认空，群聊聊天 Preset，留空跟随 agentPreset）
+ *   secretEnv（默认空，AppSecret 凭据引用）
  */
 export const SWITCH_DEFS: Array<{ key: string; label: string; desc: string; def: boolean }> = [
   {
