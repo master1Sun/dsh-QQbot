@@ -59,12 +59,3 @@ export function QqBotGlyph(props: { className?: string; uid: string; size?: numb
       h("path", { d: "M9.4 15.1 Q12 17.1 14.6 15.1", fill: "none", stroke: "#000", strokeWidth: 1.5, strokeLinecap: "round" })),
     h("rect", { x: 4.5, y: 6, width: 15, height: 13, rx: 4.5, fill: "currentColor", mask: `url(#qbot-face-${props.uid})` }));
 }
-
-/**
- * 引导页入口图标适配器。
- * 宿主 `sidebarRightTabs` 的 `guide[].icon` 契约为 `ComponentType<{ size?; className? }>`，
- * 会在 22/26px 两种尺寸下调用；这里补上 QqBotGlyph 需要的固定 uid（mask id 必须唯一）。
- */
-export function QqBotGuideIcon(props: { size?: number; className?: string; uid?: string }) {
-  return h(QqBotGlyph, { uid: props.uid ?? "guide", className: props.className, size: props.size });
-}

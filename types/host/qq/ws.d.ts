@@ -28,6 +28,11 @@ export interface QqWsSourceOptions {
     onRawEvent?: (eventType: string, data: unknown) => void;
     /** 按钮回调（INTERACTION_CREATE，SDK 单独封装为 interaction 事件）出口。 */
     onInteraction?: (event: unknown) => void;
+    /**
+     * 连接状态变化出口（state / lastError 实际变化时触发）。
+     * 收到事件的 events 计数递增不触发——那是每条消息都发生的高频变化。
+     */
+    onStatusChange?: (appId: string, status: WsStatus) => void;
 }
 export declare class QqWsSource {
     #private;

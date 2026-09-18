@@ -23,7 +23,7 @@ import { createQqRule } from "./messaging/rule.js";
 import { installReplyPump } from "./messaging/reply.js";
 import { makeQqbotRoutes } from "./admin/routes.js";
 import { registerRpcChannel, type RpcFence, type RpcChannelOptions } from "./admin/rpc-channel.js";
-import { createWsHub, WS_EVENT_BOTS_CHANGED } from "./admin/ws-hub.js";
+import { createWsHub, WS_EVENT_BOTS_CHANGED, WS_EVENT_SCHED_SEND } from "./admin/ws-hub.js";
 import { BotRuntimeManager, type BotRuntime } from "./bots.js";
 import { loadGlobalConfig, saveCredentials, upsertBot, type StoredBot, type StoredCredentials } from "./infra/store-file.js";
 import {
@@ -374,6 +374,10 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       sanitizeOutgoingText(collected, { enabled: bot.config.sanitizeReplies })
     );
   };
+  // WebSocket 推送中枢：机器人增删 / 连接状态变化、定时任务到点触发结果时通知设置界面
+  // （替代客户端轮询）。端点 ws://<host>/qqbot-settings/events，与 RPC 共用鉴权栅栏。
+  const wsHub = createWsHub({ logger });
+
   const scheduler = new Scheduler({
     store: schedules,
     resolveBot: (appId?: string) => (appId ? bots.get(appId) : undefined) ?? bots.primary(),
@@ -384,6 +388,8 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     // 宿主会话总线：测试执行时监听 session/event 等待真实投递结果
     //（cordis ctx 运行时有 on/off，静态类型缺 off，此处断言）。
     bus: ctx as unknown as ScheduleBus,
+    // 到点触发结果 → 客户端后台任务面板（文件工作台底部任务按钮）。
+    onSendEvent: (info) => wsHub.broadcast(WS_EVENT_SCHED_SEND, info),
   });
   scheduler.start();
   // 启动时把遗留的「脚本生成中」任务重新入队（上次进程中断的补偿）。
@@ -408,10 +414,6 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
 
   // webhook 运行时（先占位，机器人事件回调里使用；稍后赋值）。
   let runtime: WebhookRuntimeLike | null = null;
-
-  // WebSocket 推送中枢：机器人增删 / 连接状态变化时通知设置界面（替代客户端轮询）。
-  // 端点 ws://<host>/qqbot-settings/events，与 RPC 共用鉴权栅栏。
-  const wsHub = createWsHub({ logger });
 
   // 多机器人运行时管理器：所有机器人 / 连接 / 状态的中枢。
   const bots = new BotRuntimeManager({

@@ -14,7 +14,8 @@ export declare function getRpcCall(): RpcCall | null;
 export declare function onBotsChanged(fn: () => void): () => void;
 /** 广播「机器人列表 / 连接状态可能已变化」。 */
 export declare function notifyBotsChanged(): void;
-/** 右侧面板是否允许显示（默认开）。 */
+export declare const PANEL_VISIBLE_KEY = "dsh-qqbot.panel.visible";
+/** 右侧面板入口是否显示（默认关闭）。 */
 export declare function getPanelVisible(): boolean;
 /** 写入显隐开关并广播重判。 */
 export declare function setPanelVisible(v: boolean): void;

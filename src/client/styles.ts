@@ -71,7 +71,7 @@ export const CSS_TEXT = `
 .qbot-listHeading { min-height: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; }
 .qbot-listHeading h3 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 14px; line-height: normal; font-weight: 650; }
 .qbot-listTitle { min-width: 0; display: inline-flex; align-items: center; gap: 10px; }
-.qbot-hint { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.6; }
+.qbot-hint { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 
 /* ── 通知（dim-statusNotice / info 变体）──────────────────────────────── */
 .qbot-statusNotice { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 22%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 10px; color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 8%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 13px; line-height: 1.5; }
@@ -244,7 +244,7 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-dirRow svg { flex: none; width: 16px; height: 16px; color: var(--qbot-business); }
 .qbot-modalState { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 96px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; }
 .qbot-modalError { color: var(--dsw-alias-state-error-primary, #d54941); }
-.qbot-modalFoot { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px clamp(10px, 3.2%, 20px) 18px; }
+.qbot-modalFoot { min-width: 0; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px clamp(10px, 3.2%, 20px) 14px; font-variant-numeric: tabular-nums; }
 /* 弹窗底部内联错误：常驻可见，不随弹窗内容滚动而移出视口 */
 .qbot-footError { margin: 0; color: var(--dsw-alias-state-error-primary, #d54941); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 /* 宽弹窗：定时消息 / 消息归档 列表内容较长，放宽上限 */
@@ -257,7 +257,7 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-schedTab:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
 .qbot-schedTab.is-active { background: var(--dsw-alias-bg-layer-1, #fff); border-color: var(--dsw-alias-border-l2, #e5e6eb); color: var(--qbot-blue); font-weight: 600; box-shadow: 0 1px 2px rgb(31 35 41 / 6%); }
 /* 右侧面板「定时消息」工具栏：机器人作用域 + 刷新（自适应面板宽度、可换行） */
-.qbot-schedToolbar { flex: none; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 10px clamp(8px, 3%, 14px); border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-schedToolbar { flex: none; position: sticky; top: 0; z-index: 2; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 10px clamp(8px, 3%, 14px); border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
 .qbot-fieldInline { min-width: 0; flex: 1 1 auto; display: inline-flex; align-items: center; gap: 8px; }
 .qbot-fieldInlineLabel { flex: none; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); }
 .qbot-schedToolbar .qbot-settingSelect { flex: 1 1 auto; min-width: 0; max-width: 240px; }

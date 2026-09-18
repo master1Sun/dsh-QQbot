@@ -831,6 +831,23 @@ export interface ScheduleSkipResult {
   reason?: string;
 }
 
+/**
+ * 一次到点触发的结果事件（经 WebSocket 推给客户端，登记进文件工作台后台任务面板）。
+ * 字段保持极小：只有展示所需内容，不含完整 entry。
+ */
+export interface ScheduleSendEvent {
+  /** 任务摘要（正文 / 命令前 60 字），作为后台任务的 detail。 */
+  summary: string;
+  /** 归属机器人 AppID。 */
+  appId: string;
+  /** 是否成功投递（false = 执行抛错）。 */
+  ok: boolean;
+  /** 是否被发送门控拦下（未投递、不占配额，视为正常收尾）。 */
+  skipped: boolean;
+  /** 跳过原因或失败原因（ok 且未跳过时省略）。 */
+  reason?: string;
+}
+
 export interface SchedulerContext {
   store: ScheduleStore;
   /** 按 appId 取运行时机器人；缺省回落主机器人。 */
@@ -849,14 +866,25 @@ export interface SchedulerContext {
   executeTool?: (entry: ScheduleEntry, bot: BotRuntime) => Promise<ScheduleSkipResult | void>;
   /** 宿主会话总线（测试执行时等待投递结果）。 */
   bus?: ScheduleBus;
+  /**
+   * 定时发送事件回调：每次到点触发收尾（成功 / 失败 / 门控跳过）后调用一次，
+   * 宿主用 WebSocket 广播给客户端，登记进文件工作台的后台任务面板。
+   */
+  onSendEvent?: (info: ScheduleSendEvent) => void;
   logger: Pick<Console, "info" | "warn" | "error">;
+}
+
+/** 触发事件摘要：tool 模式取命令、其余取正文的前 60 字（空内容回退任务 id）。 */
+function sendEventSummary(entry: ScheduleEntry): string {
+  const raw = entry.mode === "tool" ? (entry.command ?? entry.content ?? "") : (entry.content ?? "");
+  const text = String(raw).trim();
+  return text ? text.slice(0, 60) : entry.id;
 }
 
 export class Scheduler {
   #ctx: SchedulerContext;
   #timer: ReturnType<typeof setInterval> | null = null;
   #running = false;
-
   constructor(ctx: SchedulerContext) {
     this.#ctx = ctx;
   }
@@ -976,11 +1004,13 @@ export class Scheduler {
             this.#ctx.logger.info(
               `[dsh-qqbot] 定时任务跳过发送（机器人 ${bot.appId}，mode=tool，gate=${entry.gate ?? "always"}）：${reason}`
             );
+            this.#ctx.onSendEvent?.({ summary: sendEventSummary(entry), appId: bot.appId, ok: true, skipped: true, reason });
           } else {
             bot.state.counters.proactive += 1;
             entry.lastSentAt = toShanghaiISO(now);
             entry.lastError = void 0;
             entry.lastSkipReason = void 0;
+            this.#ctx.onSendEvent?.({ summary: sendEventSummary(entry), appId: bot.appId, ok: true, skipped: false });
           }
           if (entry.type === "at") {
             // 一次性任务发完即删（跳过也算已触发，避免遗留一条永不生效的任务）。
@@ -998,6 +1028,7 @@ export class Scheduler {
           // 排程成功 → 保留本次执行失败的原因；排不出来 → 保留配置错误（得先修配置）。
           if (entry.nextRunAt) entry.lastError = message;
           this.#ctx.logger.error("[dsh-qqbot] 定时任务执行失败:", error);
+          this.#ctx.onSendEvent?.({ summary: sendEventSummary(entry), appId: bot.appId, ok: false, skipped: false, reason: message });
         }
         void bot.archiver.append({
           kind: "proactive",

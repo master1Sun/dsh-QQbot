@@ -22,6 +22,7 @@ import { TextInput, TextArea, confirmDlg, editRow, errText, formatTime, val } fr
 import { OpenIdPicker, useArchiveChats } from "./id-picker.js";
 import { isEnglish, useLocale } from "./i18n/index.js";
 import { isValidCron, nextCronRun, tzOffsetMs, wallToEpoch } from "../shared/cron.js";
+import { runAsBackgroundTask } from "./workbench/bg-tasks.js";
 
 /**
  * 周几按钮标签：中文用「日一二三四五六」，英文用两位缩写。
@@ -80,7 +81,14 @@ function localTimeZone(): string {
   }
 }
 
-/** 命令模板：一键填入常见脚本形态。 */
+/** 后台任务 detail：取定时消息正文 / 命令的简短摘要（最多 60 字），无内容时返回 undefined。 */
+function schedBgDetail(entry: Record<string, any> | undefined): string | undefined {
+  if (!entry) return undefined;
+  const s = entry.mode === "tool" ? String(entry.command ?? entry.content ?? "") : String(entry.content ?? "");
+  const text = s.trim();
+  return text ? text.slice(0, 60) : undefined;
+}
+
 /** 命令模板（懒求值：标签含译文，模块级只算一次会冻结语言）。 */
 function cmdTemplates(): Array<{ label: string; cmd: string }> {
   return [
@@ -196,10 +204,18 @@ export function ScheduleManager(props: {
   forceScope?: "current" | "all";
   /** 弹窗场景提供关闭回调；嵌入场景不传则不渲染关闭按钮。 */
   onClose?: () => void;
+  /** 平台提示回调（文件工作台 ctx.toast 等）；传入后用平台 toast 承载所有提示，不再渲染内嵌提示条。 */
+  toast?: (level: "ok" | "info" | "error", msg: string) => void;
 }) {
-  const { rpcCall, detailAppId, forceScope, onClose } = props;
+  const { rpcCall, detailAppId, forceScope, onClose, toast } = props;
   // 订阅宿主语言切换：本组件也会挂在右侧面板（不在设置页重渲染链路内），需自行刷新文案。
   useLocale();
+
+  /** 统一提示出口：传入 toast 时走平台 toast（如文件工作台 ctx.toast）；否则回退内嵌提示条。 */
+  const notify = (ok: boolean, text: string): void => {
+    if (toast) toast(ok ? "ok" : "error", text);
+    else setSchedNotice({ ok, text });
+  };
 
   const [scheduleModal, setScheduleModal] = React.useState<{
     loading: boolean;
@@ -260,10 +276,19 @@ export function ScheduleManager(props: {
 
   // 提示条自动收起：无论成功还是失败，8 秒后清空（失败原因在列表卡片的错误行里仍可看到）。
   React.useEffect(() => {
-    if (!schedNotice) return;
+    if (!schedNotice || toast) return;
     const timer = setTimeout(() => setSchedNotice(null), 8000);
     return () => clearTimeout(timer);
   }, [schedNotice]);
+
+  // 表单级错误（editError）与列表级错误（error）接入平台 toast：有 toast 时优先走平台，
+  // 无 toast（设置页等）回退内嵌提示条（下方分别渲染）。避免错误既不在 toast 也不在界面显示。
+  React.useEffect(() => {
+    if (scheduleModal.editError && toast) toast("error", scheduleModal.editError);
+  }, [scheduleModal.editError]);
+  React.useEffect(() => {
+    if (scheduleModal.error && toast) toast("error", scheduleModal.error);
+  }, [scheduleModal.error]);
 
   React.useEffect(() => {
     const s = forceScope ?? "current";
@@ -462,13 +487,20 @@ export function ScheduleManager(props: {
         : {}),
       ...(e.appId ? { appId: e.appId } : detailAppId ? { appId: detailAppId } : {}),
     };
-    const res = await rpcCall("schedule.add", payload);
-    if (res.ok) {
-      setScheduleModal((prev) => (prev ? { ...prev, editing: null, saving: false } : prev));
-      await loadSchedules(scheduleModal?.botScope ?? "current");
-    } else {
-      setScheduleModal((prev) => (prev ? { ...prev, saving: false, editError: errText(res.error) } : prev));
-    }
+    await runAsBackgroundTask(
+      e.id ? t("sched.bg.update") : t("sched.bg.create"),
+      async () => {
+        const res = await rpcCall("schedule.add", payload);
+        if (res.ok) {
+          setScheduleModal((prev) => (prev ? { ...prev, editing: null, saving: false } : prev));
+          await loadSchedules(scheduleModal?.botScope ?? "current");
+          return { ok: true, message: t("sched.bg.done") };
+        }
+        setScheduleModal((prev) => (prev ? { ...prev, saving: false, editError: errText(res.error) } : prev));
+        return { ok: false, message: errText(res.error) };
+      },
+      String(e.content ?? "").trim().slice(0, 60) || undefined,
+    );
   };
 
   const removeSchedule = async (id: string) => {
@@ -476,9 +508,19 @@ export function ScheduleManager(props: {
     setScheduleRemoving(id);
     const scopeNow = scheduleModal?.botScope ?? "current";
     try {
-      const res = await rpcCall("schedule.remove", { id });
-      if (res.ok) await loadSchedules(scopeNow);
-      else setScheduleModal((prev) => (prev ? { ...prev, error: errText(res.error) } : prev));
+      await runAsBackgroundTask(
+        t("sched.bg.remove"),
+        async () => {
+          const res = await rpcCall("schedule.remove", { id });
+          if (res.ok) {
+            await loadSchedules(scopeNow);
+            return { ok: true, message: t("sched.bg.done") };
+          }
+          notify(false, errText(res.error));
+          return { ok: false, message: errText(res.error) };
+        },
+        schedBgDetail(scheduleModal?.items.find((x: any) => String(x.id) === id)),
+      );
     } finally {
       setScheduleRemoving("");
     }
@@ -497,21 +539,35 @@ export function ScheduleManager(props: {
     setScheduleToggling(id);
     const scopeNow = scheduleModal?.botScope ?? "current";
     try {
-      const res = await rpcCall("schedule.setEnabled", { id, enabled: !currentlyEnabled });
-      if (res.ok) {
-        // 明确回显「下次运行」：启用后不会补跑已错过的触发，只排到下一个周期点，
-        // 不给提示的话用户会以为开关没生效。
-        const s = (val(res) ?? {}) as { schedule?: { nextRunAt?: string }; nextRunAt?: string };
-        const nextAt = s.schedule?.nextRunAt ?? s.nextRunAt;
-        setSchedNotice(
-          currentlyEnabled
-            ? { ok: true, text: t("sched.disabledToast") }
-            : nextAt
-              ? { ok: true, text: fmt("sched.enabledToast", formatTime(nextAt)) }
-              : { ok: false, text: t("sched.enabledNoNext") },
-        );
-        await loadSchedules(scopeNow);
-      } else setScheduleModal((prev) => (prev ? { ...prev, error: errText(res.error) } : prev));
+      await runAsBackgroundTask(
+        currentlyEnabled ? t("sched.bg.disable") : t("sched.bg.enable"),
+        async () => {
+          const res = await rpcCall("schedule.setEnabled", { id, enabled: !currentlyEnabled });
+          if (!res.ok) {
+            notify(false, errText(res.error));
+            return { ok: false, message: errText(res.error) };
+          }
+          // 明确回显「下次运行」：启用后不会补跑已错过的触发，只排到下一个周期点，
+          // 不给提示的话用户会以为开关没生效。
+          const s = (val(res) ?? {}) as { schedule?: { nextRunAt?: string }; nextRunAt?: string };
+          const nextAt = s.schedule?.nextRunAt ?? s.nextRunAt;
+          notify(
+            currentlyEnabled
+              ? true
+              : nextAt
+                ? true
+                : false,
+            currentlyEnabled
+              ? t("sched.disabledToast")
+              : nextAt
+                ? fmt("sched.enabledToast", formatTime(nextAt))
+                : t("sched.enabledNoNext"),
+          );
+          await loadSchedules(scopeNow);
+          return { ok: true, message: t("sched.bg.done") };
+        },
+        schedBgDetail(scheduleModal?.items.find((x: any) => String(x.id) === id)),
+      );
     } finally {
       setScheduleToggling("");
     }
@@ -522,13 +578,23 @@ export function ScheduleManager(props: {
     if (!id) return;
     setSchedNotice(null);
     setScheduleTesting(id);
-    const res = await rpcCall("schedule.runOnce", { id });
-    setScheduleTesting("");
-    if (res.ok) {
-      const v = val(res) ?? {};
-      setSchedNotice({ ok: true, text: typeof v.message === "string" ? v.message : t("sched.testSent") });
-    } else {
-      setSchedNotice({ ok: false, text: errText(res.error) });
+    try {
+      await runAsBackgroundTask(
+        t("sched.bg.runOnce"),
+        async () => {
+          const res = await rpcCall("schedule.runOnce", { id });
+          if (res.ok) {
+            const v = val(res) ?? {};
+            notify(true, typeof v.message === "string" ? v.message : t("sched.testSent"));
+            return { ok: true, message: typeof v.message === "string" ? v.message : t("sched.testSent") };
+          }
+          notify(false, errText(res.error));
+          return { ok: false, message: errText(res.error) };
+        },
+        schedBgDetail(scheduleModal?.items.find((x: any) => String(x.id) === id)),
+      );
+    } finally {
+      setScheduleTesting("");
     }
     await loadSchedules(scheduleModal?.botScope ?? "current");
   };
@@ -1056,7 +1122,11 @@ export function ScheduleManager(props: {
       h("div", { className: "qbot-schedDetailBody" }, h("div", { className: "qbot-flow" }, ...buildFlow(e))),
     );
 
-  const ROOT: CSSProperties = { display: "flex", flexDirection: "column", height: "100%", minHeight: 0, boxSizing: "border-box" };
+  // 用 flex 增长撑满父容器，而非 height:100% 百分比。百分比在 flex 嵌套里依赖父级“确定高度”
+  // 才能解析，内嵌视图（文件工作台 el）下父级高度由 flex 撑出、非显式定高，百分比经常解析失败
+  // 导致本根塌成内容高度、整条链失限、editForm 的 overflow-y:auto 永不触发、底部被裁且无滚动条。
+  // flex:1 1 auto 不依赖百分比解析，只要 el 有确定高度就一定生效；弹窗里父级 .qbot-modal 是 flex 列，等价。
+  const ROOT: CSSProperties = { display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, boxSizing: "border-box" };
   return h(
     "div",
     { className: "qbot-schedRoot", style: ROOT },
@@ -1068,6 +1138,9 @@ export function ScheduleManager(props: {
               h(
                 "div",
                 { className: "qbot-editForm qbot-schedForm" },
+                scheduleModal.editError && !toast
+                  ? h("div", { key: "editErr", className: "qbot-schedNotice is-error" }, scheduleModal.editError)
+                  : null,
                 section(
                   t("sched.form.stepRecipient"),
                   t("sched.form.stepRecipientHint"),
@@ -1233,7 +1306,7 @@ export function ScheduleManager(props: {
             "div",
             { className: `qbot-modalList${scheduleModal.loading && scheduleModal.items.length > 0 ? " is-refreshing" : ""}` },
             [
-              schedNotice
+              schedNotice && !toast
                 ? h(
                     "div",
                     { key: "notice", className: `qbot-schedNotice is-autoHide${schedNotice.ok ? "" : " is-error"}` },
@@ -1280,7 +1353,11 @@ export function ScheduleManager(props: {
                 "div",
                 { key: "scroll", className: "qbot-modalListScroll" },
                 scheduleModal.error
-                  ? null
+                  ? h(
+                      "div",
+                      { key: "listErr", className: "qbot-schedNotice is-error" },
+                      scheduleModal.error,
+                    )
                   : scheduleModal.items.length === 0
                   ? scheduleModal.loading
                     ? h(
@@ -1501,7 +1578,6 @@ export function ScheduleManager(props: {
             h(
               "div",
               { className: "qbot-viewActions" },
-              h("button", { className: "qbot-btn", type: "button", disabled: scheduleModal.loading, onClick: () => void loadSchedules(scheduleModal.botScope) }, t("common.refresh")),
               onClose ? h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: onClose }, t("common.close")) : null,
             ),
           )

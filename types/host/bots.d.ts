@@ -61,6 +61,11 @@ export interface BotRuntimeManagerOptions {
     onRawEvent?: (bot: BotRuntime, eventType: string, data: unknown) => void;
     /** 按钮回调（INTERACTION_CREATE）出口，由 index.ts 分派给审批管理器。 */
     onInteraction?: (bot: BotRuntime, event: unknown) => void;
+    /**
+     * 机器人集合或连接状态变化出口（增删 / 启停 / ws 状态迁移）。
+     * 已做 300ms 去抖合并，供 WebSocket 推送等订阅方即时感知；通知失败不影响运行。
+     */
+    onBotsChanged?: () => void;
 }
 export declare class BotRuntimeManager {
     #private;

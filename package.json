@@ -1,6 +1,6 @@
 {
   "name": "@sunjuntao/dsh-qqbot",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "把 QQ 官方机器人（Webhook 回调）接入本机 DeepSeek Harness：QQ 群/单聊消息（含群全量消息上下文）→ DSH 会话 → 回复发回 QQ，支持被动回复与群主动消息。Connect the official QQ bot (webhook callback) to a local DeepSeek Harness.",
   "type": "module",
   "main": "./lib/index.js",
@@ -46,7 +46,6 @@
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-sidebar-right",
         "@deepseek-ai/dsh-client-locale"
       ],
       "platform": "web"
@@ -82,9 +81,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1-rc.1",
-    "@deepseek-ai/dsh-credentials": "0.0.1-rc.1 || >=0.1.0-rc.1 <0.2.0-0",
-    "@deepseek-ai/dsh-host-webserver": "0.0.1-rc.1 || >=0.1.0-rc.1 <0.2.0-0",
-    "@deepseek-ai/dsh-webhook": "0.1.2-alpha.2 || >=0.1.2-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-credentials": ">=0.1.6-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.6-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-webhook": ">=0.1.6-alpha.1 <0.2.0",
     "@deepseek-ai/schemastery": "^3.18.0"
   },
   "peerDependenciesMeta": {

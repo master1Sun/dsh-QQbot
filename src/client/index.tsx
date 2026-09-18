@@ -33,7 +33,7 @@ import {
   type Tone,
 } from "./types.js";
 import { COOLDOWN_OPTIONS, FIELD_HELP, FIELD_LABELS, SWITCH_DEFS, cooldownLabel } from "./meta.js";
-import { QqBotGlyph, QqBotGuideIcon, QqLogoGlyph } from "./glyphs.js";
+import { QqBotGlyph, QqLogoGlyph } from "./glyphs.js";
 import { QBOT_SETTINGS_NAV_CSS, registerQbotSettingsNavIcon } from "./settings-nav-icon.js";
 import {
   ConfirmHost,
@@ -55,32 +55,17 @@ import { ArchiveDialog } from "./dialogs/archive-dialog.js";
 import { OverrideDialog } from "./dialogs/override-dialog.js";
 import { ScheduleDialog } from "./dialogs/schedule-dialog.js";
 import { WorkspacePickerDialog } from "./dialogs/workspace-picker.js";
-import { PANEL_VISIBLE_KEY, getPanelVisible, notifyBotsChanged, onBotsChanged, setPanelVisible, setRpcCall } from "./right-panel/api.js";
-import { ScheduleTab } from "./right-panel/ScheduleTab.js";
-import { TitleView } from "./right-panel/TitleView.js";
+import { setRpcCall } from "./right-panel/api.js";
+import { installScheduleWorkbenchView } from "./workbench/schedule-view.js";
+import { installSchedSendTasks } from "./workbench/sched-send-tasks.js";
 
 export const name = "qqbot-settings";
 // locale：宿主语言服务（ctx.locale.register/bind），支撑设置界面双语。
-// sidebarRightTabs / sidebarRight：新版右侧面板（定时消息 tab）。
-export const inject = ["slots", "connection", "locale", "sidebarRightTabs", "sidebarRight"];
+export const inject = ["slots", "connection", "locale"];
 
 declare const __PLUGIN_VERSION__: string;
 
 const RPC_CHANNEL = "/qqbot-settings";
-
-/**
- * 宿主事件推送端点的 WebSocket 地址：与 RPC 同前缀下的 `events`。
- * 页面走 https 时用 wss（反代场景），否则用 ws（本机 127.0.0.1 直连）。
- */
-function eventsWsUrl(): string {
-  const scheme = typeof location !== "undefined" && location.protocol === "https:" ? "wss:" : "ws:";
-  return `${scheme}//${location.host}${RPC_CHANNEL}/events`;
-}
-
-/** 右侧面板 tab 的身份（包名）；也是主体/标题注册时用的 key。 */
-const QQBOT_PANEL_ID = "@sunjuntao/dsh-qqbot";
-/** tab 的 kind（sidebarRight.openTab(kind) 用）。 */
-const QQBOT_PANEL_KIND = "qqbot-sched";
 
 /** 提示条自动消失时长（秒）：倒计时归零后清空并隐藏。 */
 const NOTICE_TTL_SECONDS = 8;
@@ -145,8 +130,6 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [loadError, setLoadError] = React.useState("");
   const [refreshing, setRefreshing] = React.useState(false);
   const [reconnecting, setReconnecting] = React.useState(false);
-  // 右侧面板显隐开关：客户端本地偏好（localStorage），与 host 配置无关。
-  const [panelVisible, setPanelVisibleState] = React.useState<boolean>(() => getPanelVisible());
   // 更新状态托管到模块级（见文件顶部 updateStore）：切走设置页再回来，
   // 未执行完的更新仍显示「请勿关闭本面板」，而不是让人以为更新没发生。
   const [update, setLocalUpdate] = React.useState<UpdateState>(() => updateStore.snapshot());
@@ -168,8 +151,6 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         setForm({ ...stored });
       }
       if (b.ok) setBots(val(b) ?? null);
-      // 广播机器人列表可能已变化：右侧面板 tab 的显隐立即同步（不等轮询）。
-      notifyBotsChanged();
       if (cat.ok) setCatalogs({ ...EMPTY_CATALOGS, ...(val(cat) ?? {}) });
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -478,25 +459,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                 h("p", null, t("list.emptyHint")))))
         : null,
       h("p", { className: "qbot-hint" }, t("list.cardHint"))),
-    // ── 界面偏好：右侧面板「QQ 定时消息」入口开关（客户端本地设置） ──
-    h("div", { className: "qbot-surfaceCard" },
-      h("div", { className: "qbot-surfaceBody" },
-        h("label", { className: "qbot-switchRow" },
-          h("span", { className: "qbot-switchText" },
-            h("strong", null, t("ui.panelSwitchTitle")),
-            h("p", { style: { margin: "2px 0 0", fontSize: "12px", color: "var(--dsw-alias-label-tertiary, #8f959e)" } },
-              t("ui.panelSwitchDesc"))),
-          h("input", {
-            type: "checkbox",
-            className: "qbot-switch",
-            checked: panelVisible,
-            onChange: (e: any) => {
-              const v = Boolean(e.target.checked);
-              setPanelVisibleState(v);
-              setPanelVisible(v); // 写 localStorage 并广播，tab 显隐立即重判
-            },
-            "aria-label": t("ui.panelSwitchTitle"),
-          })))))
+)
 
 
   const wsInfo = detailBot ? {
@@ -1013,146 +976,13 @@ export function apply(ctx: any) {
       QqbotSettingsTab,
     ));
 
-  // ── 右侧面板 tab（定时消息）：按持久化偏好注册 ────────────────────────────
-  // 入口默认关闭；用户在设置页开启一次后即常驻（写 localStorage），
-  // 不再随 QQ 连接状态反复出现 / 消失。② 主体与 ③ 标题是 keyed slot，
-  // 常驻无害——只有 ① 决定 chip 是否显示。
-  let disposePanelTab: (() => void) | null = null;
-  const registerPanelTab = () => {
-    if (disposePanelTab) return;
-    disposePanelTab =
-      (ctx.sidebarRightTabs as { register: (d: Record<string, unknown>) => () => void }).register({
-        id: QQBOT_PANEL_ID,
-        kind: QQBOT_PANEL_KIND,
-        // title / guide 由宿主在打开面板时求值，这里每次调用都走 i18n，切换语言后即为当前语言。
-        title: () => t("panel.title"),
-        guide: [
-          {
-            order: 100,
-            title: () => t("panel.title"),
-            description: () => t("panel.subtitle"),
-            // 入口胶囊的图标；不传则宿主画占位方块。用插件统一的 QQ 机器人 glyph。
-            icon: QqBotGuideIcon,
-          },
-        ],
-      });
-  };
-  const unregisterPanelTab = () => {
-    try { disposePanelTab?.(); } catch { /* 已被宿主回收时忽略 */ }
-    disposePanelTab = null;
-  };
+  // ── 定时消息：迁移到文件工作台（见 src/client/workbench/schedule-view.tsx） ──
+  // 原右侧面板注入（tab / 主体 / 标题 / WebSocket 推送 / localStorage 偏好开关）
+  // 已全部移除；文件工作台全局未就绪时由该模块内部轮询等待。
+  installScheduleWorkbenchView();
+  // 定时发送结果 → 文件工作台后台任务面板（WebSocket 订阅宿主 sched-send 广播）。
+  installSchedSendTasks();
 
-  // 显示条件**只有**持久化偏好：开启即常驻，不随机器人连接状态反复出现/消失。
-  // 因此这里不需要任何 RPC——读一次 localStorage 即可得出结论。
-  const syncPanelTab = () => {
-    if (getPanelVisible()) registerPanelTab();
-    else unregisterPanelTab();
-  };
-
-  syncPanelTab();
-  const offBotsChanged = onBotsChanged(() => void syncPanelTab());
-  // 偏好写在 localStorage：另一个标签页改了开关时，本标签页立即跟上（storage
-  // 事件只在「其它」标签页触发，写入方自己靠 setPanelVisible 的广播同步）。
-  const onStorage = (event: StorageEvent) => {
-    if (event.storageArea === localStorage && (event.key === null || event.key === PANEL_VISIBLE_KEY)) {
-      syncPanelTab();
-    }
-  };
-  window.addEventListener("storage", onStorage);
-
-  // ── 宿主事件订阅（WebSocket，带重连） ────────────────────────────────────
-  // 入口显隐如今只取决于本地偏好，bots-changed 不再影响它；这条通道保留用于
-  // 宿主侧的其它状态同步（面板内容刷新等），断开后指数退避重连，无需轮询。
-  let wsSocket: WebSocket | null = null;
-  let wsRetry = 0;
-  let wsTimer: ReturnType<typeof setTimeout> | null = null;
-  let wsDisposed = false;
-
-  const scheduleWsReconnect = () => {
-    if (wsDisposed || wsTimer !== null) return;
-    // 1s → 2s → 4s → … → 上限 10s。
-    const delay = Math.min(1000 * 2 ** wsRetry, 10_000);
-    wsRetry = Math.min(wsRetry + 1, 10);
-    wsTimer = setTimeout(() => {
-      wsTimer = null;
-      connectWs();
-    }, delay);
-  };
-
-  function connectWs() {
-    if (wsDisposed || typeof WebSocket === "undefined") return;
-    let socket: WebSocket;
-    try {
-      socket = new WebSocket(eventsWsUrl());
-    } catch (error) {
-      // 构造即失败（极少见）：退化为仅靠设置页动作触发的进程内广播。
-      console?.debug?.("[dsh-qqbot] WebSocket 订阅失败，面板显隐依赖设置页动作触发:", error);
-      scheduleWsReconnect();
-      return;
-    }
-    wsSocket = socket;
-    socket.onopen = () => {
-      wsRetry = 0;
-      // 断开期间宿主状态可能已变化，重连成功先自愈一次。
-      syncPanelTab();
-    };
-    socket.onmessage = (event) => {
-      if (typeof event.data !== "string") return;
-      try {
-        const message = JSON.parse(event.data) as { event?: unknown };
-        if (message.event === "bots-changed") notifyBotsChanged();
-      } catch { /* 非 JSON 帧忽略 */ }
-    };
-    socket.onerror = () => { /* close 紧随其后，统一在 onclose 里重连 */ };
-    socket.onclose = () => {
-      if (wsSocket === socket) wsSocket = null;
-      scheduleWsReconnect();
-    };
-  }
-
-  connectWs();
-  ctx.effect(
-    () => () => {
-      wsDisposed = true;
-      if (wsTimer !== null) clearTimeout(wsTimer);
-      wsTimer = null;
-      try {
-        // 先摘回调再关，避免 close 触发重连调度。
-        const socket = wsSocket;
-        wsSocket = null;
-        if (socket) {
-          socket.onclose = null;
-          socket.close();
-        }
-      } catch { /* 已关闭 */ }
-      window.removeEventListener("storage", onStorage);
-      offBotsChanged();
-      unregisterPanelTab();
-    },
-    "qqbot: right-panel tab lifecycle",
-  );
-
-  // ② 主体（keyed by 包名）：嵌入完整 CRUD+测试能力的 ScheduleManager。
-  ctx.effect(
-    () =>
-      ctx.slots.inject("sidebar.right.pane.tab", () =>
-        ctx.slots.register(
-          { name: "sidebar.right.pane.tab", key: QQBOT_PANEL_ID },
-          ScheduleTab as (props: unknown) => React.ReactNode,
-        )),
-    "qqbot: right-panel tab body",
-  );
-
-  // ③ chip 标题（keyed by 包名）。
-  ctx.effect(
-    () =>
-      ctx.slots.inject("sidebar.right.pane.tab.title", () =>
-        ctx.slots.register(
-          { name: "sidebar.right.pane.tab.title", key: QQBOT_PANEL_ID },
-          TitleView as (props: unknown) => React.ReactNode,
-        )),
-    "qqbot: right-panel tab title",
-  );
 }
 
 function installStyles(): () => void {

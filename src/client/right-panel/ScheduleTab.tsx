@@ -31,7 +31,7 @@ interface BotSummary {
 const root: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  height: "100%",
+  flex: "1 1 auto",
   minHeight: 0,
   boxSizing: "border-box",
   color: "inherit",
@@ -44,7 +44,11 @@ const body: CSSProperties = {
   flexDirection: "column",
 };
 
-export function ScheduleTab(): React.ReactNode {
+export function ScheduleTab(props?: {
+  /** 平台提示回调（文件工作台 ctx.toast）；不传则 ScheduleManager 内部回退为内嵌提示条。 */
+  toast?: (level: "ok" | "info" | "error", msg: string) => void;
+}): React.ReactNode {
+  const { toast } = props ?? {};
   // 订阅宿主语言切换：右侧面板不在设置页的重渲染链路内，需自行刷新文案。
   useLocale();
 
@@ -127,7 +131,7 @@ export function ScheduleTab(): React.ReactNode {
         ? h(
             "div",
             { style: body, key: scopeAppId || "all" },
-            h(ScheduleManager, { rpcCall: rpc, detailAppId, forceScope }),
+            h(ScheduleManager, { rpcCall: rpc, detailAppId, forceScope, toast }),
           )
         : h("div", { className: "qbot-modalState" }, t("panel.loading")),
   );

@@ -15,6 +15,11 @@ export interface RpcChannelOptions {
     fence?: RpcFence;
     /** RPC 分发：endpoint → 结果。 */
     dispatch(endpoint: string, payload: Record<string, unknown>): Promise<unknown>;
+    /**
+     * `<channel>/events` 的 WebSocket 推送端点：通过鉴权栅栏后由调用方接管
+     * upgrade 后的 socket。未提供时不注册升级路由（升级请求直接被销毁）。
+     */
+    onWsUpgrade?: (req: import("node:http").IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => void;
 }
 /**
  * 在具备 `webServer` 注入的作用域里注册设置界面 RPC 通道。
@@ -24,4 +29,4 @@ export interface RpcChannelOptions {
  * 的子作用域里 `webServer` 才可解析（框架挂 `/api` 也是同一写法）。
  * 卸载由该 inject 作用域的生命周期负责。
  */
-export declare function registerRpcChannel({ ctx, fence, dispatch }: RpcChannelOptions): void;
+export declare function registerRpcChannel({ ctx, fence, dispatch, onWsUpgrade }: RpcChannelOptions): void;
