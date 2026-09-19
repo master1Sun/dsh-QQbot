@@ -59,7 +59,6 @@
   },
   "scripts": {
     "link-dsh-deps": "node scripts/deploy/link-dsh-deps.mjs",
-    "postinstall": "node scripts/deploy/link-dsh-deps.mjs",
     "build": "node scripts/build/build.mjs",
     "build:cli": "node scripts/build/build-cli.mjs",
     "build:types": "tsc --emitDeclarationOnly --declaration --rootDir src --outDir types --skipLibCheck",
