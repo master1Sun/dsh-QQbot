@@ -33,16 +33,34 @@ const INCOMING_FINGERPRINT_CAP = 512;
  * GROUP_MESSAGE_CREATE 与 GROUP_AT_MESSAGE_CREATE（事件 id 不同）。
  * 15 秒窗口内同 (群, 发送者, 内容) 只处理一次；首次出现返回 true。
  */
+let lastFingerprintSweep = 0;
+const INCOMING_FINGERPRINT_SWEEP_MS = 60_000;
+
+/** 惰性清理过期指纹：避免指纹表长期只增不减（窗口外的旧记录被持续保留）。 */
+function sweepIncomingFingerprints(state: BotState, now: number): void {
+  if (
+    now - lastFingerprintSweep < INCOMING_FINGERPRINT_SWEEP_MS &&
+    state.incomingFingerprints.size <= INCOMING_FINGERPRINT_CAP
+  ) {
+    return;
+  }
+  lastFingerprintSweep = now;
+  for (const [k, at] of state.incomingFingerprints) {
+    if (now - at > INCOMING_FINGERPRINT_WINDOW_MS) state.incomingFingerprints.delete(k);
+  }
+}
+
 export function markIncoming(state: BotState, group: string, sender: string, content: string, now = Date.now()): boolean {
   const key = `${group}:${sender}:${content.replace(/\s+/g, "").slice(0, 120)}`;
   if (!group || !content) return true;
-  if (state.incomingFingerprints.has(key)) return false;
-  state.incomingFingerprints.set(key, now);
-  if (state.incomingFingerprints.size > INCOMING_FINGERPRINT_CAP) {
-    for (const [k, at] of state.incomingFingerprints) {
-      if (now - at > INCOMING_FINGERPRINT_WINDOW_MS) state.incomingFingerprints.delete(k);
-    }
+  const seenAt = state.incomingFingerprints.get(key);
+  if (seenAt !== undefined) {
+    // 命中：窗口内重复 → 拦截；窗口外过期 → 视为新消息（先清掉旧指纹再写入）
+    if (now - seenAt <= INCOMING_FINGERPRINT_WINDOW_MS) return false;
+    state.incomingFingerprints.delete(key);
   }
+  state.incomingFingerprints.set(key, now);
+  sweepIncomingFingerprints(state, now);
   return true;
 }
 

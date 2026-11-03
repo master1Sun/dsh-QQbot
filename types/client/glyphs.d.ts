@@ -15,13 +15,3 @@ export declare function QqBotGlyph(props: {
     uid: string;
     size?: number;
 }): import("react").DetailedReactHTMLElement<import("react").InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;
-/**
- * 引导页入口图标适配器。
- * 宿主 `sidebarRightTabs` 的 `guide[].icon` 契约为 `ComponentType<{ size?; className? }>`，
- * 会在 22/26px 两种尺寸下调用；这里补上 QqBotGlyph 需要的固定 uid（mask id 必须唯一）。
- */
-export declare function QqBotGuideIcon(props: {
-    size?: number;
-    className?: string;
-    uid?: string;
-}): import("react").DetailedReactHTMLElement<import("react").InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;

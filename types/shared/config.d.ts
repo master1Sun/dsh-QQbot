@@ -28,11 +28,9 @@ export interface GroupOverrideConfig {
     markdownReply?: boolean;
     memoryEnabled?: boolean;
     bannedWords?: string[];
-    /** 该群全量（非 @）消息使用的聊天 Preset。 */
-    agentPresetChat?: string;
 }
 /** 群覆盖里允许出现的字段（写入/合并时的白名单，防止夹带系统级字段）。 */
-export declare const GROUP_OVERRIDE_FIELDS: readonly ["groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs", "atContextMessages", "replyChunkChars", "maxRepliesPerMessage", "markdownReply", "memoryEnabled", "bannedWords", "agentPresetChat"];
+export declare const GROUP_OVERRIDE_FIELDS: readonly ["groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs", "atContextMessages", "replyChunkChars", "maxRepliesPerMessage", "markdownReply", "memoryEnabled", "bannedWords"];
 export interface QqbotConfig {
     appId: string;
     appSecret: string;
@@ -43,8 +41,6 @@ export interface QqbotConfig {
     adminToken: string;
     workspacePath: string;
     agentPreset: string;
-    /** 群全量非 AT 消息使用的聊天 Preset（不执行工具）；留空跟随 agentPreset。 */
-    agentPresetChat: string;
     permissionPreset: string;
     model: QqbotModelSelection | null;
     allowC2c: boolean;

@@ -69,7 +69,6 @@ export declare function createAdminService(ctx: AdminServiceContext): {
                     [key: string]: unknown;
                     workspacePath?: string;
                     agentPreset?: string;
-                    agentPresetChat?: string;
                     permissionPreset?: string;
                     model?: {
                         provider: string;

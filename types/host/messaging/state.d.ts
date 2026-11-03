@@ -3,11 +3,6 @@
  */
 import type { BotState, GroupBufferEntry, PassiveReplyRecord } from "../../shared/types.js";
 export declare function createBotState(): BotState;
-/**
- * 跨事件指纹去重：群开启全量后，同一条 @ 消息可能同时收到
- * GROUP_MESSAGE_CREATE 与 GROUP_AT_MESSAGE_CREATE（事件 id 不同）。
- * 15 秒窗口内同 (群, 发送者, 内容) 只处理一次；首次出现返回 true。
- */
 export declare function markIncoming(state: BotState, group: string, sender: string, content: string, now?: number): boolean;
 /** 事件去重：首次出现返回 true；超容量时淘汰最旧的一半。 */
 export declare function markSeen(state: BotState, eventId: string): boolean;

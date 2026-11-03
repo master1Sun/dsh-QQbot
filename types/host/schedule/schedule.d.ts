@@ -264,6 +264,22 @@ export interface ScheduleSkipResult {
     skipped?: boolean;
     reason?: string;
 }
+/**
+ * 一次到点触发的结果事件（经 WebSocket 推给客户端，登记进文件工作台后台任务面板）。
+ * 字段保持极小：只有展示所需内容，不含完整 entry。
+ */
+export interface ScheduleSendEvent {
+    /** 任务摘要（正文 / 命令前 60 字），作为后台任务的 detail。 */
+    summary: string;
+    /** 归属机器人 AppID。 */
+    appId: string;
+    /** 是否成功投递（false = 执行抛错）。 */
+    ok: boolean;
+    /** 是否被发送门控拦下（未投递、不占配额，视为正常收尾）。 */
+    skipped: boolean;
+    /** 跳过原因或失败原因（ok 且未跳过时省略）。 */
+    reason?: string;
+}
 export interface SchedulerContext {
     store: ScheduleStore;
     /** 按 appId 取运行时机器人；缺省回落主机器人。 */
@@ -282,6 +298,11 @@ export interface SchedulerContext {
     executeTool?: (entry: ScheduleEntry, bot: BotRuntime) => Promise<ScheduleSkipResult | void>;
     /** 宿主会话总线（测试执行时等待投递结果）。 */
     bus?: ScheduleBus;
+    /**
+     * 定时发送事件回调：每次到点触发收尾（成功 / 失败 / 门控跳过）后调用一次，
+     * 宿主用 WebSocket 广播给客户端，登记进文件工作台的后台任务面板。
+     */
+    onSendEvent?: (info: ScheduleSendEvent) => void;
     logger: Pick<Console, "info" | "warn" | "error">;
 }
 export declare class Scheduler {

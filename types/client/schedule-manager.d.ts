@@ -26,4 +26,6 @@ export declare function ScheduleManager(props: {
     forceScope?: "current" | "all";
     /** 弹窗场景提供关闭回调；嵌入场景不传则不渲染关闭按钮。 */
     onClose?: () => void;
+    /** 平台提示回调（文件工作台 ctx.toast 等）；传入后用平台 toast 承载所有提示，不再渲染内嵌提示条。 */
+    toast?: (level: "ok" | "info" | "error", msg: string) => void;
 }): React.DetailedReactHTMLElement<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;

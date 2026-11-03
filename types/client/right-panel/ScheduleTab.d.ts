@@ -15,4 +15,7 @@
  * 不在此写死任何颜色。文案全部走 i18n 字段名，并由 useLocale() 订阅语言切换。
  */
 import * as React from "react";
-export declare function ScheduleTab(): React.ReactNode;
+export declare function ScheduleTab(props?: {
+    /** 平台提示回调（文件工作台 ctx.toast）；不传则 ScheduleManager 内部回退为内嵌提示条。 */
+    toast?: (level: "ok" | "info" | "error", msg: string) => void;
+}): React.ReactNode;

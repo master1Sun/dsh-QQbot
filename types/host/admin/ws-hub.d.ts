@@ -2,6 +2,8 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 /** 广播事件名：机器人列表或连接状态变化（客户端据此重新拉取 bots.list）。 */
 export declare const WS_EVENT_BOTS_CHANGED = "bots-changed";
+/** 广播事件名：定时任务到点触发完成（成功 / 失败 / 门控跳过），客户端据此登记后台任务面板条目。 */
+export declare const WS_EVENT_SCHED_SEND = "sched-send";
 export interface WsHub {
     /** 向所有在线客户端广播一个事件（JSON 文本帧）。 */
     broadcast(event: string, data?: unknown): void;
