@@ -22,9 +22,18 @@ export const QBOT_SETTINGS_NAV_MARKER = "data-qbot-settings-nav";
 const NAV_ICON_MASK =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5v2.5'/%3E%3Ccircle cx='12' cy='2.5' r='.9' fill='black' stroke='none'/%3E%3Crect x='5' y='6' width='14' height='12' rx='3.5'/%3E%3Ccircle cx='9.4' cy='11.5' r='.9' fill='black' stroke='none'/%3E%3Ccircle cx='14.6' cy='11.5' r='.9' fill='black' stroke='none'/%3E%3Cpath d='M9.5 14.8q2.5 1.8 5 0'/%3E%3C/svg%3E";
 
-/** 注入到 document.head 的样式：隐藏默认齿轮，按标记替换为机器人图标。 */
+/**
+ * 注入到 document.head 的样式：隐藏默认图标，按标记替换为机器人图标。
+ *
+ * 宿主对外部 section 只会画一个默认图标（齿轮 / 系统图标）。原选择器
+ * `[data-qbot-settings-nav] > svg:first-child` 要求该图标是按钮的「直接第一个子元素」，
+ * 但宿主不同版本把图标结构改成了「包一层 wrapper」或「不再位于 first-child」，
+ * 导致隐藏失效、出现「机器人 + 默认图标」双图标。这里改为隐藏标记按钮内的
+ * 任意 svg 后代，无论图标被怎么嵌套都一并隐藏；机器人是 ::before 伪元素（非 svg），
+ * 不受影响。
+ */
 export const QBOT_SETTINGS_NAV_CSS = `
-[${QBOT_SETTINGS_NAV_MARKER}] > svg:first-child {
+[${QBOT_SETTINGS_NAV_MARKER}] svg {
   display: none;
 }
 [${QBOT_SETTINGS_NAV_MARKER}]::before {

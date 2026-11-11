@@ -14,7 +14,6 @@
 import type { MessageId } from "@deepseek-ai/dsh-llm";
 import { randomUUID } from "node:crypto";
 import type { WebhookRule, WebhookSessionRequest } from "@deepseek-ai/dsh-webhook";
-import { WebhookRuleId } from "@deepseek-ai/dsh-webhook";
 import type { Agent as LiveAgent } from "@deepseek-ai/dsh-agent";
 import type { BotRuntime } from "../bots.js";
 import { runCommand, type CommandContext } from "../chat/commands.js";
@@ -55,6 +54,8 @@ export interface QqRuleContext {
   /** 主动消息每日配额（/广播 等命令消耗）。 */
   quota?: import("../infra/quota.js").QuotaTracker;
   logger: Pick<Console, "info" | "warn" | "error">;
+  /** webhook 规则 id 构造器（来自 @deepseek-ai/dsh-webhook；运行时有值时由宿主注入）。 */
+  WebhookRuleId?: (name: string) => string;
 }
 
 /** 群消息 content 里的 @ 提及文本（v2 平台格式 <@openid>；兼容 <@!id> 变体）。 */
@@ -312,9 +313,13 @@ export function createQqRule({
   memory,
   quota,
   logger,
+  WebhookRuleId,
 }: QqRuleContext): WebhookRule<"qq"> {
+  // WebhookRuleId 来自可选 peer @deepseek-ai/dsh-webhook；缺失时退化为原样 id，
+  // 保证运行时不可用时规则仍可构造（插件整体已降级运行）。
+  const makeRuleId = WebhookRuleId ?? ((name: string) => name);
   return {
-    id: WebhookRuleId("dsh-qqbot:messages"),
+    id: makeRuleId("dsh-qqbot:messages"),
     kind: "qq",
     async run(delivery) {
       const bot = resolveBot((delivery.event as { botAppId?: string } | undefined)?.botAppId);

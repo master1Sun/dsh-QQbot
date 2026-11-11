@@ -70,6 +70,15 @@ interface WebhookRuntimeLike {
 }
 
 /**
+ * webhook 运行时 + 规则 id 构造器（来自可选 peer @deepseek-ai/dsh-webhook）。
+ * 二者解耦：即使只拿到运行时、拿不到 WebhookRuleId 导出，也尽量返回运行时。
+ */
+interface WebhookRuntimeBundle {
+  runtime: WebhookRuntimeLike;
+  WebhookRuleId?: (name: string) => string;
+}
+
+/**
  * 取 webhook 运行时：
  *  1. 宿主已启用 @deepseek-ai/dsh-webhook → 直接用；
  *  2. 否则尝试自行加载它（该包是可选 peer，未安装时只警告）；
@@ -78,24 +87,36 @@ interface WebhookRuntimeLike {
 async function resolveWebhookRuntime(
   ctx: Context,
   logger: Pick<Console, "info" | "warn" | "error">,
-): Promise<WebhookRuntimeLike | null> {
+): Promise<WebhookRuntimeBundle | null> {
   const host = ctx as unknown as {
     get?(name: string, strict?: boolean): unknown;
     plugin?(entry: unknown): unknown;
   };
+  // 单独取 WebhookRuleId 导出（构造规则 id 用）；失败时只返回 undefined，不影响运行时。
+  const loadRuleId = async (): Promise<((name: string) => string) | undefined> => {
+    try {
+      const mod = await import("@deepseek-ai/dsh-webhook") as { WebhookRuleId?: (name: string) => string };
+      return mod.WebhookRuleId;
+    } catch {
+      return undefined;
+    }
+  };
   const existing = host.get?.("webhookRuntime", false);
-  if (existing) return existing as WebhookRuntimeLike;
+  if (existing) {
+    return { runtime: existing as WebhookRuntimeLike, WebhookRuleId: await loadRuleId() };
+  }
   try {
     const mod = await import("@deepseek-ai/dsh-webhook") as {
       WebhookRuntime?: unknown;
       default?: unknown;
+      WebhookRuleId?: (name: string) => string;
     };
     const Runtime = mod.WebhookRuntime ?? mod.default;
     if (typeof Runtime !== "function") return null;
     await host.plugin?.(Runtime);
     for (let i = 0; i < 20; i += 1) {
       const loaded = host.get?.("webhookRuntime", false);
-      if (loaded) return loaded as WebhookRuntimeLike;
+      if (loaded) return { runtime: loaded as WebhookRuntimeLike, WebhookRuleId: mod.WebhookRuleId };
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return null;
@@ -414,6 +435,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
 
   // webhook 运行时（先占位，机器人事件回调里使用；稍后赋值）。
   let runtime: WebhookRuntimeLike | null = null;
+  let webhookRuleId: ((name: string) => string) | undefined;
 
   // 多机器人运行时管理器：所有机器人 / 连接 / 状态的中枢。
   const bots = new BotRuntimeManager({
@@ -463,7 +485,9 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     },
   });
 
-  runtime = await resolveWebhookRuntime(ctx, logger);
+  const wh = await resolveWebhookRuntime(ctx, logger);
+  runtime = wh?.runtime ?? null;
+  webhookRuleId = wh?.WebhookRuleId;
 
   // 扫码登录管理器：凭据落盘 + 写入机器人库（多机器人卡片）+ 热同步运行时。
   // source 会作为「接入平台标识」显示在 QQ 扫码页上，必须用可读文案（勿用内部实例名）。
@@ -601,6 +625,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       memory,
       quota,
       logger,
+      WebhookRuleId: webhookRuleId,
     });
     disposeRule = await runtime.register(rule);
   } else {
