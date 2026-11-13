@@ -31,7 +31,14 @@ dsh plugin --profile web add <本目录或 git 地址>
 
 开发模式：`npm run build && npm run sync`（同步到 `~/.dsh/profiles/web/node_modules/@sunjuntao/dsh-qqbot`）。
 
-依赖 `@deepseek-ai/dsh-webhook` 提供的 `ctx.webhookRuntime`；不可用时插件降级运行（不创建会话，设置页与 `/status` 可查）。
+### 会话运行时（务必确认）
+
+QQ 消息要变成会话，依赖 `@deepseek-ai/dsh-webhook` 提供的 `ctx.webhookRuntime`。**dsh 0.2.2-rc.1 起宿主不再自带这个包**，升级后若未单独安装，会出现「WebSocket 显示已连接，但 QQ 消息完全没有反应」——消息在入口就被丢弃，不会写归档、不会建会话、不会回复。
+
+- 安装与宿主**同版本**的该包（例如宿主 `0.2.2-rc.1` → `@deepseek-ai/dsh-webhook@0.2.2-rc.1`），然后重启 `dsh web`。
+- 检查：`curl http://127.0.0.1:3080/qqbot/status` 里的 `runtimeReady` 应为 `true`。
+- 缺失时设置页会显示红色告警，插件也会在后台每 5 秒自动重试（最多 5 分钟）；装回包后无需重启即可自动恢复，点告警里的「重新检查」可立即刷新状态。
+- 该包是可选 peer，未安装时插件仍可运行：设置界面、定时消息、主动消息、HTTP 端点都可用，只有「QQ 消息 → 会话」这条链路暂停。
 
 ## 快速上手
 

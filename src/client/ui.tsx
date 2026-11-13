@@ -116,11 +116,29 @@ export function formatRemaining(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/**
+ * 宿主内置 Agent Preset 的显示名 key。内置 preset 不发布 name，目录接口只能回退到
+ * id（standard / ptc / minimal / cordis），直接展示就成了英文 id；这里按官方译名本地化。
+ * 用户自定义 preset 有自己的 name（label !== id），保持原样、不翻译。
+ */
+const BUILT_IN_PRESET_LABELS: Record<string, string> = {
+  standard: "session.presetStandard",
+  ptc: "session.presetPtc",
+  minimal: "session.presetMinimal",
+  cordis: "session.presetCordis",
+};
+
+/** preset 选项：首项「跟随 Host 默认」，内置 preset 用当前语言名，自定义保持宿主名称。 */
 export const presetOptions = (list: Array<{ id: string; label: string }>): Option[] => [
     { value: "", label: t("session.followHostDefault") },
     ...list
       .filter((p) => p && typeof p.id === "string" && p.id)
-      .map((p) => ({ value: p.id, label: typeof p.label === "string" && p.label ? p.label : p.id })),
+      .map((p) => {
+        const label = typeof p.label === "string" && p.label ? p.label : p.id;
+        const key = BUILT_IN_PRESET_LABELS[p.id];
+        // label === id 说明宿主没给名称（内置 preset 的常态），此时才用本地化译名。
+        return { value: p.id, label: key && label === p.id ? t(key) : label };
+      }),
   ];
 
 /** 弹窗编辑表单行：标签 + 控件 + 提示（提示写清「怎么填、影响什么」）。 */

@@ -75,7 +75,14 @@ export const CSS_TEXT = `
 
 /* ── 通知（dim-statusNotice / info 变体）──────────────────────────────── */
 .qbot-statusNotice { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 22%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 10px; color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 8%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 13px; line-height: 1.5; }
+/* 会话运行时缺失告警：主文案 + 修复指引竖排，常驻不淡出（与 8s 消失的 infoNotice 区分）。 */
+.qbot-runtimeNotice { flex-direction: column; gap: 6px; }
+.qbot-runtimeNotice strong { font-weight: 650; }
+.qbot-runtimeNotice span { min-width: 0; font-weight: 400; overflow-wrap: anywhere; }
+.qbot-runtimeNotice .qbot-btn { align-self: flex-start; }
+
 .qbot-infoNotice { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--qbot-business) 22%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 10px; color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 7%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 13px; line-height: 1.5; animation: qbotNoticeOut 8s ease-in forwards; }
+.qbot-noticeText { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 /* 提示条右侧倒计时胶囊：右对齐、等宽数字、随 8s 自动消失同步归零。 */
 .qbot-noticeCount { margin-left: auto; flex: none; align-self: flex-start; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; line-height: 1.4; padding: 1px 9px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--qbot-business) 14%, var(--dsw-alias-bg-layer-1, #fff)); border: 1px solid color-mix(in srgb, var(--qbot-business) 28%, var(--dsw-alias-border-l2, #dfe1e5)); }
 /* 页面级更新提示（qbot-page 是普通块布局，无 channelPage 的 flex gap，需自带下边距与面板隔开） */
@@ -179,6 +186,7 @@ export const CSS_TEXT = `
 .qbot-credentialForm { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
 .qbot-credentialActions { grid-column: 1 / -1; }
 .qbot-field { min-width: 0; display: grid; gap: 7px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: normal; font-weight: 560; }
+.qbot-fieldLabel { display: block; min-width: 0; overflow-wrap: anywhere; }
 .qbot-input { width: 100%; min-width: 0; height: 38px; padding: 0 11px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; outline: none; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; transition: border-color .16s ease, box-shadow .16s ease; }
 .qbot-input:focus { border-color: #4e5969; box-shadow: 0 0 0 3px rgb(78 89 105 / 10%); }
 .qbot-input::placeholder { color: var(--dsw-alias-label-tertiary, #8f959e); font-family: inherit; }
@@ -266,23 +274,87 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-schedPanelError { margin: 10px clamp(8px, 3%, 14px); padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 34%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 8%, transparent); color: var(--dsw-alias-state-error-primary, #d54941); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .qbot-schedAdd { margin-left: auto; padding: 4px 12px; font-size: 12px; }
 
-/* 消息归档双栏：左月份文件 / 右记录内容 */
+/* 消息归档双栏：左会话列表（个人/群聊）/ 右消息内容（卡片式） */
 .qbot-modalAlert { flex: none; margin: 10px 20px 0; padding: 8px 12px; border-radius: 8px; background: var(--dsw-alias-state-error-bg, #fee9e7); color: var(--dsw-alias-state-error-primary, #d54941); font-size: 12px; font-weight: 600; }
+.qbot-modalWide { width: min(880px, 100%); height: min(80vh, 760px); }
 .qbot-archSplit { flex: 1 1 auto; min-height: 140px; margin: 12px 20px 0; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; overflow: hidden; display: flex; }
-.qbot-archSide { width: 176px; flex: none; overflow-y: auto; padding: 8px; border-right: 1px solid var(--dsw-alias-border-l1, #eef0f3); display: flex; flex-direction: column; gap: 4px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
-.qbot-archSideEmpty { padding: 10px 6px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
-.qbot-archMonth { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
-.qbot-archMonth.is-active { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
-.qbot-archMonthBtn { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; text-align: left; }
-.qbot-archMonthBtn:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
-.qbot-archMonth.is-active .qbot-archMonthBtn:hover { background: transparent; }
-.qbot-archMonthName { font-family: var(--dsw-alias-font-mono, ui-monospace, monospace); font-weight: 600; }
-.qbot-archMonth.is-active .qbot-archMonthName { color: var(--qbot-blue); }
-.qbot-archMonthCount { color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; }
-.qbot-archMonthDel { flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 1; cursor: pointer; opacity: 0; }
-.qbot-archMonth:hover .qbot-archMonthDel, .qbot-archMonthDel:focus-visible { opacity: 1; }
-.qbot-archMonthDel:hover { background: var(--dsw-alias-state-error-bg, #fee9e7); color: var(--dsw-alias-state-error-primary, #d54941); }
-.qbot-archMain { flex: 1; min-width: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.qbot-archSplit.is-refreshing { opacity: 0.6; pointer-events: none; }
+/* 左栏：会话列表 */
+.qbot-archSide { width: 252px; flex: none; overflow-y: auto; padding: 8px; border-right: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-archSideEmpty { padding: 14px 8px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.6; }
+.qbot-archChats { display: flex; flex-direction: column; gap: 12px; }
+.qbot-convSection { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.qbot-convSectionTitle { padding: 4px 8px 2px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--dsw-alias-label-tertiary, #8f959e); text-transform: uppercase; }
+/* 左栏会话 → 月份 两级折叠树 */
+.qbot-convGroup { border-radius: 10px; }
+.qbot-convGroup.is-open { background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-convGroupHeadRow { display: flex; align-items: stretch; gap: 2px; }
+.qbot-convGroupHead { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; padding: 7px 6px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.qbot-convGroupHead:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-convGroupName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-convGroupCount { flex: none; min-width: 18px; padding: 0 6px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--dsw-alias-label-tertiary, #8f959e); color: #fff; font-size: 10px; font-weight: 700; }
+.qbot-chevron { flex: none; color: var(--dsw-alias-label-tertiary, #8f959e); transition: transform .15s ease; }
+.qbot-convGroup.is-open .qbot-chevron { transform: rotate(90deg); }
+.qbot-convMonths { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 6px; }
+.qbot-convMonth { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 6px 6px 28px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.qbot-convMonth:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-convMonth.is-active { background: var(--dsw-alias-bg-active, rgba(22, 119, 255, .14)); }
+.qbot-convMonthMeta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.qbot-convMonthName { font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-convMonth.is-active .qbot-convMonthName { color: var(--qbot-blue); }
+.qbot-convMonthSub { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-convMonthCount { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
+.qbot-convMonthEmpty { padding: 4px 6px 4px 28px; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-avatarXs { width: 18px; height: 18px; flex: none; }
+/* 右栏：消息内容（标题栏固定，仅消息列表滚动，滚动条不越过标题） */
+.qbot-archMain { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.qbot-archChatHead { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-archChatTitle { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-archChatTitle > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-archChatDel { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); cursor: pointer; }
+.qbot-archChatDel:hover { background: var(--dsw-alias-state-error-bg, #fee9e7); color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-archState { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px 14px; text-align: center; }
+.qbot-archMore { padding: 8px 14px 2px; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-msgList { flex: 1 1 auto; min-height: 0; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; overflow-x: hidden; }
+.qbot-msgCard { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.qbot-msgAvatar { flex: none; }
+.qbot-msgBody { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.qbot-msgHead { display: flex; align-items: baseline; gap: 8px; }
+.qbot-msgName { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-msgTime { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
+.qbot-msgQuote { margin: 2px 0; padding: 7px 10px; border-left: 3px solid var(--dsw-alias-border-l2, #d0d3d9); border-radius: 0 8px 8px 0; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-msgQuoteName { font-size: 11px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); margin-bottom: 2px; }
+.qbot-msgQuoteText { font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-msgText { font-size: 13.5px; line-height: 1.65; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
+.qbot-msgNote { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-msgCard.is-bot .qbot-msgName { color: var(--qbot-blue); }
+/* 右栏按月分组分隔线 */
+.qbot-monthGroup { display: flex; flex-direction: column; gap: 14px; }
+.qbot-monthDivider { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; padding: 0 2px; }
+.qbot-monthDividerLabel { font-size: 12px; font-weight: 700; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-monthDivider::before, .qbot-monthDivider::after { content: ""; height: 1px; background: var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-monthDivider::before { flex: none; width: 14px; }
+.qbot-monthDivider::after { flex: 1; }
+.qbot-monthDividerCount { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
+/* 右栏底部分页条（显示进度 + 加载更多 / 显示全部） */
+.qbot-archFoot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; padding: 8px 14px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-archFootInfo { flex: none; font-size: 12px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
+.qbot-archFootMore { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; color: var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-archFootLink { flex: none; padding: 2px 4px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-tertiary, #8f959e); cursor: pointer; white-space: nowrap; }
+.qbot-archFootLink:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-archFootLink:disabled { opacity: .55; cursor: default; }
+.qbot-archFootSep { flex: none; color: var(--dsw-alias-border-l1, #eef0f3); }
+/* Markdown：代码块换行，避免横向滚动条 */
+.qbot-md pre { white-space: pre-wrap; word-break: break-word; max-width: 100%; }
+/* 头像（无真实头像图，用图标占位） */
+.qbot-avatar { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; color: #fff; }
+.qbot-avatar svg { width: 22px; height: 22px; }
+.qbot-avatar-bot { background: linear-gradient(135deg, var(--qbot-blue, #1677ff), var(--qbot-business, #7c4dff)); }
+.qbot-avatar-person { background: #6b7785; }
+.qbot-avatar-group { background: #4a8a5b; }
+.qbot-avatarSm { width: 22px; height: 22px; }
+.qbot-avatarSm svg { width: 13px; height: 13px; }
+.qbot-modalStateInline { min-height: 60px; padding: 0; }
 /* 分组（群聊 / 单聊）：标题即折叠开关，可收起以减少滚动长度。
    同时作为「任务卡」的宽度容器：卡片实际可用宽度随面板拖拽变化，
    由下方 @container schedgroup 决定正文与操作列是并排还是上下堆叠。 */
@@ -576,15 +648,11 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-cardFooter { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
 .qbot-cardSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12px; font-weight: 400; line-height: normal; overflow-wrap: anywhere; white-space: normal; }
 
-/* ── 详情页：顶部导航 ─────────────────────────────────────────────────── */
-.qbot-detailNav { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 14px; margin: -2px 0 0; padding: 8px 2px 6px; background: var(--dsw-alias-bg-layer-1, #fff); }
-/* 吸顶导航条（详情页）：返回 + 机器人身份（图标/编号/启用状态/连接状态）常驻顶部 */
-.qbot-detailIdentity { min-width: 0; display: flex; align-items: center; gap: 9px; }
-.qbot-detailAvatar { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: linear-gradient(140deg, #3d8bff, var(--qbot-blue-dark)); }
-.qbot-detailAvatar svg { width: 17px; height: 17px; }
-.qbot-detailIdentity > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; line-height: normal; font-weight: 700; }
-/* 吸顶导航条右侧的连接状态胶囊：推到行尾，滚动时始终可见 */
-.qbot-detailNavState { margin-left: auto; }
+/* ── 详情页：面包屑（只标位置；身份与状态统一由 hero 承载） ────────────── */
+.qbot-detailNav { position: sticky; top: 0; z-index: 40; min-width: 0; display: flex; align-items: center; gap: 12px; margin: -2px 0 0; padding: 8px 2px 6px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-detailCrumb { min-width: 0; display: flex; align-items: center; gap: 10px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: normal; }
+.qbot-detailCrumbSep { color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-detailCrumb > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary, #1f2329); }
 
 /* ── 详情页：概览横幅 ─────────────────────────────────────────────────── */
 .qbot-hero { position: relative; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); }
@@ -599,10 +667,44 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-chip.is-active { border-color: color-mix(in srgb, var(--qbot-business) 32%, transparent); color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 10%, transparent); }
 .qbot-heroMeta { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; line-height: normal; }
 .qbot-metaDot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .6; }
-.qbot-heroStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 20px 20px; padding: 1px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-border-l1, #eef0f3); overflow: hidden; }
-.qbot-heroStat { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px 14px; background: var(--dsw-alias-bg-layer-1, #fff); }
-.qbot-heroStatLabel { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; font-weight: 600; letter-spacing: .06em; }
-.qbot-heroStatValue { display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 650; line-height: normal; }
+/* 状态压成一行 inline，不再用表格状三格；窄容器自动换行。 */
+.qbot-heroStatusLine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin: 0 20px 18px; padding: 9px 13px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-heroStatusItem { min-width: 0; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; line-height: normal; }
+.qbot-heroStatusItem + .qbot-heroStatusItem { padding-left: 18px; border-left: 1px solid var(--dsw-alias-border-l2, #e5e6eb); }
+.qbot-heroStatusLabel { color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-heroStatusItem strong { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* ── 详情页：分组网格（运行 / 配置 / 管理） ──────────────────────────────
+   auto-fit + minmax 按「网格自身可用宽度」决定列数：够 652px 就两列，否则一列，
+   不依赖容器查询（避免给祖先加 containment 影响 sticky 面包屑），也不依赖视口宽度。
+   分组标题与「已展开」的分区横跨整行——表单行是「说明 + 控件」双列结构，
+   半宽下会被挤成窄缝，展开即独占一行也避免把邻卡拉高。 */
+.qbot-detailGrid { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; align-items: stretch; }
+/* 详情页横向 Tab：运行 / 配置 / 管理 */
+.qbot-detailTabs { display: flex; align-items: stretch; gap: 4px; padding: 3px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-detailTab { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: 13px; font-weight: 600; line-height: normal; white-space: nowrap; cursor: pointer; transition: background .14s ease, color .14s ease, box-shadow .14s ease; }
+.qbot-detailTab:hover { color: var(--dsw-alias-label-primary, #1f2329); background: color-mix(in srgb, var(--dsw-alias-bg-layer-1, #fff) 55%, transparent); }
+.qbot-detailTab.is-active { color: var(--qbot-blue); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 10%); }
+.qbot-detailTabCount { flex: none; min-width: 18px; padding: 1px 6px; border-radius: 999px; color: var(--dsw-alias-label-tertiary, #8f959e); background: color-mix(in srgb, var(--dsw-alias-label-tertiary, #8f959e) 12%, transparent); font-size: 11px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.qbot-detailTab.is-active .qbot-detailTabCount { color: var(--qbot-blue); background: color-mix(in srgb, var(--qbot-blue) 12%, transparent); }
+.qbot-detailGrid > .qbot-section[open] { grid-column: 1 / -1; align-self: start; }
+
+/* 分区头：彩色图标 + 标题 + 一句说明 + 当前值摘要 chip */
+.qbot-sectionIcon { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: var(--qbot-business, #3370ff); background: color-mix(in srgb, var(--qbot-business, #3370ff) 10%, transparent); font-size: 14px; line-height: 1; }
+.qbot-sectionIcon[data-tone="success"] { color: var(--dsw-alias-state-success-primary, #20a162); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 12%, transparent); }
+.qbot-sectionIcon[data-tone="warning"] { color: var(--dsw-alias-state-warn-primary, #d97706); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 12%, transparent); }
+.qbot-sectionIcon[data-tone="danger"] { color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 12%, transparent); }
+.qbot-sectionSummary { align-self: flex-start; max-width: 100%; min-width: 0; margin-top: 5px; padding: 2px 8px; border-radius: 999px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); font-size: 11px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 快捷入口卡：整卡可点，视觉与折叠卡对齐 */
+.qbot-actionCard { width: 100%; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 14px 16px; font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.qbot-actionCard:hover:not(:disabled) { border-color: color-mix(in srgb, var(--qbot-business, #3370ff) 45%, var(--dsw-alias-border-l2, #e5e6eb)); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-actionCard:disabled { cursor: default; opacity: .6; }
+.qbot-actionCard .qbot-sectionTitle { flex: 1 1 auto; }
+.qbot-actionCardTitle { color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; line-height: normal; font-weight: 680; }
+.qbot-actionCardDesc { color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.5; }
+.qbot-actionCard .qbot-sectionChevron { margin-left: 0; font-size: 16px; }
+
 .qbot-heroFoot { display: flex; align-items: flex-start; gap: 10px; margin: 0 20px 18px; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 24%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 9px; color: var(--dsw-alias-label-secondary, #646a73); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 7%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 
 /* ── 详情页：分区卡片（第一层层次，details/summary 折叠）──────────────── */
@@ -617,11 +719,12 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-sectionAction + .qbot-sectionChevron { margin-left: 0; }
 .qbot-section > summary.qbot-sectionHead:hover .qbot-sectionTitle h3 { color: color-mix(in srgb, var(--dsw-alias-brand-primary, #4e5969) 72%, var(--dsw-alias-label-primary, #1f2329)); }
 .qbot-section[open] > summary.qbot-sectionHead .qbot-sectionChevron { transform: rotate(90deg); }
-.qbot-sectionHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 20px 13px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
-.qbot-sectionTitle { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qbot-sectionHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 92px; box-sizing: border-box; padding: 14px 16px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-sectionTitle { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }
 .qbot-sectionTitle h3 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; line-height: normal; font-weight: 680; }
 .qbot-sectionTitle p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.6; }
-.qbot-section.is-danger .qbot-sectionTitle h3 { color: var(--dsw-alias-state-error-primary, #d54941); }
+/* 危险区只靠边框 + 图标辨识，标题保持主色（红字读起来像报错，不是分区） */
+.qbot-section.is-danger .qbot-sectionTitle h3 { color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-sectionAction { flex: none; display: flex; align-items: center; gap: 8px; }
 .qbot-sectionBody { min-width: 0; padding: 14px 20px 18px; background: var(--dsw-alias-bg-layer-1, #fff); }
 
@@ -635,6 +738,15 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-settingControl { flex: none; display: flex; align-items: center; justify-content: flex-end; min-width: 190px; }
 .qbot-settingSelect { width: 100%; min-width: 0; max-width: 260px; height: 34px; padding: 0 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; outline: none; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease; }
 .qbot-settingSelect:focus { border-color: #4e5969; box-shadow: 0 0 0 3px rgb(78 89 105 / 10%); }
+/* 关于卡：版本 / 作者 / 许可证 / 开源地址 */
+.qbot-aboutList { display: flex; flex-direction: column; }
+.qbot-aboutRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; padding: 10px 2px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-aboutRow > span { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; }
+.qbot-aboutRow > code, .qbot-aboutRow > strong { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 600; line-height: normal; text-align: right; overflow-wrap: anywhere; }
+.qbot-aboutRow > code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.qbot-aboutLink { min-width: 0; color: var(--qbot-blue); font-size: 13px; font-weight: 600; line-height: normal; text-decoration: none; overflow-wrap: anywhere; }
+.qbot-aboutLink:hover { text-decoration: underline; }
+.qbot-aboutFoot { padding: 10px 2px 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1.7; text-align: center; }
 
 /* 文本输入设置行（textarea）：说明在上、输入框通栏在下，长文本不再被窄框截断 */
 .qbot-settingRow.is-wide { grid-template-columns: minmax(0, 1fr); }
@@ -643,6 +755,31 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-textarea { display: block; width: 100%; min-width: 0; min-height: 56px; max-height: 240px; padding: 8px 11px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; outline: none; resize: vertical; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; line-height: 1.6; transition: border-color .16s ease, box-shadow .16s ease; }
 .qbot-textarea:focus { border-color: #4e5969; box-shadow: 0 0 0 3px rgb(78 89 105 / 10%); }
 .qbot-textarea::placeholder { color: var(--dsw-alias-label-tertiary, #8f959e); font-family: inherit; }
+
+/* ── 按群覆盖弹窗：分组卡片 + 两列字段网格 ──────────────────────────────
+   旧版是「标签 / 控件 / 说明」单列竖排、控件固定 260px，右半边全空且纵向过长。
+   现在按语义分 4 组浅底卡片，组内两列（窄屏一列）通栏控件，标签与说明都收短。 */
+.qbot-ovModal { height: auto; max-height: min(86vh, 800px); }
+.qbot-ovModal .qbot-modalHead { padding-bottom: 10px; }
+.qbot-ovModal .qbot-modalList { border: 0; border-radius: 0; margin: 0; background: transparent; }
+.qbot-ovForm { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 2px 20px 16px; overflow-y: auto; overscroll-behavior: contain; }
+.qbot-ovGroup { min-width: 0; display: flex; flex-direction: column; gap: 11px; padding: 13px 15px 15px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 12px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-ovGroupHead { display: flex; align-items: center; gap: 7px; }
+/* 组名前的品牌色短条：比圆点更「栏目感」，也不抢占视线 */
+.qbot-ovGroupDot { flex: none; width: 14px; height: 3px; border-radius: 2px; background: var(--qbot-blue); }
+.qbot-ovGroupHead h3 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; line-height: 1.4; font-weight: 700; letter-spacing: .02em; }
+.qbot-ovGrid { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px 16px; align-items: start; }
+.qbot-ovField { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.qbot-ovField.is-wide { grid-column: 1 / -1; }
+.qbot-ovLabel { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; line-height: 1.5; font-weight: 600; }
+/* 控件通栏：不再受 .qbot-settingSelect 的 260px 上限，列多宽就多宽 */
+.qbot-ovField .qbot-settingSelect { width: 100%; max-width: none; height: 34px; }
+.qbot-ovField .qbot-input { height: 34px; }
+.qbot-ovHint { min-width: 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.qbot-ovForm .qbot-textarea { min-height: 52px; background: var(--dsw-alias-bg-layer-1, #fff); }
+/* 编辑已有群时 openid 只读：弱化文字但保持可选中复制 */
+.qbot-ovModal .qbot-input:read-only { color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-ovModal .qbot-modalFoot { border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
 
 /* ── 详情页：工作区卡片 ───────────────────────────────────────────────── */
 .qbot-workspaceCard { min-width: 0; display: flex; flex-direction: column; gap: 9px; padding: 13px 14px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
@@ -678,9 +815,10 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
   .qbot-emptyView { grid-template-columns: 1fr; }
   .qbot-emptyBrand { display: none; }
   .qbot-credentialForm, .qbot-grid, .qbot-switches { grid-template-columns: 1fr; }
-  .qbot-heroStats { grid-template-columns: 1fr; }
+  .qbot-detailGrid { grid-template-columns: minmax(0, 1fr); }
+  .qbot-heroStatusItem + .qbot-heroStatusItem { padding-left: 0; border-left: 0; }
   .qbot-heroMain { flex-wrap: wrap; }
-  .qbot-sectionHead { flex-direction: column; align-items: stretch; }
+  .qbot-sectionHead { flex-wrap: wrap; align-items: flex-start; }
   .qbot-settingRow, .qbot-workspaceCardHead { grid-template-columns: minmax(0, 1fr); }
   .qbot-settingControl { justify-content: flex-start; min-width: 0; }
   .qbot-settingSelect { max-width: none; }

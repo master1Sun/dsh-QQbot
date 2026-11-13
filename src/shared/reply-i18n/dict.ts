@@ -136,6 +136,9 @@ export const cn: Readonly<Record<string, string>> = Object.freeze({
   "perm.none": "尚未设置默认权限。",
   "perm.nothingToClear": "没有可清除的默认权限。",
   "perm.usageAll": "用法：/perm set <内容> | /perm view | /perm clear",
+
+  // ── reply ──
+  "reply.chunkTruncated": "…（内容过长，还有约 {0} 字未发送，请在 DSH 会话中查看完整回复）",
 });
 
 /** English */
@@ -269,4 +272,7 @@ export const en: Readonly<Record<string, string>> = Object.freeze({
   "perm.none": "No default permission set yet.",
   "perm.nothingToClear": "No default permission to clear.",
   "perm.usageAll": "Usage: /perm set <text> | /perm view | /perm clear",
+
+  // ── reply ──
+  "reply.chunkTruncated": "… (about {0} more characters not sent; open the DSH session to read the full reply)",
 });

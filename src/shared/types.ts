@@ -255,3 +255,19 @@ export function replyTargetOf(eventType: string, payload: QqMessagePayload): Rep
   const group = payload.group_openid ?? "";
   return group ? { scope: "group", openid: group } : null;
 }
+
+/**
+ * 宿主 LLM 服务的类型增强：旧版 cordis 把服务直接挂在 ctx 上（ctx.llm），
+ * 新版通过 ctx.get("llm") 取。这里补一个可选属性，避免 index.ts 里
+ * `host.llm` 被报「Property 'llm' does not exist on type 'Context'」。
+ */
+declare module "@deepseek-ai/cordis" {
+  interface Context {
+    llm?: unknown;
+    /**
+     * 按名取宿主服务（cordis 4 的 ctx.get）；新版用 get，旧版直接挂属性。
+     * 第二个参数为 false 时表示「取不到不抛错」，本插件均这样调用。
+     */
+    get?(name: string, strict?: boolean): unknown;
+  }
+}

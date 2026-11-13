@@ -146,7 +146,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
       `[dsh-qqbot][diag-quote] chat=${record.chatKey} mode=${config.quoteReply} ` +
       `quoteMention=${record.quoteMention} selfIdx=${record.selfIdx ? "✓" : "∅"} msgId=${record.msgId ? "✓" : "∅"} → quoteReply=${quoteReply}`,
     );
-    const chunks = chunkReply(text, config.replyChunkChars, limit);
+    const chunks = chunkReply(text, config.replyChunkChars, limit, config.replyLocale);
     if (chunks.length === 0) return;
     // 本条回复即将发出：停掉单聊「正在输入」状态（TTS 成功路径同样受益）。
     bot.typing.stop(record.chatKey);

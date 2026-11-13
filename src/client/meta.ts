@@ -7,7 +7,7 @@ import { fmt, t } from "./i18n/index.js";
 
 export const FIELD_LABELS: Record<string, string> = {
   workspacePath: t("session.workspace"),
-  agentPreset: "Agent Preset",
+  agentPreset: t("session.preset"),
   model: t("session.model"),
   valueThreshold: t("tune.groupValueThreshold"),
   atContextMessages: t("tune.atContext"),

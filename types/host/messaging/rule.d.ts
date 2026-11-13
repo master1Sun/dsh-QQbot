@@ -16,5 +16,7 @@ export interface QqRuleContext {
     /** 主动消息每日配额（/广播 等命令消耗）。 */
     quota?: import("../infra/quota.js").QuotaTracker;
     logger: Pick<Console, "info" | "warn" | "error">;
+    /** webhook 规则 id 构造器（来自 @deepseek-ai/dsh-webhook；运行时有值时由宿主注入）。 */
+    WebhookRuleId?: (name: string) => string;
 }
-export declare function createQqRule({ resolveBot, agents, schedules, memory, quota, logger, }: QqRuleContext): WebhookRule<"qq">;
+export declare function createQqRule({ resolveBot, agents, schedules, memory, quota, logger, WebhookRuleId, }: QqRuleContext): WebhookRule<"qq">;

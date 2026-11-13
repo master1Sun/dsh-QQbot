@@ -6,6 +6,7 @@ import type {
   GroupBufferEntry,
   PassiveReplyRecord,
 } from "../../shared/types.js";
+import { tr, type ReplyLocale } from "../../shared/reply-i18n.js";
 
 export function createBotState(): BotState {
   return {
@@ -115,16 +116,38 @@ export function addGroupMessage(
   state.groupBuffer.set(groupOpenid, list);
 }
 
-/** 取某个群的最近 count 条群消息（旧 → 新）。 */
+/**
+ * 取某个群的最近 count 条群消息（旧 → 新）。
+ *
+ * maxChars > 0 时对上下文总量做字符预算：按「新 → 旧」累加，超出预算就丢弃更早的
+ * 消息，单条过长则截取尾部（更接近当前话题）并标注省略。这样「条数越多越耗 token」
+ * 是有界的——有人刷一大段或贴长日志时不会把整个 prompt 撑爆。
+ */
 export function recentGroupMessages(
   state: BotState,
   groupOpenid: string,
   count: number,
+  maxChars = 0,
 ): GroupBufferEntry[] {
   if (count <= 0) return [];
   const list = state.groupBuffer.get(groupOpenid);
   if (!list || list.length === 0) return [];
-  return list.slice(-count);
+  const tail = list.slice(-count).filter((e) => typeof e.content === "string" && e.content.trim().length > 0);
+  if (maxChars <= 0) return tail;
+  const out: GroupBufferEntry[] = [];
+  let used = 0;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const entry = tail[i]!;
+    const remain = maxChars - used;
+    if (remain <= 0) break;
+    if (entry.content.length > remain) {
+      out.push({ ...entry, content: `…${entry.content.slice(-Math.max(1, remain - 1))}` });
+      break;
+    }
+    out.push(entry);
+    used += entry.content.length;
+  }
+  return out.reverse();
 }
 
 const RECORD_QUEUE_CAP = 32;
@@ -192,29 +215,98 @@ export function takeTurnText(state: BotState, sessionId: string, turn: number): 
 }
 
 /** 把回复文本切成不超过 maxChars 的分片（优先按空行/换行断开），最多 maxChunks 片。 */
-export function chunkReply(text: string, maxChars: number, maxChunks: number): string[] {
+/** 单条消息字符硬上限：与 replyChunkChars 的 clamp 上界一致，更长会被平台截断。 */
+const CHUNK_HARD_CAP = 4000;
+
+/** 文本末尾是否停在打开的代码块里；返回语言标记（无标记为空串），未打开返回 null。 */
+function openFenceLang(text: string): string | null {
+  let open: string | null = null;
+  for (const m of text.matchAll(/^```([^\n`]*)$/gm)) {
+    open = open === null ? (m[1] ?? "").trim() : null;
+  }
+  return open;
+}
+
+/**
+ * 在 budget 内挑切点，优先级：段落 → 换行 → 句末标点 → 空格词边界 → 硬切。
+ * 额外避开 URL 内部，避免把链接劈成两半。
+ */
+function findCut(rest: string, budget: number): number {
+  const window = rest.slice(0, budget);
+  const openUrl = /(?:https?:\/\/|www\.)\S*$/i.exec(window);
+  if (openUrl && openUrl.index >= budget * 0.3) return openUrl.index;
+  const para = window.lastIndexOf("\n\n");
+  if (para >= budget * 0.4) return para;
+  const nl = window.lastIndexOf("\n");
+  if (nl >= budget * 0.5) return nl;
+  let sentence = -1;
+  for (const m of window.matchAll(/[。！？!?；;]/g)) sentence = m.index! + m[0].length;
+  if (sentence >= budget * 0.6) return sentence;
+  const space = window.lastIndexOf(" ");
+  if (space >= budget * 0.75) return space + 1;
+  return budget;
+}
+
+/**
+ * 把长回复切成不超过 maxChars 的多片。
+ *
+ * 旧实现只有「段落 / 换行 / 硬切」三级，且会在超片数时把截断提示直接拼在最后一片
+ * 尾部（可能超出 maxChars 被平台再截一次）。新版：
+ *  - 四级边界 + URL 保护 + 代码块跨片自动补 fence，Markdown 不会被切坏；
+ *  - 任意片（含补齐的 fence 与截断提示）严格不超过 maxChars；
+ *  - 剩余内容给出「还有约 N 字未发送」的明确提示，并按回复语言国际化。
+ */
+export function chunkReply(
+  text: string,
+  maxChars: number,
+  maxChunks: number,
+  locale: ReplyLocale = "zh",
+): string[] {
   const clean = text.replace(/\r\n/g, "\n").trim();
   if (!clean) return [];
-  if (clean.length <= maxChars) return [clean];
+  const size = Math.max(1, Math.min(CHUNK_HARD_CAP, Math.floor(maxChars) || 1000));
+  const cap = Math.max(1, Math.floor(maxChunks) || 1);
+  if (clean.length <= size) return [clean];
+
   const chunks: string[] = [];
   let rest = clean;
-  while (rest.length > 0 && chunks.length < maxChunks) {
-    if (rest.length <= maxChars) {
-      chunks.push(rest);
+  let pendingFence: string | null = null;
+  while (rest.length > 0 && chunks.length < cap) {
+    const lead = pendingFence !== null ? `\`\`\`${pendingFence}\n` : "";
+    if (rest.length + lead.length <= size) {
+      chunks.push(lead + rest);
       rest = "";
       break;
     }
-    let cut = rest.lastIndexOf("\n\n", maxChars);
-    if (cut < maxChars * 0.3) cut = rest.lastIndexOf("\n", maxChars);
-    if (cut < maxChars * 0.3) cut = maxChars;
-    chunks.push(rest.slice(0, cut).trim());
-    rest = rest.slice(cut).trim();
+    // 预留片尾闭合 fence 的 4 个字符，保证任意片都不超过 size。
+    const budget = Math.max(1, size - lead.length - 4);
+    const cut = Math.max(1, findCut(rest, budget));
+    let head = rest.slice(0, cut).replace(/^\s+/, "").trimEnd();
+    rest = rest.slice(cut).replace(/^[\r\n]+/, "");
+    if (!head) {
+      head = rest.slice(0, budget).trimEnd();
+      rest = rest.slice(budget).replace(/^[\r\n]+/, "");
+    }
+    const stillOpen = openFenceLang(lead + head);
+    if (stillOpen !== null) {
+      head = `${head}\n\`\`\``;
+      pendingFence = stillOpen;
+    } else {
+      pendingFence = null;
+    }
+    chunks.push(lead + head);
   }
   if (rest.length > 0 && chunks.length > 0) {
+    const note = tr(locale, "reply.chunkTruncated", rest.length);
     const last = chunks[chunks.length - 1]!;
-    chunks[chunks.length - 1] = `${last}\n…（内容过长已截断，请在 DSH 会话中查看完整回复）`;
+    if (last.length + note.length + 1 <= size) {
+      chunks[chunks.length - 1] = `${last}\n${note}`;
+    } else {
+      const keep = Math.max(0, size - note.length - 1);
+      chunks[chunks.length - 1] = `${last.slice(0, keep).trimEnd()}\n${note}`;
+    }
   }
-  return chunks.filter((c) => c.length > 0);
+  return chunks.filter((c) => c.trim().length > 0);
 }
 
 /** 会话 id 的防御式读取（Session.id 为主，header.id 兜底）。 */

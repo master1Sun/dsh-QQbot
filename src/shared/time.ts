@@ -25,7 +25,7 @@ export function shanghaiMonth(date: Date = new Date()): string {
   return `${y}-${m}`;
 }
 
-/** 取上海时间的年月日（用于归档文件按天滚动），形如 2026-09-09。 */
+/** 取上海时间的年月日，形如 2026-09-09（归档已改为按会话+月份存文件，此函数保留给其它日期场景）。 */
 export function shanghaiDay(date: Date = new Date()): string {
   const sh = shanghaiWallClock(date);
   const d = String(sh.getUTCDate()).padStart(2, "0");

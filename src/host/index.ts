@@ -78,15 +78,21 @@ interface WebhookRuntimeBundle {
   WebhookRuleId?: (name: string) => string;
 }
 
+/** 已对某个 context 动态注册过 WebhookRuntime：重试时只等它就绪，避免重复创建同名 Service。 */
+const pluginAttempted = new WeakSet<object>();
+
 /**
  * 取 webhook 运行时：
  *  1. 宿主已启用 @deepseek-ai/dsh-webhook → 直接用；
  *  2. 否则尝试自行加载它（该包是可选 peer，未安装时只警告）；
  *  3. 都拿不到 → 返回 null，插件以「无会话」降级模式运行（设置界面与 HTTP 端点仍可用）。
+ *
+ * quiet=true 用于后台重试：包仍缺失时不重复刷日志，首次调用已给出完整修复指引。
  */
 async function resolveWebhookRuntime(
   ctx: Context,
   logger: Pick<Console, "info" | "warn" | "error">,
+  options: { quiet?: boolean } = {},
 ): Promise<WebhookRuntimeBundle | null> {
   const host = ctx as unknown as {
     get?(name: string, strict?: boolean): unknown;
@@ -113,15 +119,34 @@ async function resolveWebhookRuntime(
     };
     const Runtime = mod.WebhookRuntime ?? mod.default;
     if (typeof Runtime !== "function") return null;
-    await host.plugin?.(Runtime);
+    // 不 await fiber：若它的 inject 依赖晚到，await 会把整个 apply 卡死。
+    // 只动态注册一次，之后靠下面的轮询与后台重试等服务就绪。
+    if (!pluginAttempted.has(ctx) && typeof host.plugin === "function") {
+      pluginAttempted.add(ctx);
+      void Promise.resolve(host.plugin(Runtime)).catch((error) => {
+        if (!options.quiet) logger.warn("[dsh-qqbot] 动态注册 webhook 运行时失败:", error);
+      });
+    }
     for (let i = 0; i < 20; i += 1) {
       const loaded = host.get?.("webhookRuntime", false);
-      if (loaded) return { runtime: loaded as WebhookRuntimeLike, WebhookRuleId: mod.WebhookRuleId };
+      if (loaded) {
+        return {
+          runtime: loaded as WebhookRuntimeLike,
+          WebhookRuleId: mod.WebhookRuleId ?? await loadRuleId(),
+        };
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return null;
   } catch (error) {
-    logger.warn("[dsh-qqbot] 无法加载 @deepseek-ai/dsh-webhook，QQ 消息将不能创建会话:", error);
+    if (!options.quiet) {
+      logger.error(
+        "[dsh-qqbot] 无法加载 @deepseek-ai/dsh-webhook，QQ 消息将被丢弃（不会创建会话、不会回复）。"
+        + "请安装与宿主 dsh 同版本的 @deepseek-ai/dsh-webhook 并重启 dsh web；"
+        + "可用 GET /qqbot/status 的 runtimeReady 确认状态。",
+        error,
+      );
+    }
     return null;
   }
 }
@@ -433,9 +458,14 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   }, 60_000);
   outboxTimer.unref?.();
 
-  // webhook 运行时（先占位，机器人事件回调里使用；稍后赋值）。
+  // webhook 运行时（先占位，机器人事件回调里使用；启动或后台重试成功后赋值）。
   let runtime: WebhookRuntimeLike | null = null;
-  let webhookRuleId: ((name: string) => string) | undefined;
+  let disposeRule: (() => void | Promise<void>) | undefined;
+  /** 运行时缺失时的自愈定时器：包恢复或服务晚到后自动接管消息链路。 */
+  let runtimeRetryTimer: ReturnType<typeof setInterval> | null = null;
+  let runtimeRetryCount = 0;
+  /** 降级期间「事件已丢弃」告警限流（每 60s 一条）。 */
+  let runtimeDropWarnAt = 0;
 
   // 多机器人运行时管理器：所有机器人 / 连接 / 状态的中枢。
   const bots = new BotRuntimeManager({
@@ -447,7 +477,14 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     onBotsChanged: () => wsHub.broadcast(WS_EVENT_BOTS_CHANGED),
     onEvent: (bot, eventType, payload, deliveryId) => {
       if (!runtime) {
-        logger.warn("[dsh-qqbot] webhook 运行时不可用，事件已丢弃");
+        if (Date.now() - runtimeDropWarnAt > 60_000) {
+          runtimeDropWarnAt = Date.now();
+          logger.error(
+            "[dsh-qqbot] webhook 运行时不可用，收到的 QQ 消息已被丢弃（不会创建会话、不会回复）。"
+            + "请安装与宿主同版本的 @deepseek-ai/dsh-webhook 并重启 dsh web；"
+            + "详见 GET /qqbot/status 的 runtimeReady。"
+          );
+        }
         return;
       }
       try {
@@ -485,9 +522,84 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     },
   });
 
+  /**
+   * 把 webhook 运行时接入消息链路：注册规则后，onEvent 才会把 QQ 事件分发进会话。
+   * 冷启动与后台自愈共用，避免「恢复了但规则没注册」这种半可用状态。
+   */
+  const attachRuntime = async (bundle: WebhookRuntimeBundle): Promise<void> => {
+    if (runtime) return;
+    const activeRuntime = bundle.runtime;
+    const ruleId = bundle.WebhookRuleId;
+    const rule = createQqRule({
+      resolveBot: (appId?: string) => bots.get(appId) ?? bots.primary(),
+      agents: (ctx as unknown as { agents: QqAgentRegistry }).agents,
+      schedules,
+      memory,
+      quota,
+      logger,
+      WebhookRuleId: ruleId,
+    });
+    const dispose = await activeRuntime.register(rule);
+    // 规则注册成功才放行事件分发：否则会变成「运行时有了、消息却没人接」的半可用状态。
+    runtime = activeRuntime;
+    disposeRule = dispose;
+    if (runtimeRetryTimer) {
+      clearInterval(runtimeRetryTimer);
+      runtimeRetryTimer = null;
+    }
+    logger.info("[dsh-qqbot] webhook 运行时已就绪：QQ 消息可以创建会话并回复");
+  };
+
+  /**
+   * 运行时缺失时后台自愈：每 5s 静默重试，最多 5 分钟。
+   * 覆盖「宿主升级丢了 dsh-webhook」「宿主服务比本插件晚就绪」两类场景；
+   * 成功后自动注册规则并通知设置页刷新状态，无需重启 dsh web。
+   */
+  const startRuntimeRetry = (): void => {
+    if (runtimeRetryTimer) return;
+    runtimeRetryCount = 0;
+    runtimeRetryTimer = setInterval(() => {
+      if (runtimeRetryTimer && (runtime || runtimeRetryCount >= 60)) {
+        clearInterval(runtimeRetryTimer);
+        runtimeRetryTimer = null;
+        if (!runtime) {
+          logger.warn(
+            "[dsh-qqbot] webhook 运行时重试已停止（5 分钟仍未就绪）。"
+            + "请安装与宿主同版本的 @deepseek-ai/dsh-webhook 后重启 dsh web。"
+          );
+        }
+        return;
+      }
+      runtimeRetryCount += 1;
+      void resolveWebhookRuntime(ctx, logger, { quiet: true })
+        .then(async (bundle) => {
+          if (!bundle || runtime) return;
+          try {
+            await attachRuntime(bundle);
+            logger.info("[dsh-qqbot] webhook 运行时已恢复，QQ 消息恢复正常");
+            wsHub.broadcast(WS_EVENT_BOTS_CHANGED);
+          } catch (error) {
+            logger.error("[dsh-qqbot] webhook 运行时恢复后注册规则失败:", error);
+            runtime = null;
+            disposeRule = undefined;
+          }
+        })
+        .catch(() => undefined);
+    }, 5_000);
+    runtimeRetryTimer.unref?.();
+  };
+
   const wh = await resolveWebhookRuntime(ctx, logger);
-  runtime = wh?.runtime ?? null;
-  webhookRuleId = wh?.WebhookRuleId;
+  if (wh) {
+    await attachRuntime(wh);
+  } else {
+    logger.warn(
+      "[dsh-qqbot] 降级运行：webhook 运行时不可用，QQ 消息不会创建会话。"
+      + "请在宿主中启用/安装 @deepseek-ai/dsh-webhook（与 dsh 同版本）；后台会自动重试。"
+      + "设置界面与 /qqbot/status 仍可用。"
+    );
+    startRuntimeRetry();
+  }
 
   // 扫码登录管理器：凭据落盘 + 写入机器人库（多机器人卡片）+ 热同步运行时。
   // source 会作为「接入平台标识」显示在 QQ 扫码页上，必须用可读文案（勿用内部实例名）。
@@ -615,25 +727,8 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     onScheduleSilent: (scheduleId, reason) => schedules.markSkipped(scheduleId, reason),
   });
 
-  // webhookRuntime 规则：QQ 事件 → 会话（命令系统带 schedule store 与长期记忆）。
-  let disposeRule: (() => void | Promise<void>) | undefined;
-  if (runtime) {
-    const rule = createQqRule({
-      resolveBot: (appId?: string) => bots.get(appId) ?? bots.primary(),
-      agents: (ctx as unknown as { agents: QqAgentRegistry }).agents,
-      schedules,
-      memory,
-      quota,
-      logger,
-      WebhookRuleId: webhookRuleId,
-    });
-    disposeRule = await runtime.register(rule);
-  } else {
-    logger.warn(
-      "[dsh-qqbot] 降级运行：webhook 运行时不可用，QQ 消息不会创建会话。"
-      + "请在 profile 中启用 @deepseek-ai/dsh-webhook（设置界面与 /status 仍可用）。",
-    );
-  }
+  // webhookRuntime 规则（QQ 事件 → 会话）已在 attachRuntime 中注册；
+  // 运行时缺失时由 startRuntimeRetry 后台自愈，恢复后会自动补注册。
 
   // AI 工具：让模型帮忙设置/取消/查看定时消息、发送主动消息与图片、管理长期记忆。
   const disposeTools = registerQqbotTools(ctx, { bots, store: schedules, scriptGen, memory, logger });
@@ -682,6 +777,10 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       disposeRoute();
     } catch { /* 已卸载 */ }
     clearInterval(outboxTimer);
+    if (runtimeRetryTimer) {
+      clearInterval(runtimeRetryTimer);
+      runtimeRetryTimer = null;
+    }
     disposePump();
     disposeTools();
     scheduler.stop();

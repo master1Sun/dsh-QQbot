@@ -617,7 +617,8 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
 
 /** 把工具注册到 host（全局）；返回卸载函数。 */
 export function registerQqbotTools(ctx: Context, deps: QqbotToolsContext): () => void {
-  const runtime = ctx.get("tools", false) as
+  // 旧版 cordis 没有 ctx.get，此时直接视为「服务不可用」，而不是抛 TypeError。
+  const runtime = (typeof ctx.get === "function" ? ctx.get("tools", false) : undefined) as
     | { register(definition: ToolDefinition): () => void }
     | undefined;
   if (!runtime || typeof runtime.register !== "function") {

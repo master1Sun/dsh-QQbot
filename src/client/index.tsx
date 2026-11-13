@@ -65,6 +65,13 @@ export const inject = ["slots", "connection", "locale"];
 
 declare const __PLUGIN_VERSION__: string;
 
+/** 插件元信息（「关于」卡用）；版本号来自构建期注入的 __PLUGIN_VERSION__。 */
+const PLUGIN_AUTHOR = "master1Sun";
+const PLUGIN_LICENSE = "MIT";
+const PLUGIN_REPO_URL = "https://github.com/master1Sun/dsh-QQbot";
+const PLUGIN_REPO_LABEL = "github.com/master1Sun/dsh-QQbot";
+const pluginVersion = typeof __PLUGIN_VERSION__ === "string" && __PLUGIN_VERSION__ ? __PLUGIN_VERSION__ : "0.0.0";
+
 const RPC_CHANNEL = "/qqbot-settings";
 
 /** 提示条自动消失时长（秒）：倒计时归零后清空并隐藏。 */
@@ -119,6 +126,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [form, setForm] = React.useState<Record<string, any>>({});
   const [page, setPage] = React.useState<"list" | "add" | "detail">("list");
   const [detailAppId, setDetailAppId] = React.useState("");
+  // 详情页横向 Tab：运行 / 配置 / 管理，默认「运行」
+  const [detailTab, setDetailTab] = React.useState<"runtime" | "config" | "manage">("runtime");
   // ── 弹窗开关：内容与状态由各弹窗组件自管理（挂载即拉取数据） ──────────────
   const [scheduleOpen, setScheduleOpen] = React.useState(false);
   const [archiveOpen, setArchiveOpen] = React.useState(false);
@@ -210,6 +219,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   // ── 运行统计复位：清零该机器人的持久计数（stats.reset 后刷新展示） ───────────
   const [resetting, setResetting] = React.useState(false);
   const resetStats = async () => {
+    // 复位是不可逆的清零操作，先走全局确认框（与「移除接入」一致）。
+    if (!(await confirmDlg({ message: t("stats.resetConfirm"), danger: true }))) return;
     setResetting(true);
     try {
       const res = await rpcCall("stats.reset", detailAppId ? { appId: detailAppId } : {});
@@ -368,7 +379,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     return groups;
   };
 
-  /** 数值候选 → 下拉选项；当前值不在候选中时并入。 */
+  /** 数值候选 → 下拉选项；当前值不在候选中时并入，避免下拉回退到第一项。 */
   const withCurrent = (candidates: number[], current: unknown, labelFn?: (n: number) => string): Option[] => {
     const list = candidates.map((n) => ({ value: String(n), label: labelFn ? labelFn(n) : String(n) }));
     const cur = Number(current);
@@ -416,8 +427,23 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     return OnlineBadge({ tone: "neutral", text: t("status.noBot") });
   })();
 
+  /**
+   * 会话运行时缺失告警：此时 QQ 消息在宿主入口就被丢弃，光看 WebSocket「已连接」会误判。
+   * 列表页与详情页都常驻展示，直到 runtimeReady 变回 true（后台自愈成功后刷新即消失）。
+   */
+  const runtimeAlert = bots && !bots.runtimeReady
+    ? h("div", { className: "qbot-statusNotice qbot-runtimeNotice", role: "alert" },
+        h("strong", null, t("runtime.disabled")),
+        h("span", null, t("runtime.disabledHint")),
+        h("button", {
+          className: "qbot-btn", type: "button",
+          onClick: () => void refresh(),
+        }, t("runtime.recheck")))
+    : null;
+
   // ═══ 列表视图（panel 内容） ════════════════════════════════════════════════
   const listView = h("div", { className: "qbot-channelPage" },
+    runtimeAlert,
     loadError ? h("div", { className: "qbot-statusNotice", role: "alert" }, loadError) : null,
     notice ? h("div", { className: "qbot-infoNotice", id: "qbot-notice", role: "status", key: `notice-${notice}` },
       h("span", { className: "qbot-noticeText", key: "text" }, notice), countdownBadge(noticeLeft)) : null,
@@ -434,7 +460,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           key: bot.appId,
           type: "button",
           className: "qbot-botCard",
-          onClick: () => { setDetailAppId(bot.appId); setNotice(""); setPage("detail"); },
+          onClick: () => { setDetailAppId(bot.appId); setDetailTab("runtime"); setNotice(""); setPage("detail"); },
         },
           h("div", { className: "qbot-botCardBody" },
             h("div", { className: "qbot-botTop" },
@@ -496,22 +522,62 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           : "neutral";
 
   /**
-   * 分区卡片：标题 + 一句说明 + 主体 + 右上角操作，构成页面的第一层层次。
+   * 分区卡片：图标 + 标题 + 一句说明 + 当前值摘要 + 右上角操作 + 折叠主体。
    * 默认收起（用原生 details/summary，展开状态由浏览器保持，
    * 表单保存触发的重渲染不会重置折叠状态）；opts.open=true 可单独默认展开。
+   * icon / tone / summary 让卡片在分组网格里「不展开也能读到现状」。
    */
-  const sectionCard = (title: string, desc: string, body: any, action?: any, opts?: { open?: boolean; danger?: boolean }) =>
+  const sectionCard = (
+    title: string, desc: string, body: any, action?: any,
+    opts?: { open?: boolean; danger?: boolean; icon?: string; tone?: string; summary?: string },
+  ) =>
     h("details", {
         className: opts?.danger ? "qbot-section is-danger" : "qbot-section",
         open: opts?.open ?? false,
       },
       h("summary", { className: "qbot-sectionHead" },
+        h("span", { className: "qbot-sectionIcon", "data-tone": opts?.tone ?? "info", "aria-hidden": "true" },
+          opts?.icon ?? "◆"),
         h("div", { className: "qbot-sectionTitle" },
           h("h3", null, title),
-          h("p", null, desc)),
+          h("p", null, desc),
+          opts?.summary ? h("span", { className: "qbot-sectionSummary" }, opts.summary) : null),
         action ? h("div", { className: "qbot-sectionAction", onClick: (e: any) => e.stopPropagation() }, action) : null,
         h("span", { className: "qbot-sectionChevron", "aria-hidden": "true" }, "▸")),
       h("div", { className: "qbot-sectionBody" }, body));
+
+  /** 详情页横向 Tab：运行 / 配置 / 管理，默认「运行」。标签是函数内常量，t() 不会冻结语言。 */
+  const detailTabs: Array<{ id: "runtime" | "config" | "manage"; label: string; count: number }> = [
+    { id: "runtime", label: t("detail.groupRuntime"), count: (status ? 1 : 0) + 2 },
+    { id: "config", label: t("detail.groupConfig"), count: 4 },
+    { id: "manage", label: t("detail.groupManage"), count: 2 },
+  ];
+  const detailTabBar = h("div", { className: "qbot-detailTabs", role: "tablist" },
+    detailTabs.map((tb) =>
+      h("button", {
+        key: tb.id, type: "button", role: "tab",
+        className: `qbot-detailTab${detailTab === tb.id ? " is-active" : ""}`,
+        "aria-selected": detailTab === tb.id ? "true" : "false",
+        onClick: () => setDetailTab(tb.id),
+      },
+        h("span", null, tb.label),
+        h("span", { className: "qbot-detailTabCount" }, String(tb.count)))));
+
+  /** 快捷入口卡：整卡可点，直接打开弹窗；不占折叠位，避免与设置卡混用交互。 */
+  const actionCard = (opts: {
+    icon: string; tone: string; title: string; desc: string; summary: string;
+    disabled?: boolean; onClick: () => void;
+  }) =>
+    h("button", {
+        type: "button", className: "qbot-section qbot-actionCard",
+        disabled: opts.disabled, onClick: opts.onClick,
+      },
+      h("span", { className: "qbot-sectionIcon", "data-tone": opts.tone, "aria-hidden": "true" }, opts.icon),
+      h("span", { className: "qbot-sectionTitle" },
+        h("span", { className: "qbot-actionCardTitle" }, opts.title),
+        h("span", { className: "qbot-actionCardDesc" }, opts.desc),
+        h("span", { className: "qbot-sectionSummary" }, opts.summary)),
+      h("span", { className: "qbot-sectionChevron", "aria-hidden": "true" }, "›"));
 
   /** 指标卡：用于运行统计，比裸表格更易扫读。 */
   const metricCard = (label: string, value: string, tone: Tone) =>
@@ -540,21 +606,42 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       })()
     : [];
 
+  /** 分组网格里各卡片的「当前值摘要」：不展开也能读到配置现状。 */
+  const counters = (detailBot?.counters ?? {}) as { received?: number; replies?: number; proactive?: number; errors?: number };
+  const statSummary = fmt(
+    "detail.summaryStats",
+    String(counters.received ?? 0),
+    String(counters.replies ?? 0),
+    String(counters.proactive ?? 0),
+    String(counters.errors ?? 0),
+  );
+  const curModel = String(form.model ?? "").trim();
+  const modelLabel = curModel
+    ? (catalogs.models.find((m) => m.id === curModel)?.label ?? curModel)
+    : t("session.followDefaultModel");
+  const workspaceLabel = String(form.workspacePath ?? "").trim()
+    ? t("detail.customWorkspace")
+    : t("session.defaultWorkspace");
+  const sessionSummary = fmt("detail.summarySession", modelLabel, workspaceLabel);
+  const enabledSwitches = SWITCH_DEFS.filter((it) => Boolean(form[it.key] ?? it.def)).length;
+  const policySummary = fmt("detail.summaryPolicy", String(enabledSwitches), String(SWITCH_DEFS.length));
+  const groupSummary = fmt("detail.summaryGroup", String(Object.keys(groupOverrides).length));
+  /** 连接卡摘要：启用状态 + WebSocket 状态，保证与其它卡一样有「不展开可读」的一行。 */
+  const connSummary = fmt(
+    "detail.summaryConn",
+    detailBot ? (detailBot.enabled ? t("status.enabled") : t("status.disabled")) : "—",
+    wsLabel,
+  );
+
   const detailView = h("div", { className: "qbot-channelPage" },
-    // ── 顶部导航：返回 + 机器人身份（QQ 图标 / 编号 / 启用状态 / 连接状态），整条 sticky 吸顶 ──
+    // ── 面包屑：只标位置。身份与状态统一由下方 hero 承载，避免三层重复 ──
     h("div", { className: "qbot-detailNav" },
       h("button", { className: "qbot-btn", type: "button", onClick: () => { setPage("list"); setNotice(""); } }, t("add.backToList")),
-      h("div", { className: "qbot-detailIdentity" },
-        h("span", { className: "qbot-detailAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
-        h("strong", null, detailBot ? detailBot.appIdMasked : t("detail.noneSelected")),
-        detailBot
-          ? h("span", { className: `qbot-chip${detailBot.primary ? " is-active" : ""}` },
-              detailBot.primary ? t("status.primaryBot") : (detailBot.enabled ? t("status.enabled") : t("status.disabled")))
-          : null,
-        h("span", { className: "qbot-onlineBadge qbot-detailNavState" },
-          h("span", { className: "qbot-stateDot", "data-tone": connState.tone }),
-          connState.text))),
+      h("div", { className: "qbot-detailCrumb" },
+        h("span", { className: "qbot-detailCrumbSep", "aria-hidden": "true" }, "/"),
+        h("span", null, detailBot ? detailBot.appIdMasked : t("detail.noneSelected")))),
     loadError ? h("div", { className: "qbot-statusNotice", role: "alert" }, loadError) : null,
+    runtimeAlert,
 
     // ── 概览：机器人身份 + 连接状态 ──
     h("section", { className: "qbot-hero" },
@@ -570,35 +657,28 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           h("div", { className: "qbot-heroMeta" },
             h("span", null, detailBot ? (detailBot.source === "qr" ? t("qr.tabScan") : t("qr.tabManual")) : "—"),
             h("span", { className: "qbot-metaDot", "aria-hidden": "true" }),
-            h("span", null, detailBot ? fmt("notice.savedAtPrefix", formatTime(detailBot.savedAt)) : "—"))),
-        h("div", { className: "qbot-heroActions" },
-          h("button", {
-            className: "qbot-btn", type: "button",
-            disabled: !detailBot,
-            onClick: () => setScheduleOpen(true),
-          }, t("sched.tabScheduled")),
-          h("button", {
-            className: "qbot-btn", type: "button",
-            disabled: !detailBot,
-            onClick: () => setArchiveOpen(true),
-          }, t("archive.tab")))),
-      h("div", { className: "qbot-heroStats" },
-        h("div", { className: "qbot-heroStat" },
-          h("span", { className: "qbot-heroStatLabel" }, t("detail.connectionStatus")),
-          h("div", { className: "qbot-heroStatValue" },
-            h("span", { className: "qbot-stateDot", "data-tone": connState.tone }),
-            h("strong", null, connState.text))),
-        h("div", { className: "qbot-heroStat" },
-          h("span", { className: "qbot-heroStatLabel" }, "WebSocket"),
-          h("div", { className: "qbot-heroStatValue" },
-            h("span", { className: "qbot-stateDot", "data-tone": wsTone }),
-            h("strong", null, wsLabel))),
-        h("div", { className: "qbot-heroStat" },
-          h("span", { className: "qbot-heroStatLabel" }, t("detail.lastConnected")),
-          h("div", { className: "qbot-heroStatValue" }, h("strong", null, lastChecked)))),
+            h("span", null, detailBot ? fmt("notice.savedAtPrefix", formatTime(detailBot.savedAt)) : "—")))),
+      // 状态压成一行：连接健康 / WebSocket / 最近连接，不再用表格状三格。
+      h("div", { className: "qbot-heroStatusLine" },
+        h("span", { className: "qbot-heroStatusItem" },
+          h("span", { className: "qbot-stateDot", "data-tone": connState.tone }),
+          h("span", { className: "qbot-heroStatusLabel" }, t("detail.connectionStatus")),
+          h("strong", null, connState.text)),
+        h("span", { className: "qbot-heroStatusItem" },
+          h("span", { className: "qbot-stateDot", "data-tone": wsTone }),
+          h("span", { className: "qbot-heroStatusLabel" }, "WebSocket"),
+          h("strong", null, wsLabel)),
+        h("span", { className: "qbot-heroStatusItem" },
+          h("span", { className: "qbot-heroStatusLabel" }, t("detail.lastConnected")),
+          h("strong", null, lastChecked))),
       cardSummary ? h("div", { className: "qbot-heroFoot", id: "qbot-notice", role: "status" },
         h("span", { className: "qbot-noticeText", key: "text" }, cardSummary),
         notice ? countdownBadge(noticeLeft) : null) : null),
+
+    // ── 横向 Tab：运行 / 配置 / 管理（默认「运行」），每个 Tab 只渲染自己的卡片 ──
+    detailTabBar,
+    h("div", { className: "qbot-detailGrid", key: detailTab },
+      ...(detailTab === "runtime" ? [
 
     // ── 运行统计（持久化：跨重启累计，stats/<appId>.json；可复位清零） ──
     status
@@ -616,8 +696,23 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
               disabled: resetting || refreshing,
               title: t("stats.resetHint"),
               onClick: () => void resetStats(),
-            }, resetting ? t("common.resetting") : t("common.reset"))))
+            }, resetting ? t("common.resetting") : t("common.reset"))),
+          { icon: "▤", tone: "info", summary: statSummary })
       : null,
+      // 定时消息 / 消息归档从 hero 收进「运行」组，整卡可点，入口唯一。
+      actionCard({
+        icon: "◷", tone: "success",
+        title: t("detail.actionSchedule"), desc: t("detail.actionScheduleHint"),
+        summary: t("detail.summarySchedule"),
+        disabled: !detailBot, onClick: () => setScheduleOpen(true),
+      }),
+      actionCard({
+        icon: "▣", tone: "warning",
+        title: t("detail.actionArchive"), desc: t("detail.actionArchiveHint"),
+        summary: t("detail.summaryArchive"),
+        disabled: !detailBot, onClick: () => setArchiveOpen(true),
+      }),
+      ] : detailTab === "config" ? [
 
     // ── 会话与模型 ──
     sectionCard(t("session.title"), t("session.hint"),
@@ -649,17 +744,17 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
               g.options.map((o) => h("option", { key: o.value, value: o.value }, o.label))))),
         }),
         SettingRow({
-          label: "Agent Preset",
+          label: t("session.preset"),
           desc: t("session.presetHint"),
           control: h("select", {
             className: "qbot-settingSelect",
             value: String(form.agentPreset ?? ""),
             onChange: (e: any) => void saveField("agentPreset", e.target.value),
-            "aria-label": "Agent Preset",
+            "aria-label": t("session.preset"),
           }, presetOptions(catalogs.agentPresets).map((o) =>
             h("option", { key: o.value, value: o.value }, o.label))),
         }),
-      )),
+      ), undefined, { icon: "◇", tone: "info", summary: sessionSummary }),
 
     // ── 消息与回复策略（开关） ──
     sectionCard(t("policy.title"), t("policy.hint"),
@@ -721,7 +816,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             },
             "aria-label": t("feature.bannedWords"),
           }),
-        }))),
+        })), undefined, { icon: "⇄", tone: "success", summary: policySummary }),
 
     // ── 回复调优（数值） ──
     sectionCard(t("tune.title"), t("tune.hint"),
@@ -734,7 +829,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5]),
         numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => fmt("override.charsOption", n)),
         numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? t("quota.unlimitedZero") : fmt("override.perDayOption", n)))),
-      undefined),
+      undefined, { icon: "≋", tone: "warning", summary: t("detail.summaryTune") }),
 
     // ── 按群配置（群级覆盖） ──
     sectionCard(t("group.title"), t("group.hint"),
@@ -755,7 +850,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         h("div", { className: "qbot-editActions" },
           h("span", { className: "qbot-hint" }, t("group.overrideHint")),
           h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setOverrideEdit("") }, t("group.add")))),
-      undefined),
+      undefined, { icon: "▦", tone: "info", summary: groupSummary }),
+      ] : [
 
     // ── 连接与移除 ──
     sectionCard(t("conn.title"), t("conn.hint"),
@@ -799,7 +895,30 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                   onClick: () => void removeBot(detailBot),
                 }, t("conn.remove")),
               })
-            : null), undefined, { danger: true }));
+            : null), undefined, { danger: true, icon: "!", tone: "danger", summary: connSummary }),
+
+    // ── 关于（版本 / 作者 / 许可证 / 开源地址） ──
+    sectionCard(t("detail.aboutTitle"), t("detail.aboutHint"),
+      h("div", { className: "qbot-aboutList" },
+        h("div", { className: "qbot-aboutRow" },
+          h("span", null, t("detail.aboutVersion")),
+          h("code", null, `v${pluginVersion}`)),
+        h("div", { className: "qbot-aboutRow" },
+          h("span", null, t("detail.aboutAuthor")),
+          h("strong", null, PLUGIN_AUTHOR)),
+        h("div", { className: "qbot-aboutRow" },
+          h("span", null, t("detail.aboutLicense")),
+          h("strong", null, PLUGIN_LICENSE)),
+        h("div", { className: "qbot-aboutRow" },
+          h("span", null, t("detail.aboutRepo")),
+          h("a", {
+            className: "qbot-aboutLink",
+            href: PLUGIN_REPO_URL,
+            target: "_blank", rel: "noreferrer noopener",
+          }, PLUGIN_REPO_LABEL)),
+        h("div", { className: "qbot-aboutFoot" },
+          h("span", null, fmt("detail.aboutCopyright", PLUGIN_AUTHOR)))),
+      undefined, { icon: "ⓘ", tone: "info", summary: `v${pluginVersion}` })])));
 
   const addBotView = h(AddBotView, {
     rpcCall,
@@ -808,6 +927,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     onBotReady: async (appId: string) => {
       await refresh();
       setDetailAppId(appId);
+      setDetailTab("runtime");
       setPage("detail");
     },
     onBack: () => setPage("list"),

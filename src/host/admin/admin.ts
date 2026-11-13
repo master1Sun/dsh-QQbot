@@ -15,7 +15,7 @@ import type { ModelOption } from "./catalogs.js";
 import type { QrLoginManager } from "../qq/qr-login.js";
 import type { ScheduleStore, ScheduleEntry, Scheduler } from "../schedule/schedule.js";
 import type { ScriptGenerator } from "../schedule/script-gen.js";
-import { listArchiveChats, listArchiveDays, readArchiveDay, readArchiveRecords, removeArchiveDay } from "../infra/archive.js";
+import { listArchiveChats, listArchiveDays, readArchiveChat, readArchiveDay, readArchiveRecords, removeArchiveChat, removeArchiveDay } from "../infra/archive.js";
 import { applyUpdate, checkUpdate } from "./updater.js";
 import { toShanghaiISO } from "../../shared/time.js";
 import type { BotRuntimeManager, BotRuntime } from "../bots.js";
@@ -480,7 +480,7 @@ export function createAdminService(ctx: AdminServiceContext) {
     return { ok: true, data: { appId, ...result } };
   };
 
-  /** 列举每个归档天的条数（顺带触发旧月文件 → 天文件迁移）。 */
+  /** 列举每个归档天的条数（顺带触发旧按天文件 → 「会话/月份」新结构迁移）。 */
   const archiveDays = async (payload: { appId?: unknown }) => {
     const appId = archiveAppId(payload);
     const days = await listArchiveDays(appId, logger);
@@ -495,12 +495,37 @@ export function createAdminService(ctx: AdminServiceContext) {
     return { ok: true, data: { appId, ...result } };
   };
 
+  /** 读取单个会话的归档记录（归档弹窗右栏；支持月份过滤、分页、倒序）。 */
+  const archiveChat = async (payload: { appId?: unknown; chat?: unknown; month?: unknown; limit?: unknown; offset?: unknown; order?: unknown }) => {
+    const appId = archiveAppId(payload);
+    const chat = typeof payload.chat === "string" ? payload.chat : "";
+    const month = typeof payload.month === "string" ? payload.month : "";
+    const limit = typeof payload.limit === "number" && Number.isSafeInteger(payload.limit) ? payload.limit : undefined;
+    const offset = typeof payload.offset === "number" && Number.isSafeInteger(payload.offset) ? payload.offset : undefined;
+    const order = payload.order === "asc" ? "asc" : "desc";
+    const result = await readArchiveChat({ bot: appId, chat, month, limit, offset, order });
+    return { ok: true, data: { appId, chat, month, ...result } };
+  };
+
+  /** 删除单个会话的归档记录（按月份文件，其余会话保留）。 */
+  const archiveRemoveChat = async (payload: { appId?: unknown; chat?: unknown; month?: unknown }) => {
+    const appId = archiveAppId(payload);
+    const chat = typeof payload.chat === "string" ? payload.chat : "";
+    const month = typeof payload.month === "string" && /^\d{4}-\d{2}$/.test(payload.month) ? payload.month : "";
+    const result = await removeArchiveChat({ bot: appId, chat, month });
+    logger.info(`[dsh-qqbot] 已删除归档会话 ${chat}${month ? ` 的 ${month}` : ""} 中机器人 ${appId} 的 ${result.removed} 条记录${result.filesDeleted.length ? `（整删 ${result.filesDeleted.length} 个月份文件）` : ""}`);
+    const list = await listArchiveChats({ bot: appId });
+    // 与 archive.chats 保持同一结构：data.chats 必须是数组（此前把整个 list 对象塞进 chats，
+    // 客户端 Array.isArray 判定失败，删除后列表与右栏状态无法刷新）。
+    return { ok: true, data: { appId, chat, month, ...result, ...list } };
+  };
+
   /** 删除某天归档中当前机器人的记录（其余机器人的保留）。 */
   const archiveRemoveDay = async (payload: { appId?: unknown; day?: unknown }) => {
     const appId = archiveAppId(payload);
     const day = typeof payload.day === "string" ? payload.day : "";
     const result = await removeArchiveDay({ bot: appId, day });
-    logger.info(`[dsh-qqbot] 已删除归档 ${day} 中机器人 ${appId} 的 ${result.removed} 条记录${result.fileDeleted ? "（天文件已整删）" : ""}`);
+    logger.info(`[dsh-qqbot] 已删除归档 ${day} 中机器人 ${appId} 的 ${result.removed} 条记录${result.fileDeleted ? "（月份文件已整删）" : ""}`);
     const days = await listArchiveDays(appId, logger);
     return { ok: true, data: { appId, day, ...result, days } };
   };
@@ -574,6 +599,8 @@ export function createAdminService(ctx: AdminServiceContext) {
         case "archive.list": result = await archiveList(payload); break;
         case "archive.days": result = await archiveDays(payload); break;
         case "archive.chats": result = await archiveChats(payload); break;
+        case "archive.chat": result = await archiveChat(payload); break;
+        case "archive.removeChat": result = await archiveRemoveChat(payload); break;
         case "archive.removeDay": result = await archiveRemoveDay(payload); break;
         case "stats.reset": {
           const bot = await bots.resetCounters(typeof payload.appId === "string" ? payload.appId : undefined);

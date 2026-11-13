@@ -168,10 +168,14 @@ export function createWsHub({ logger }: { logger: Pick<Console, "warn"> }): WsHu
     }
     try {
       client.socket.write(encodeFrame(opcode, payload), (error) => {
-        if (error) drop(client);
+        if (error) {
+          drop(client);
+          try { client.socket.destroy(); } catch { /* 已断开 */ }
+        }
       });
     } catch (error) {
       drop(client);
+      try { client.socket.destroy(); } catch { /* 已断开 */ }
       logger.warn("[dsh-qqbot] WebSocket 写入失败，已摘除该客户端:", error);
     }
   };
@@ -198,6 +202,8 @@ export function createWsHub({ logger }: { logger: Pick<Console, "warn"> }): WsHu
     let buffer: Buffer = Buffer.alloc(0);
     const fragments: Buffer[] = [];
     let fragmentOpcode = OPCODE_CONTINUATION;
+    /** 分片消息的累计字节数：单片有上限，但片数不限，必须再做总量校验。 */
+    let fragmentBytes = 0;
 
     const feed = (chunk: Buffer): void => {
       buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
@@ -220,10 +226,18 @@ export function createWsHub({ logger }: { logger: Pick<Console, "warn"> }): WsHu
         const { fin, opcode, payload } = result.frame;
 
         if (opcode === OPCODE_CONTINUATION) {
+          fragmentBytes += payload.length;
+          // 分片消息总长也要设上限，否则「无数个小分片」可以绕过单帧限制把内存撑爆。
+          if (fragmentBytes > MAX_PAYLOAD_BYTES) {
+            fragments.length = 0;
+            client.socket.destroy();
+            return;
+          }
           fragments.push(payload);
           if (!fin) continue;
           const full = Buffer.concat(fragments);
           fragments.length = 0;
+          fragmentBytes = 0;
           if (fragmentOpcode === OPCODE_TEXT) onText(full.toString("utf8"));
           fragmentOpcode = OPCODE_CONTINUATION;
           continue;
@@ -236,6 +250,7 @@ export function createWsHub({ logger }: { logger: Pick<Console, "warn"> }): WsHu
           if (!fin) {
             fragmentOpcode = OPCODE_TEXT;
             fragments.length = 0;
+            fragmentBytes = payload.length;
             fragments.push(payload);
             continue;
           }
