@@ -3,3 +3,5 @@ node_modules/
 .DS_Store
 /.workbuddy
 scripts/tmp/
+# CLI 产物仅由 prepublishOnly 生成并随 npm 包发布，不入库
+/lib/cli.js

@@ -15,7 +15,7 @@ export declare const SHANGHAI_OFFSET_MS: number;
 export declare function shanghaiWallClock(date?: Date): Date;
 /** 取上海时间的年月（用于归档文件按月滚动），形如 2026-09。 */
 export declare function shanghaiMonth(date?: Date): string;
-/** 取上海时间的年月日（用于归档文件按天滚动），形如 2026-09-09。 */
+/** 取上海时间的年月日，形如 2026-09-09（归档已改为按会话+月份存文件，此函数保留给其它日期场景）。 */
 export declare function shanghaiDay(date?: Date): string;
 /** 序列化为上海时间 ISO 字符串（含 +08:00 偏移，可被 new Date() 往返解析）。 */
 export declare function toShanghaiISO(date?: Date): string;

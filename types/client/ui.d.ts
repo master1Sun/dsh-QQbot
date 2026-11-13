@@ -49,6 +49,7 @@ export declare const val: (res: Reply) => any;
 export declare function formatTime(raw: unknown): string;
 /** 倒计时 mm:ss（对齐 dsh-im formatRemaining）。 */
 export declare function formatRemaining(ms: number): string;
+/** preset 选项：首项「跟随 Host 默认」，内置 preset 用当前语言名，自定义保持宿主名称。 */
 export declare const presetOptions: (list: Array<{
     id: string;
     label: string;
