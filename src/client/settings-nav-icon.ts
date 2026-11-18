@@ -4,8 +4,8 @@
  *
  * DSH 0.1.x 的 settings.section 契约只透传 id / order / label（label 为纯文本），
  * 外部插件都会渲染同一个通用齿轮图标。这里参照 dsh-prompt-library 的做法：
- * MutationObserver 按文本匹配导航按钮并打标记，注入 CSS 隐藏默认齿轮、
- * 用 mask 方式渲染机器人图标（跟随原生 hover/active 变色）。
+ * MutationObserver 按文本匹配导航按钮并打标记，用 CSS **就地改造原生 svg**
+ * 渲染机器人图标（跟随原生 hover/active 变色），不新增、不替换 DOM 节点。
  *
  * 注意：CSS mask-image 按 alpha 通道取样，QqBotGlyph 的「黑底白洞」镂空画法
  * 无法直接序列化为 mask，这里用描边风格重画一份等义图标（双眼/天线为实心，
@@ -23,27 +23,28 @@ const NAV_ICON_MASK =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5v2.5'/%3E%3Ccircle cx='12' cy='2.5' r='.9' fill='black' stroke='none'/%3E%3Crect x='5' y='6' width='14' height='12' rx='3.5'/%3E%3Ccircle cx='9.4' cy='11.5' r='.9' fill='black' stroke='none'/%3E%3Ccircle cx='14.6' cy='11.5' r='.9' fill='black' stroke='none'/%3E%3Cpath d='M9.5 14.8q2.5 1.8 5 0'/%3E%3C/svg%3E";
 
 /**
- * 注入到 document.head 的样式：隐藏默认图标，按标记替换为机器人图标。
+ * 注入到 document.head 的样式：把宿主默认 svg **就地改造成**机器人图标。
  *
- * 宿主对外部 section 只会画一个默认图标（齿轮 / 系统图标）。原选择器
- * `[data-qbot-settings-nav] > svg:first-child` 要求该图标是按钮的「直接第一个子元素」，
- * 但宿主不同版本把图标结构改成了「包一层 wrapper」或「不再位于 first-child」，
- * 导致隐藏失效、出现「机器人 + 默认图标」双图标。这里改为隐藏标记按钮内的
- * 任意 svg 后代，无论图标被怎么嵌套都一并隐藏；机器人是 ::before 伪元素（非 svg），
- * 不受影响。
+ * 关键：不新增、不替换 DOM 节点。早先用 ::before 伪元素画图标，伪元素没继承
+ * 原生图标与文字之间的间距，导致这一行的间距与「词库设置」等原生项对不齐。
+ * 这一版只隐藏原生 svg 内部的 path/circle 等子元素，再给 svg 本身套 mask +
+ * background-color: currentColor —— 图标的位置、尺寸、与文字的间距全部沿用
+ * 原生按钮布局，因此与其它原生设置项完全一致。
  */
 export const QBOT_SETTINGS_NAV_CSS = `
-[${QBOT_SETTINGS_NAV_MARKER}] svg {
-  display: none;
+[${QBOT_SETTINGS_NAV_MARKER}] svg > * {
+  display: none !important;
 }
-[${QBOT_SETTINGS_NAV_MARKER}]::before {
-  content: '';
-  flex: none;
-  width: 16px;
-  height: 16px;
-  background: currentColor;
-  -webkit-mask: url("${NAV_ICON_MASK}") center / contain no-repeat;
-  mask: url("${NAV_ICON_MASK}") center / contain no-repeat;
+[${QBOT_SETTINGS_NAV_MARKER}] svg {
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-image: url("${NAV_ICON_MASK}");
+  mask-image: url("${NAV_ICON_MASK}");
 }
 `;
 

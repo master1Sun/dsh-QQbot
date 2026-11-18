@@ -819,28 +819,17 @@ export function ScheduleManager(props: {
       t("sched.form.selfCheck"),
       t("sched.form.selfCheckHint"),
       h(
-        "div",
-        { className: "qbot-schedSeg", role: "group", "aria-label": t("sched.form.selfCheck") },
-        h(
-          "button",
-          {
-            type: "button",
-            className: `qbot-segBtn${e.verify !== true ? " is-on" : ""}`,
-            "aria-pressed": e.verify !== true,
-            onClick: () => setEditField("verify", false),
-          },
-          t("sched.form.checkOff"),
-        ),
-        h(
-          "button",
-          {
-            type: "button",
-            className: `qbot-segBtn${e.verify === true ? " is-on" : ""}`,
-            "aria-pressed": e.verify === true,
-            onClick: () => setEditField("verify", true),
-          },
-          t("sched.form.checkOn"),
-        ),
+        "label",
+        { className: "qbot-checkRow" },
+        h("input", {
+          type: "checkbox",
+          className: "qbot-checkbox",
+          checked: e.verify === true,
+          onChange: (ev: any) => setEditField("verify", ev.target.checked),
+          "aria-label": t("sched.form.selfCheck"),
+        }),
+        h("span", { className: "qbot-checkText" },
+          e.verify === true ? t("sched.form.checkOn") : t("sched.form.checkOff")),
       ),
     ),
   ];
@@ -1266,7 +1255,7 @@ export function ScheduleManager(props: {
             ),
             h(
               "div",
-              { key: "foot", className: "qbot-modalFoot" },
+              { key: "foot", className: "qbot-modalFoot qbot-schedEditFoot" },
               h(
                 "span",
                 { className: "qbot-hint" },

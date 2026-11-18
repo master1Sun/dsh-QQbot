@@ -19,8 +19,8 @@ export const CSS_TEXT = `
   --qbot-blue: #1677ff;
   --qbot-blue-dark: #0958d9;
   --qbot-business: var(--dsw-alias-state-business-primary, #3370ff);
+  /* 铺满设置面板宽度：不再限 max-width，避免右侧大片空白（对齐词库设置页改法） */
   width: 100%;
-  max-width: 1080px;
   padding: 2px 0 30px;
   color: var(--dsw-alias-label-primary, #1f2329);
   box-sizing: border-box;
@@ -277,6 +277,9 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 /* 消息归档双栏：左会话列表（个人/群聊）/ 右消息内容（卡片式） */
 .qbot-modalAlert { flex: none; margin: 10px 20px 0; padding: 8px 12px; border-radius: 8px; background: var(--dsw-alias-state-error-bg, #fee9e7); color: var(--dsw-alias-state-error-primary, #d54941); font-size: 12px; font-weight: 600; }
 .qbot-modalWide { width: min(880px, 100%); height: min(80vh, 760px); }
+/* 定时编辑态底部动作条：与表单区隔一层，按钮靠右、提示靠左 */
+.qbot-schedEditFoot { border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: color-mix(in srgb, var(--dsw-alias-bg-module-platform, #f7f8fa) 55%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-schedEditFoot .qbot-viewActions { margin-left: auto; }
 .qbot-archSplit { flex: 1 1 auto; min-height: 140px; margin: 12px 20px 0; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; overflow: hidden; display: flex; }
 .qbot-archSplit.is-refreshing { opacity: 0.6; pointer-events: none; }
 /* 左栏：会话列表 */
@@ -371,8 +374,8 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
   border-radius: 8px;
   background: transparent;
   font: inherit;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 650;
   text-align: left;
   color: var(--dsw-alias-label-secondary, #646a73);
   cursor: pointer;
@@ -389,11 +392,11 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-schedGroupTitle[data-scope="group"] .qbot-schedCount { color: var(--qbot-blue); background: color-mix(in srgb, var(--qbot-business) 12%, transparent); }
 .qbot-schedGroup.is-collapsed .qbot-schedGroupTitle { opacity: .82; }
 /* 定时消息行：任务卡片式（类型徽标 + 内容 + 元信息 + 操作列） */
-.qbot-schedRow { min-width: 0; display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-schedRow { min-width: 0; position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 11px 13px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 4%); }
 .qbot-schedMain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .qbot-schedTop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .qbot-chipWarn { color: var(--dsw-alias-state-warn-primary, #d97706); }
-.qbot-schedContent { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.qbot-schedContent { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 550; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
 .qbot-schedMeta { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; }
 /* 元信息里的每一项都必须可收缩：flex item 默认 min-width:auto，遇到无空格长串
    （典型是 python 报错里的绝对路径）会把整行撑破、溢出卡片外。 */
@@ -439,9 +442,12 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 /* 成功提示：8 秒内保持可读，最后 0.8s 淡出后由组件卸载（见自动收起定时器） */
 @keyframes qbotNoticeOut { 0%, 90% { opacity: 1; } 100% { opacity: 0; } }
 .qbot-schedNotice.is-autoHide { animation: qbotNoticeOut 8s ease-in forwards; }
-/* 列表卡片：悬浮反馈 + 左侧色条强化层次 */
-.qbot-schedRow { position: relative; transition: border-color .15s ease, box-shadow .15s ease; }
-.qbot-schedRow:hover { border-color: var(--dsw-alias-border-l2, #e5e6eb); box-shadow: 0 2px 8px rgb(31 35 41 / 6%); }
+/* 列表卡片：左侧品牌色条强化层次 + 悬浮反馈 */
+.qbot-schedRow { transition: border-color .15s ease, box-shadow .15s ease; }
+.qbot-schedRow::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--qbot-business); }
+.qbot-schedRow:hover { border-color: color-mix(in srgb, var(--qbot-business) 32%, var(--dsw-alias-border-l2, #e5e6eb)); box-shadow: 0 3px 12px rgb(31 35 41 / 9%); }
+.qbot-schedRow.is-failed::before { background: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-schedRow.is-disabled::before { background: var(--dsw-alias-border-l2, #e5e6eb); }
 .qbot-schedEdit { padding: 4px 12px; font-size: 12px; }
 .qbot-schedRemove { padding: 4px 12px; font-size: 12px; }
 /* 禁用态：虚线边框 + 左侧内容降透明，让「不会再执行」一眼可辨 */
@@ -461,35 +467,48 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-chipInfo { border-color: color-mix(in srgb, var(--qbot-business) 32%, transparent); color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 10%, transparent); }
 .qbot-chipError { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 34%, transparent); color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 10%, transparent); }
 .qbot-schedContent.qbot-mono, .qbot-schedCmd .qbot-textarea { font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-/* ── 定时编辑表单：按步骤竖向排列（发送给谁 / 什么时候 / 做什么） ──
+/* ── 定时编辑表单：三步向导卡片（发送给谁 / 什么时候 / 做什么） ──
    宽度自适应面板：字段一律单列堆叠、控件宽度 100%、容器 min-width:0，
    窄面板不挤压文字、不产生横向滚动条；宽面板自动铺满，间距由 clamp 收敛。 */
-.qbot-schedForm { gap: 10px; counter-reset: qbot-schedStep; min-width: 0; }
-.qbot-schedSection { min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; padding: 14px clamp(12px, 3%, 16px); border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); }
-.qbot-schedSection + .qbot-schedSection { margin-top: 0; }
-.qbot-schedSectionHead { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px dashed var(--dsw-alias-border-l1, #eef0f3); }
-/* 步骤序号：由 CSS 计数器生成，与文案解耦，随语言切换保持 1/2/3 顺序 */
+.qbot-schedForm { gap: 14px; counter-reset: qbot-schedStep; min-width: 0; padding-bottom: 2px; }
+.qbot-schedSection {
+  min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2, #e5e6eb);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  box-shadow: 0 1px 3px rgb(31 35 41 / 5%);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+.qbot-schedSection:focus-within { border-color: color-mix(in srgb, var(--qbot-business) 42%, var(--dsw-alias-border-l2, #e5e6eb)); box-shadow: 0 2px 10px color-mix(in srgb, var(--qbot-business) 12%, transparent); }
+.qbot-schedSectionHead {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px clamp(12px, 3%, 16px);
+  border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3);
+  border-radius: 13px 13px 0 0;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--qbot-business) 9%, var(--dsw-alias-bg-layer-1, #fff)), var(--dsw-alias-bg-layer-1, #fff) 78%);
+}
+/* 步骤序号：实心品牌圆牌，由 CSS 计数器生成，与文案解耦，随语言切换保持 1/2/3 顺序 */
 .qbot-schedSectionHead::before {
   counter-increment: qbot-schedStep;
   content: counter(qbot-schedStep);
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
-  border: 1px solid color-mix(in srgb, var(--qbot-business) 28%, transparent);
-  background: color-mix(in srgb, var(--qbot-business) 12%, var(--dsw-alias-bg-layer-1, #fff));
-  color: var(--qbot-business);
-  font-size: 12px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--qbot-business), color-mix(in srgb, var(--qbot-business) 78%, var(--qbot-blue, #3370ff)));
+  color: #fff;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--qbot-business) 32%, transparent);
 }
-.qbot-schedSectionTitle { min-width: 0; font-size: 13.5px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
-.qbot-schedSectionDesc { flex: 1 1 100%; min-width: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
-.qbot-schedSectionBody { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.qbot-schedSectionTitle { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 680; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-schedSectionDesc { flex: 1 1 100%; min-width: 0; margin-left: 34px; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
+.qbot-schedSectionBody { min-width: 0; display: flex; flex-direction: column; gap: 15px; padding: 15px clamp(12px, 3%, 16px) 17px; }
 /* 字段行 / 编辑栅格：一律单列竖向堆叠（步骤式配置），子项允许收缩 */
 .qbot-schedFieldRow, .qbot-editGrid { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
 .qbot-schedFieldCol { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
@@ -498,6 +517,17 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-segBtn { flex: 1 1 0; min-width: 0; padding: 5px 6px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12.5px; line-height: 1.4; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: background .15s ease, color .15s ease; }
 .qbot-segBtn:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
 .qbot-segBtn.is-on { background: var(--dsw-alias-bg-layer-1, #fff); border-color: var(--dsw-alias-border-l2, #e5e6eb); color: var(--qbot-business); font-weight: 600; box-shadow: 0 1px 2px rgb(31 35 41 / 6%); }
+/* 勾选框行：原生 checkbox + 状态文字，整行可点 */
+.qbot-checkRow { min-width: 0; align-self: flex-start; display: inline-flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.qbot-checkRow:hover { border-color: color-mix(in srgb, var(--qbot-business) 45%, var(--dsw-alias-border-l2, #e5e6eb)); }
+.qbot-checkRow:has(.qbot-checkbox:checked) { border-color: color-mix(in srgb, var(--qbot-business) 42%, transparent); background: color-mix(in srgb, var(--qbot-business) 6%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-checkbox { appearance: none; flex: none; width: 17px; height: 17px; margin: 0; border: 1.5px solid var(--dsw-alias-border-l2, #c9cdd4); border-radius: 5px; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; position: relative; transition: background .15s ease, border-color .15s ease; }
+.qbot-checkbox:hover { border-color: var(--qbot-business); }
+.qbot-checkbox:checked { background: var(--qbot-business); border-color: var(--qbot-business); }
+.qbot-checkbox:checked::after { content: ""; position: absolute; left: 5px; top: 2px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.qbot-checkbox:focus-visible { outline: 2px solid color-mix(in srgb, var(--qbot-business) 45%, transparent); outline-offset: 2px; }
+.qbot-checkText { min-width: 0; font-size: 13px; line-height: 1.4; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-checkRow:has(.qbot-checkbox:checked) .qbot-checkText { color: var(--qbot-business); font-weight: 600; }
 /* 星期过滤：七等分网格，随面板宽度自适应，不再固定像素导致溢出 */
 .qbot-weekdayPicker { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .qbot-weekdayRow { min-width: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
@@ -687,7 +717,8 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-detailTab.is-active { color: var(--qbot-blue); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 10%); }
 .qbot-detailTabCount { flex: none; min-width: 18px; padding: 1px 6px; border-radius: 999px; color: var(--dsw-alias-label-tertiary, #8f959e); background: color-mix(in srgb, var(--dsw-alias-label-tertiary, #8f959e) 12%, transparent); font-size: 11px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 .qbot-detailTab.is-active .qbot-detailTabCount { color: var(--qbot-blue); background: color-mix(in srgb, var(--qbot-blue) 12%, transparent); }
-.qbot-detailGrid > .qbot-section[open] { grid-column: 1 / -1; align-self: start; }
+/* 所有分区卡（展开 / 折叠）始终占满整行，不再并排缩成半列。 */
+.qbot-detailGrid > .qbot-section { grid-column: 1 / -1; align-self: start; }
 
 /* 分区头：彩色图标 + 标题 + 一句说明 + 当前值摘要 chip */
 .qbot-sectionIcon { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: var(--qbot-business, #3370ff); background: color-mix(in srgb, var(--qbot-business, #3370ff) 10%, transparent); font-size: 14px; line-height: 1; }
