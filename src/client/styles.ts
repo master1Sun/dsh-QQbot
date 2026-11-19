@@ -27,6 +27,12 @@ export const CSS_TEXT = `
 }
 .qbot-page *, .qbot-page *::before, .qbot-page *::after { box-sizing: border-box; }
 
+/* ── 页面底部页脚：常规软件 About 风格（细分隔线 + 居中 + 低调链接） ── */
+.qbot-pageFoot { margin: 10px 2px 0; padding: 12px 8px 2px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); color: var(--dsw-alias-label-tertiary, #8f959e); text-align: center; }
+.qbot-pageFootBody { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 10px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; line-height: 1.5; }
+.qbot-pageFootDot { color: var(--dsw-alias-border-l2, #dfe1e5); user-select: none; }
+.qbot-pageFootCopy { margin-top: 5px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; line-height: 1.6; }
+
 /* ── 标题栏（dim-title）────────────────────────────────────────────────── */
 /* sticky 吸顶：长页面滚动时标题栏（含连接状态）常驻视口顶部；负顶 margin 抵消
    .qbot-page 的 2px 顶部 padding，使吸附时背景无缝贴合滚动容器顶缘。 */
@@ -93,22 +99,23 @@ export const CSS_TEXT = `
 .qbot-updateKeepOpen { color: var(--dsw-alias-state-error-primary, #d54941); font-size: 13px; font-weight: 650; line-height: 1.5; }
 
 /* ── 机器人卡片（dim-botCard）─────────────────────────────────────────── */
-.qbot-botList { min-width: 0; width: 100%; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.qbot-botCard { position: relative; min-width: 0; width: 100%; max-width: 100%; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease; }
-.qbot-botCard:hover { border-color: color-mix(in srgb, var(--qbot-blue) 25%, var(--dsw-alias-border-l2, #e5e6eb)); box-shadow: 0 5px 16px rgb(31 35 41 / 5%); }
+.qbot-botList { min-width: 0; width: 100%; max-width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+/* 奇数张时最后一张占满整行：1 张铺满、3 张 2+1、2 张并排，不留半行空白 */
+.qbot-botCard:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.qbot-botCard { position: relative; min-width: 0; width: 100%; max-width: 100%; min-height: 156px; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.qbot-botCard:hover { border-color: color-mix(in srgb, var(--qbot-blue) 25%, var(--dsw-alias-border-l2, #e5e6eb)); box-shadow: 0 6px 18px rgb(31 35 41 / 6%); transform: translateY(-2px); }
 .qbot-botCard:focus-visible { outline: none; border-color: color-mix(in srgb, var(--qbot-blue) 72%, var(--dsw-alias-border-l2, #dfe1e5)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--qbot-blue) 24%, transparent) inset, 0 3px 12px rgb(22 119 255 / 7%); }
-.qbot-botCardBody { padding: 12px; display: flex; align-items: center; gap: 12px; }
-.qbot-botTop { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.qbot-botIdentity { min-width: 0; flex: 1 1 0; display: flex; align-items: center; gap: 10px; }
-.qbot-botAvatar { flex: none; width: 38px; height: 38px; display: grid; place-items: center; overflow: hidden; border-radius: 11px; color: #fff; background: var(--qbot-blue); }
-.qbot-botAvatar svg { width: 27px; height: 27px; }
-.qbot-botName { min-width: 0; }
-.qbot-botName h3 { overflow: hidden; margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; font-weight: 650; line-height: normal; text-overflow: ellipsis; white-space: nowrap; }
-.qbot-botName p { overflow: hidden; margin: 4px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font: 12px ui-monospace, SFMono-Regular, monospace; line-height: normal; text-overflow: ellipsis; white-space: nowrap; }
-.qbot-botTools { flex: none; display: flex; align-items: center; gap: 8px; }
-.qbot-botHealthGroup { min-width: 0; max-width: 100%; flex: none; display: grid; justify-items: end; gap: 5px; }
-.qbot-lastChecked { display: inline-flex; align-items: baseline; gap: 4px; color: var(--dsw-alias-label-tertiary, #8f959e); font: inherit; font-size: 11px; font-weight: 400; line-height: normal; white-space: nowrap; }
-.qbot-botChevron { flex: none; width: 9px; height: 9px; border-right: 1.6px solid var(--dsw-alias-label-tertiary, #8f959e); border-bottom: 1.6px solid var(--dsw-alias-label-tertiary, #8f959e); transform: rotate(-45deg); }
+.qbot-botCardHead { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.qbot-botAvatar { flex: none; width: 44px; height: 44px; display: grid; place-items: center; overflow: hidden; border-radius: 12px; color: #fff; background: var(--qbot-blue); }
+.qbot-botAvatar svg { width: 30px; height: 30px; }
+.qbot-botCardTitle { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.qbot-botCardTitle strong { overflow: hidden; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; font-weight: 650; line-height: normal; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-botCardMeta { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.qbot-botCardStatus { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-botCardRole { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; white-space: nowrap; }
+.qbot-botCardFoot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--qbot-blue); font-size: 12px; font-weight: 600; }
+.qbot-botCardArrow { font-size: 16px; line-height: 1; transition: transform .16s ease; }
+.qbot-botCard:hover .qbot-botCardArrow { transform: translateX(3px); }
 
 /* ── 空状态（dim-emptyView）───────────────────────────────────────────── */
 .qbot-emptyView { min-height: 230px; display: grid; grid-template-columns: minmax(0, 1fr) 180px; align-items: center; gap: 30px; }
@@ -296,6 +303,7 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-convGroupHead:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
 .qbot-convGroupName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-convGroupCount { flex: none; min-width: 18px; padding: 0 6px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--dsw-alias-label-tertiary, #8f959e); color: #fff; font-size: 10px; font-weight: 700; }
+.qbot-convGroupMembers { flex: none; padding: 0 6px; height: 16px; display: inline-flex; align-items: center; border-radius: 999px; background: color-mix(in srgb, var(--qbot-blue, #2466e8) 12%, transparent); color: var(--qbot-blue, #2466e8); font-size: 10px; font-weight: 600; white-space: nowrap; }
 .qbot-chevron { flex: none; color: var(--dsw-alias-label-tertiary, #8f959e); transition: transform .15s ease; }
 .qbot-convGroup.is-open .qbot-chevron { transform: rotate(90deg); }
 .qbot-convMonths { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 6px; }
@@ -312,24 +320,111 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 /* 右栏：消息内容（标题栏固定，仅消息列表滚动，滚动条不越过标题） */
 .qbot-archMain { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .qbot-archChatHead { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-archChatTitleWrap { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .qbot-archChatTitle { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-archChatTitle > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-archGroupMeta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-left: 36px; font-size: 11px; font-weight: 400; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-archGroupMeta > span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 7px; border-radius: 999px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-archChatActions { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.qbot-archChatDel:disabled { opacity: 0.5; cursor: default; }
 .qbot-archChatDel { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); cursor: pointer; }
 .qbot-archChatDel:hover { background: var(--dsw-alias-state-error-bg, #fee9e7); color: var(--dsw-alias-state-error-primary, #d54941); }
+/* 右栏筛选栏（仿聊天记录搜索）：关键词 / 群成员（仅群聊） / 日期，客户端过滤已加载记录 */
+.qbot-archSearchBar { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-archSearchBox { flex: 1 1 170px; min-width: 0; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 9px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); transition: border-color .15s ease, background .15s ease; }
+.qbot-archSearchBox:focus-within { border-color: var(--qbot-business); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-archSearchIcon { flex: none; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-archSearchInput { flex: 1 1 auto; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font: inherit; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-archSearchInput::placeholder { color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-archSearchX { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 15px; line-height: 1; cursor: pointer; }
+.qbot-archSearchX:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); color: var(--dsw-alias-label-primary, #1f2329); }
+
+/* ── 群成员下拉（自定义弹层，替代原生 select）：只高亮选中项与悬停项 ── */
+.qbot-archMemberWrap { flex: none; position: relative; }
+.qbot-archMemberBtn { max-width: 168px; height: 32px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; transition: border-color .15s ease; }
+.qbot-archMemberBtn:hover { border-color: var(--dsw-alias-border-l3, #d8dadf); }
+.qbot-archMemberBtn.is-on { border-color: color-mix(in srgb, var(--qbot-business) 45%, transparent); color: var(--qbot-business); font-weight: 600; }
+.qbot-archMemberBtnText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-archMemberCaret { flex: none; opacity: 0.65; }
+.qbot-archMemberPanel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 200px; max-width: 280px; max-height: 248px; overflow-y: auto; overflow-x: hidden; padding: 6px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 8px 24px rgb(31 35 41 / 14%); }
+.qbot-archMemberItem { display: flex; width: 100%; align-items: center; border: 0; border-radius: 8px; background: transparent; padding: 7px 10px; font: inherit; font-size: 12.5px; line-height: 1.4; text-align: left; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 悬停高亮：淡灰 */
+.qbot-archMemberItem:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+/* 选中高亮：淡品牌底 + 品牌色字（不是大色块） */
+.qbot-archMemberItem.is-on { background: color-mix(in srgb, var(--qbot-business) 10%, transparent); color: var(--qbot-business); font-weight: 600; }
+.qbot-archMemberItem.is-on:hover { background: color-mix(in srgb, var(--qbot-business) 16%, transparent); }
+
+/* ── 日期范围选择器：触发按钮 + 弹出日历（有消息的日子打点标记） ── */
+.qbot-archDateWrap { flex: none; position: relative; }
+.qbot-archDateBtn { height: 32px; min-width: 136px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; transition: border-color .15s ease; }
+.qbot-archDateBtn:hover { border-color: var(--dsw-alias-border-l3, #d8dadf); }
+.qbot-archDateBtn.is-on { border-color: color-mix(in srgb, var(--qbot-business) 45%, transparent); color: var(--qbot-business); font-weight: 600; }
+.qbot-archDateBtnText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-archDatePanel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; width: 254px; padding: 10px 12px 8px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 8px 24px rgb(31 35 41 / 14%); }
+.qbot-archDateHead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.qbot-archDateTitle { flex: 1; min-width: 0; text-align: center; font-size: 13px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); white-space: nowrap; }
+.qbot-archDateNav { flex: none; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font-size: 14px; line-height: 1; cursor: pointer; }
+.qbot-archDateNav:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-archDateGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.qbot-archDateWd { text-align: center; padding: 2px 0 4px; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-archDateCell { position: relative; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; font: inherit; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; font-variant-numeric: tabular-nums; transition: background .12s ease; }
+.qbot-archDateCell:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-archDateCell.is-out { color: var(--dsw-alias-label-quaternary, #b8bcc2); cursor: default; pointer-events: none; }
+/* 打点：当天有消息 */
+.qbot-archDateCell::after { content: ""; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); width: 4px; height: 4px; border-radius: 50%; background: transparent; }
+.qbot-archDateCell.is-marked::after { background: color-mix(in srgb, var(--qbot-business) 72%, transparent); }
+/* 范围中间日 / 起止端点 */
+.qbot-archDateCell.is-inrange { background: color-mix(in srgb, var(--qbot-business) 12%, transparent); border-radius: 0; }
+.qbot-archDateCell.is-edge, .qbot-archDateCell.is-edge:hover { background: var(--qbot-business); color: #fff; font-weight: 650; }
+.qbot-archDateCell.is-edge.is-marked::after { background: rgb(255 255 255 / 85%); }
+.qbot-archDateFoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-archDateClear { flex: none; border: 0; background: transparent; padding: 2px 6px; border-radius: 6px; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12px; cursor: pointer; }
+.qbot-archDateClear:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-archDateHint { min-width: 0; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); text-align: right; }
+/* 一键清除：固定尺寸的 × 图标按钮，常驻占位（隐藏用 visibility），避免出现/消失引起布局抖动 */
+.qbot-archSearchClear { flex: none; width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--qbot-business) 38%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--qbot-business) 8%, transparent); color: var(--qbot-business); font: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
+.qbot-archSearchClear:hover { background: color-mix(in srgb, var(--qbot-business) 14%, transparent); }
+.qbot-archSearchClear:disabled { cursor: default; }
 .qbot-archState { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px 14px; text-align: center; }
 .qbot-archMore { padding: 8px 14px 2px; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
 .qbot-msgList { flex: 1 1 auto; min-height: 0; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; overflow-x: hidden; }
+/* 消息卡片：聊天式左右对话——用户消息靠左、机器人靠右（头像在外侧），内容收进气泡 */
 .qbot-msgCard { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.qbot-msgCard.is-bot { flex-direction: row-reverse; }
 .qbot-msgAvatar { flex: none; }
-.qbot-msgBody { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+/* 真实头像（消息事件学习的 avatar URL），与占位图标同尺寸。 */
+.qbot-avatarImg { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; display: block; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+/* 左栏会话头 / 月份节点的真实头像尺寸，与占位图标对齐。 */
+.qbot-avatarImg.qbot-convAvatarImg { width: 34px; height: 34px; }
+.qbot-avatarImg.qbot-convMonthAvatarImg { width: 18px; height: 18px; }
+/* 气泡：不占满全宽（max-width 86%），按内容收缩；用户灰底、机器人淡品牌底 */
+.qbot-msgBody { min-width: 0; flex: 0 1 auto; max-width: min(86%, 760px); display: flex; flex-direction: column; gap: 4px; padding: 9px 12px 10px; border-radius: 14px 14px 14px 4px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-msgCard.is-bot .qbot-msgBody { border-radius: 14px 14px 4px 14px; border-color: color-mix(in srgb, var(--qbot-blue) 16%, transparent); background: color-mix(in srgb, var(--qbot-blue) 8%, var(--dsw-alias-bg-layer-1, #fff)); }
 .qbot-msgHead { display: flex; align-items: baseline; gap: 8px; }
+.qbot-msgCard.is-bot .qbot-msgHead { justify-content: flex-end; }
 .qbot-msgName { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-msgTime { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
-.qbot-msgQuote { margin: 2px 0; padding: 7px 10px; border-left: 3px solid var(--dsw-alias-border-l2, #d0d3d9); border-radius: 0 8px 8px 0; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+/* 引用块：嵌在气泡内，改用浮起的白底 + 左侧竖线 */
+.qbot-msgQuote { margin: 2px 0; padding: 7px 10px; border-left: 3px solid var(--dsw-alias-border-l2, #d0d3d9); border-radius: 0 8px 8px 0; background: var(--dsw-alias-bg-layer-1, #fff); }
 .qbot-msgQuoteName { font-size: 11px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); margin-bottom: 2px; }
 .qbot-msgQuoteText { font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
 .qbot-msgText { font-size: 13.5px; line-height: 1.65; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
+.qbot-msgFace { display: inline-block; font-size: 11px; line-height: 1.5; padding: 1px 8px; margin: 0 2px; border-radius: 999px; background: var(--dsw-alias-fill-secondary, rgba(31,35,41,.06)); color: var(--dsw-alias-label-secondary, #646a73); vertical-align: baseline; }
 .qbot-msgNote { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+/* 归档媒体：图片缩略图 / 视频 / 文件条目 */
+.qbot-archMediaList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.qbot-archMedia { display: flex; flex-direction: column; gap: 4px; max-width: 100%; min-width: 0; }
+.qbot-archMediaBtn { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; max-width: 240px; min-width: 0; transition: border-color .15s ease, background .15s ease; }
+.qbot-archMediaBtn:hover { border-color: color-mix(in srgb, var(--qbot-blue) 40%, transparent); }
+.qbot-archMediaBtn.is-expanded { border-color: var(--qbot-blue); }
+.qbot-archMediaImg { display: block; width: 100%; max-width: 228px; height: auto; max-height: 320px; object-fit: contain; border-radius: 6px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-archMediaPlaceholder { display: flex; align-items: center; justify-content: center; width: 180px; height: 110px; font-size: 12px; color: var(--dsw-alias-label-tertiary, #8f959e); border-radius: 6px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); text-align: center; padding: 8px; }
+.qbot-archMediaName { font-size: 11px; color: var(--dsw-alias-label-secondary, #646a73); max-width: 228px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-archMediaSize { font-size: 10px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-archMediaIcon { font-size: 18px; line-height: 1; color: var(--qbot-blue); }
+.qbot-archMediaBtn.is-file, .qbot-archMediaBtn.is-video { flex-direction: row; align-items: center; gap: 8px; padding: 7px 10px; }
+.qbot-archMediaErr { font-size: 10px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-archMediaVideo { display: block; max-width: 100%; max-height: 360px; border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
 .qbot-msgCard.is-bot .qbot-msgName { color: var(--qbot-blue); }
 /* 右栏按月分组分隔线 */
 .qbot-monthGroup { display: flex; flex-direction: column; gap: 14px; }
@@ -340,10 +435,10 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-monthDivider::after { flex: 1; }
 .qbot-monthDividerCount { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
 /* 右栏底部分页条（显示进度 + 加载更多 / 显示全部） */
-.qbot-archFoot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; padding: 8px 14px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-archFoot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; padding: 4px 14px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
 .qbot-archFootInfo { flex: none; font-size: 12px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
 .qbot-archFootMore { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; color: var(--dsw-alias-border-l1, #eef0f3); }
-.qbot-archFootLink { flex: none; padding: 2px 4px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-tertiary, #8f959e); cursor: pointer; white-space: nowrap; }
+.qbot-archFootLink { flex: none; padding: 1px 4px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; line-height: 1.3; color: var(--dsw-alias-label-tertiary, #8f959e); cursor: pointer; white-space: nowrap; }
 .qbot-archFootLink:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary, #d54941); }
 .qbot-archFootLink:disabled { opacity: .55; cursor: default; }
 .qbot-archFootSep { flex: none; color: var(--dsw-alias-border-l1, #eef0f3); }
@@ -683,6 +778,11 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-detailCrumb { min-width: 0; display: flex; align-items: center; gap: 10px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: normal; }
 .qbot-detailCrumbSep { color: var(--dsw-alias-label-tertiary, #8f959e); }
 .qbot-detailCrumb > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary, #1f2329); }
+/* 平台能力操作结果：贴着面包屑下方吸顶，只有警告 / 操作成功才出现，5 秒自动消失。 */
+/* 层级必须高于 sticky 的标题栏(40)与返回栏(40)，否则 top:42px 处会被标题栏压住只露一条边。 */
+.qbot-detailToast { position: sticky; top: 68px; z-index: 41; min-width: 0; margin: 4px 0 0; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; cursor: pointer; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 6px 18px rgb(31 35 41 / 14%); }
+.qbot-detailToast.is-error { border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 35%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 8%, var(--dsw-alias-bg-layer-1, #fff)); color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-detailToast.is-success { border: 1px solid color-mix(in srgb, var(--qbot-business) 35%, transparent); background: color-mix(in srgb, var(--qbot-business) 8%, var(--dsw-alias-bg-layer-1, #fff)); color: var(--qbot-business); }
 
 /* ── 详情页：概览横幅 ─────────────────────────────────────────────────── */
 .qbot-hero { position: relative; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); }
@@ -775,7 +875,306 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-aboutRow > span { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; }
 .qbot-aboutRow > code, .qbot-aboutRow > strong { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 600; line-height: normal; text-align: right; overflow-wrap: anywhere; }
 .qbot-aboutRow > code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.qbot-aboutLink { min-width: 0; color: var(--qbot-blue); font-size: 13px; font-weight: 600; line-height: normal; text-decoration: none; overflow-wrap: anywhere; }
+
+/* ── 平台能力（设置页管理 Tab：分享链接 / 菜单 / 面板 / 卡片 / 审批 / 群管理） ──
+   布局已改为左侧分组导航（见下方 .qbot-ptLayout / .qbot-ptNav*），与频道管理同款。 */
+/* 选群入口卡：淡品牌色底 + 左侧步骤标签。 */
+.qbot-ptPickCard { min-width: 0; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; padding: 12px; border: 1px solid color-mix(in srgb, var(--qbot-business) 25%, transparent); border-radius: 11px; background: color-mix(in srgb, var(--qbot-business) 4%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-ptStepTag { align-self: flex-start; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--qbot-business) 12%, transparent); color: var(--qbot-business); font-size: 11px; font-weight: 600; }
+/* 子标签导航：横向可换行，选中态品牌色下划线。 */
+.qbot-ptSubNav { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
+.qbot-ptSubTab { min-width: 0; padding: 6px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.qbot-ptSubTab:hover { background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptSubTab.is-active { background: var(--dsw-alias-bg-layer-1, #fff); color: var(--qbot-business); font-weight: 600; box-shadow: 0 1px 4px rgb(31 35 41 / 8%); }
+.qbot-ptSubPane { min-width: 0; }
+/* 未选群空态引导。 */
+.qbot-ptEmpty { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 26px 14px; border: 1px dashed var(--dsw-alias-border-l2, #e5e6eb); border-radius: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12.5px; text-align: center; }
+.qbot-ptEmptyIcon { font-size: 18px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+/* 操作按钮行：与上方内容分隔，避免挤在一起。 */
+.qbot-ptOps { padding-top: 8px; border-top: 1px dashed var(--dsw-alias-border-l1, #eef0f3); }
+/* 能力卡片分区：每个能力一块，标题 + 说明 + 内容。 */
+.qbot-ptBlock { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptBlockHead { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding-bottom: 8px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ptBlockTitle { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptBlockDesc { font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptRow { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qbot-ptShareUrl { min-width: 0; flex: 1 1 220px; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptFieldLabel { flex: none; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); }
+/* 图文卡片·被动回复选择区。 */
+.qbot-ptReply { min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 11px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
+.qbot-ptReplySelect { width: 100%; }
+.qbot-ptTextarea { min-width: 0; width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, #1f2329); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.55; resize: vertical; }
+.qbot-ptTextarea:focus { outline: none; border-color: var(--qbot-business); }
+.qbot-ptList { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.qbot-ptPanelRow { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptPanelRow > .qbot-mono { font-size: 11.5px; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
+.qbot-ptPanelRemark { min-width: 0; flex: 1 1 120px; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptGrid { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 8px; }
+.qbot-ptField { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-ptFieldWide { grid-column: 1 / -1; }
+.qbot-ptFieldHint { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
+/* Combo 放进纵向 Field 时不能被 flex:1 1 240px 当高度撑高整行。 */
+.qbot-ptField > .qbot-ptCombo { flex: 0 0 auto; width: 100%; }
+.qbot-ptGroupPick { min-width: 0; flex: 1 1 240px; }
+/* ── 群 / openid 可搜索选择器（按钮 + 弹出搜索面板，候选项带来源徽章） ── */
+.qbot-ptCombo { position: relative; min-width: 0; flex: 1 1 240px; }
+.qbot-ptComboBtn { min-width: 0; width: 100%; height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-tertiary, #8f959e); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.qbot-ptComboBtn.is-on { color: var(--dsw-alias-label-primary, #1f2329); border-color: color-mix(in srgb, var(--qbot-business) 40%, var(--dsw-alias-border-l2, #e5e6eb)); }
+.qbot-ptComboBtn:hover { border-color: var(--qbot-business); }
+.qbot-ptComboBtnText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* fixed 定位挂到 body，避开 .qbot-section 的 overflow:hidden 裁切；坐标由 JS 计算（下方不够则翻到上方）。
+   z-index 高于弹窗遮罩（9999）、低于全局确认框（10010），保证平台能力弹窗内也能正常展开。 */
+.qbot-ptComboPanel { position: fixed; z-index: 10005; overflow: hidden; padding: 6px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 8px 24px rgb(31 35 41 / 12%); display: flex; flex-direction: column; gap: 5px; }
+.qbot-ptComboSearch { width: 100%; flex: none; }
+.qbot-ptComboList { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.qbot-ptComboItem { min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-primary, #1f2329); text-align: left; cursor: pointer; }
+.qbot-ptComboItem:hover { background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptComboItem.is-on { background: color-mix(in srgb, var(--qbot-business) 12%, transparent); }
+.qbot-ptComboItemLabel { min-width: 0; flex: 1 1 130px; font-size: 12px; overflow-wrap: anywhere; }
+.qbot-ptComboSource { flex: none; padding: 1px 6px; border-radius: 6px; font-size: 10.5px; line-height: 1.6; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptComboSource.is-config { color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 10%, transparent); }
+.qbot-ptComboItemHint { flex: 1 1 100%; font-size: 10.5px; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
+.qbot-ptComboEmpty { padding: 8px 9px; font-size: 12px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptComboManual { padding: 6px 9px; border: 1px dashed var(--dsw-alias-border-l2, #e5e6eb); border-radius: 7px; background: color-mix(in srgb, var(--qbot-business) 5%, transparent); color: var(--qbot-business); font-size: 11.5px; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.qbot-ptComboManual:hover { border-color: var(--qbot-business); }
+/* ── 平台能力弹窗：头部下方吸顶提示 + 自滚动主体 ── */
+.qbot-ptDialogToast { position: static; top: auto; z-index: auto; margin: 0 20px 2px; }
+.qbot-ptDialogBody { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; display: flex; }
+.qbot-ptModal { width: min(980px, 100%); height: min(84vh, 800px); }
+/* 群聊管理：左侧分组导航（群聊 / 通用两大组），与频道管理同款布局。 */
+.qbot-ptLayout { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
+.qbot-ptNav { flex: none; width: 168px; display: flex; flex-direction: column; gap: 3px; padding: 14px 10px; border-right: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); overflow-y: auto; overscroll-behavior: contain; }
+.qbot-ptNavGroup { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qbot-ptNavGroup + .qbot-ptNavGroup { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ptNavGroupTitle { flex: none; padding: 3px 10px 5px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; font-weight: 650; letter-spacing: 0.4px; }
+.qbot-ptNavItem { flex: none; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.qbot-ptNavItem:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-ptNavItem.is-active { border-color: color-mix(in srgb, var(--qbot-blue, #1677ff) 32%, transparent); background: var(--dsw-alias-bg-layer-1, #fff); color: var(--qbot-blue, #1677ff); font-weight: 650; }
+.qbot-ptNavIcon { flex: none; width: 18px; text-align: center; font-size: 14px; }
+.qbot-ptContent { flex: 1 1 auto; min-width: 0; min-height: 0; padding: 16px 20px 20px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.qbot-ptDialogFoot { border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+/* ── 权限状态横幅 ── */
+.qbot-ptPerm { min-width: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; border-radius: 10px; font-size: 12px; line-height: 1.55; }
+.qbot-ptPerm.is-checking { border: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-2, #f7f8fa); color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-ptPerm.is-admin { border: 1px solid color-mix(in srgb, var(--qbot-business) 28%, transparent); background: color-mix(in srgb, var(--qbot-business) 6%, transparent); color: var(--qbot-business); }
+.qbot-ptPerm.is-member, .qbot-ptPerm.is-error { border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 28%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 6%, transparent); color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-ptPermBadge { flex: none; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 12%, transparent); font-weight: 600; font-size: 11px; }
+.qbot-ptPermText { min-width: 0; flex: 1 1 200px; overflow-wrap: anywhere; }
+.qbot-ptPermRetry { flex: none; }
+.qbot-ptPermTip { min-width: 0; padding: 6px 10px; border-left: 3px solid var(--dsw-alias-state-error-primary, #d54941); background: var(--dsw-alias-bg-layer-2, #f7f8fa); color: var(--dsw-alias-state-error-primary, #d54941); font-size: 11.5px; }
+.qbot-ptGroupId { min-width: 0; flex: 1 1 200px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
+/* ── 群资料栅格 ── */
+.qbot-ptInfoGrid { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 8px; }
+/* 指令面板：列表元信息 / 编辑表单 */
+.qbot-ptPanelMeta { min-width: 0; flex: 1 1 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qbot-ptPanelForm { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--qbot-business) 25%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--qbot-business) 4%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-ptPanelForm .qbot-settingInput:disabled,
+.qbot-ptPanelForm .qbot-ptTextarea:disabled,
+.qbot-ptPanelForm .qbot-settingSelect:disabled,
+.qbot-ptPanelForm .qbot-checkbox:disabled { opacity: 1; cursor: default; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #f7f8fa); border-color: var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ptPanelHelp { min-width: 0; border: 1px dashed color-mix(in srgb, var(--qbot-business) 40%, transparent); border-radius: 9px; padding: 7px 10px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptPanelHelp > summary { cursor: pointer; font-size: 12px; color: var(--qbot-business); font-weight: 600; }
+.qbot-ptPanelHelpCode { margin: 9px 0 2px; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #f7f8fa); border-radius: 8px; }
+.qbot-ptItemCard { min-width: 0; display: flex; flex-direction: column; gap: 9px; padding: 10px 11px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptItemHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.qbot-ptItemHeadOps { min-width: 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.qbot-ptItemNo { font-size: 12px; font-weight: 650; color: var(--dsw-alias-label-secondary, #646a73); }
+/* 查看模式的「仅管理员可见」状态徽标：明确显示是/否，勾选态一眼可见。 */
+.qbot-ptAdminBadge { font-size: 11.5px; padding: 3px 9px; border-radius: 6px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #f7f8fa); border: 1px solid var(--dsw-alias-border-l1, #eef0f3); white-space: nowrap; }
+.qbot-ptAdminBadge.is-on { color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 10%, transparent); border-color: color-mix(in srgb, var(--qbot-business) 30%, transparent); }
+/* 查看模式的命令值纯文本回显 + 无效值提醒。 */
+.qbot-ptCmdReadonly { min-height: 32px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 7px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); font-size: 12px; overflow-wrap: anywhere; }
+.qbot-ptCmdWarn { font-size: 11px; color: var(--dsw-alias-state-error-primary, #d54941); }
+/* 元素字段两列固定栅格：类型较窄、名称较宽，描述/链接整行。 */
+.qbot-ptItemGrid { min-width: 0; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); gap: 9px 10px; }
+.qbot-ptItemGrid .qbot-ptFieldWide { grid-column: 1 / -1; }
+.qbot-ptItemGrid .qbot-ptField > .qbot-settingInput,
+.qbot-ptItemGrid .qbot-ptField > .qbot-settingSelect { width: 100%; box-sizing: border-box; }
+/* 「删除按钮」改为轻量危险按钮，不抢主操作视觉。 */
+.qbot-ptItemDel { min-height: 28px; padding: 0 9px; font-size: 11.5px; color: var(--dsw-alias-state-error-primary, #d54941); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 28%, var(--dsw-alias-border-l2, #dfe1e5)); background: transparent; }
+/* 表单底部操作栏：添加靠左、保存/取消靠右并分开。 */
+.qbot-ptPanelActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-top: 10px; margin-top: 2px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ptPanelActionsEnd { margin-left: auto; }
+.qbot-ptAddBtn { border-style: dashed; color: var(--qbot-business); }
+.qbot-ptSelf { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 9px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ptInfoCell { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
+.qbot-ptInfoLabel { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptInfoValue { min-width: 0; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; }
+.qbot-ptTags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+/* ── 成员行 / 搜索 ── */
+.qbot-ptSearch { min-width: 0; flex: 1 1 180px; }
+.qbot-ptMemberCheck { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.qbot-ptMemberInfo { flex: none; padding: 2px 8px; font-size: 12px; }
+/* ── AI 群规审核：违规类型 + 配置/记录双 tab ───────────────────────────── */
+.qbot-ptModCats { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.qbot-ptModCat { min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; }
+.qbot-ptModPane { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+/* 配置 Hero：状态总览卡，开启时用品牌色渐变强调。 */
+.qbot-ptModHero { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 15px 17px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 2px 10px rgb(31 35 41 / 4%); }
+.qbot-ptModHero.is-on { border-color: color-mix(in srgb, var(--qbot-business) 32%, transparent); background: linear-gradient(120deg, color-mix(in srgb, var(--qbot-business) 9%, var(--dsw-alias-bg-layer-1, #fff)), var(--dsw-alias-bg-layer-1, #fff) 72%); }
+.qbot-ptModHeroMain { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.qbot-ptModHeroTitle { min-width: 0; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.qbot-ptModHeroTitle > strong { font-size: 14px; font-weight: 700; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptModHeroIcon { flex: none; width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 9px; background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); color: var(--dsw-alias-label-secondary, #646a73); font-size: 15px; font-weight: 700; }
+.qbot-ptModHero.is-on .qbot-ptModHeroIcon { background: var(--qbot-business); color: #fff; }
+.qbot-ptModHeroDesc { min-width: 0; font-size: 11.5px; line-height: 1.55; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptModHeroSummary { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.qbot-ptModHeroSummary > span { display: inline-flex; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 550; color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 9%, transparent); }
+.qbot-ptModHeroActions { flex: none; display: flex; align-items: center; gap: 8px; }
+/* 分组头：左侧色条 + 主标题 + 副标题，形成清晰的两段层次。 */
+.qbot-ptModGroupHead { min-width: 0; display: flex; align-items: stretch; gap: 10px; margin-top: 2px; }
+.qbot-ptModGroupBar { flex: none; width: 3px; border-radius: 3px; background: var(--qbot-business); }
+.qbot-ptModGroupText { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.qbot-ptModGroupText strong { font-size: 13px; font-weight: 700; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptModGroupText span { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptModGroup { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* 步骤卡：浅底内嵌卡 + 方形序号徽标，弱化重复的大卡边框。 */
+.qbot-ptModStep { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 11px; background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #f7f8fa) 50%, transparent); }
+.qbot-ptModStepHead { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
+.qbot-ptModStepNo { flex: none; width: 20px; height: 20px; display: inline-grid; place-items: center; border-radius: 6px; background: var(--qbot-business); color: #fff; font-size: 11px; font-weight: 700; }
+.qbot-ptModStepText { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.qbot-ptModStepText strong { font-size: 12.5px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptModStepText span { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptModStatus { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptModStatusDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.qbot-ptModStatus.is-on { color: var(--dsw-alias-state-success-primary, #20a162); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 12%, transparent); }
+/* 规则自测：虚线内嵌卡，输入 + 测试按钮一行，判定结果就地展示（不弹 toast）。 */
+.qbot-ptModTest { min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border: 1px dashed var(--dsw-alias-border-l2, #dee0e3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptModTestTitle { font-size: 11.5px; font-weight: 650; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-ptModTestRow { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.qbot-ptModTestRow .qbot-settingInput { min-width: 0; flex: 1 1 auto; }
+.qbot-ptModTestRow .qbot-btn { flex: none; }
+.qbot-ptModTestResult { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 9px; border-radius: 8px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
+.qbot-ptModTestResult.is-none { opacity: 0.86; }
+.qbot-ptModTestReason { min-width: 0; font-size: 11.5px; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; }
+.qbot-ptModTestChip { flex: none; font-size: 10.5px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptModSaveBar { display: flex; justify-content: flex-end; margin-top: 2px; padding: 11px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 11px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
+/* 概览统计：固定一行四列，紧凑卡片；数字带语义色。 */
+.qbot-ptModStats { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.qbot-ptModStat { min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptModStat strong { font-size: 17px; line-height: 1.15; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptModStat span { font-size: 10.5px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptModStat.is-ok strong { color: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-ptModStat.is-esc strong { color: var(--qbot-business); }
+.qbot-ptModStat.is-fail strong { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-ptModLogHead { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.qbot-ptModLogHeadText { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qbot-ptModLogHeadText strong { font-size: 13px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptModLogHeadText span { font-size: 11.5px; color: var(--dsw-alias-label-secondary, #646a73); }
+/* 时间线：左侧圆点 + 连接线，右侧记录卡 */
+.qbot-ptModTimeline { min-width: 0; display: flex; flex-direction: column; gap: 0; margin-top: 2px; }
+.qbot-ptModRec { min-width: 0; position: relative; display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 6px; padding-bottom: 6px; }
+.qbot-ptModRec::before { content: ""; position: absolute; left: 5px; top: 14px; bottom: -1px; width: 1px; background: var(--dsw-alias-border-l2, #e5e6eb); }
+.qbot-ptModRec:last-child { padding-bottom: 0; }
+.qbot-ptModRec:last-child::before { display: none; }
+.qbot-ptModRecDot { position: relative; z-index: 1; width: 11px; height: 11px; margin-top: 4px; border: 2px solid var(--dsw-alias-bg-layer-1, #fff); border-radius: 50%; background: var(--dsw-alias-label-tertiary, #8f959e); box-shadow: 0 0 0 1px var(--dsw-alias-border-l2, #e5e6eb); }
+.qbot-ptModRec.is-light .qbot-ptModRecDot { background: #f59e0b; }
+.qbot-ptModRec.is-medium .qbot-ptModRecDot { background: var(--qbot-business); }
+.qbot-ptModRec.is-severe .qbot-ptModRecDot { background: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-ptModRecCard { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptModRec.is-failed .qbot-ptModRecCard { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 28%, var(--dsw-alias-border-l1, #eef0f3)); }
+.qbot-ptModRecHead { min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.qbot-ptModRecAvatar { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: linear-gradient(140deg, color-mix(in srgb, var(--qbot-business) 70%, #3d8bff), var(--qbot-business)); color: #fff; font-size: 10px; font-weight: 700; }
+.qbot-ptModRecWho { min-width: 0; flex: 1 1 80px; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-ptModRecTime { flex: none; font-size: 10.5px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
+.qbot-ptModLevel { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptModLevel.is-light { color: #b45309; background: color-mix(in srgb, #f59e0b 16%, transparent); }
+.qbot-ptModLevel.is-medium { color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 12%, transparent); }
+.qbot-ptModLevel.is-severe { color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); }
+.qbot-ptModRecQuote { min-width: 0; padding: 4px 8px; border-left: 2px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 0 6px 6px 0; background: var(--dsw-alias-bg-layer-2, #f7f8fa); font-size: 11.5px; line-height: 1.45; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; }
+.qbot-ptModRecReason { min-width: 0; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 11px; line-height: 1.45; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptModRecReasonTag { flex: none; font-weight: 600; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptModRecChips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 5px; }
+.qbot-ptModChip { display: inline-flex; align-items: center; padding: 1px 7px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 999px; font-size: 10.5px; font-weight: 550; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
+.qbot-ptModChip.is-strike { color: var(--qbot-business); border-color: color-mix(in srgb, var(--qbot-business) 24%, transparent); background: color-mix(in srgb, var(--qbot-business) 8%, transparent); }
+.qbot-ptModChip.is-meta { font-weight: 400; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-ptModChip.is-error { color: var(--dsw-alias-state-error-primary, #d54941); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 24%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent); }
+.qbot-ptModRecErr { min-width: 0; padding: 5px 8px; border-radius: 7px; font-size: 10.5px; line-height: 1.45; color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent); overflow-wrap: anywhere; }
+.qbot-ptModRecErr.is-warn { color: var(--dsw-alias-state-warn-primary, #d97706); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 9%, transparent); }
+.qbot-ptModLogEmpty { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 30px 16px; border: 1px dashed var(--dsw-alias-border-l2, #e5e6eb); border-radius: 12px; text-align: center; }
+.qbot-ptModLogEmptyIcon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 10%, transparent); font-size: 22px; }
+.qbot-ptModLogEmpty strong { font-size: 13px; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptModLogEmpty span { font-size: 11.5px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+/* AI 审核 · 禁言成员：批量操作条 + 成员列表（紧凑卡片）。 */
+.qbot-ptMutedOps { min-width: 0; display: flex; flex-direction: column; gap: 9px; padding: 11px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 11px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptMutedOpsTop { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.qbot-ptMutedOpsSpacer { flex: 1 1 auto; min-width: 8px; }
+/* 常驻定宽徽标：勾选数量变化时只换文字，不让整行控件左右跳动。 */
+.qbot-ptMutedCount { flex: none; width: 92px; padding: 3px 6px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.qbot-ptMutedCount.is-on { color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 10%, transparent); }
+.qbot-ptMutedDuration { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-ptMutedDuration .qbot-settingSelect { width: 118px; max-width: none; height: 30px; font-size: 12px; }
+.qbot-ptMutedOpsActions { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-top: 9px; border-top: 1px dashed var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-btn.qbot-ptMutedBtn { width: 100%; min-width: 0; min-height: 32px; padding: 0 6px; font-size: 12.5px; }
+.qbot-ptMutedCheck { min-width: 0; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; }
+.qbot-ptMutedList { min-width: 0; display: flex; flex-direction: column; gap: 5px; max-height: 340px; overflow-y: auto; padding: 2px; }
+.qbot-ptMutedRow { min-width: 0; display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.qbot-ptMutedRow:hover { background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptMutedRow.is-on { border-color: color-mix(in srgb, var(--qbot-business) 45%, transparent); background: color-mix(in srgb, var(--qbot-business) 6%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-ptMutedAvatar { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: linear-gradient(140deg, color-mix(in srgb, var(--qbot-business) 70%, #3d8bff), var(--qbot-business)); color: #fff; font-size: 11px; font-weight: 700; }
+.qbot-ptMutedWho { min-width: 0; flex: 1 1 90px; font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-ptMutedExpire { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary, #646a73); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.qbot-ptModLogEmpty .qbot-btn { margin-top: 4px; }
+.qbot-settingInput { height: 32px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); box-sizing: border-box; min-width: 0; }
+.qbot-settingInput:focus { outline: none; border-color: var(--qbot-business); }
+.qbot-ptReqRow { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptReqMain { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.qbot-ptReqMain > strong { font-size: 13px; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; }
+.qbot-ptReqMain > .qbot-hint { font-size: 11.5px; }
+.qbot-ptReqVerify { font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptReqRisk { font-size: 11.5px; color: var(--dsw-alias-state-error-primary, #d54941); overflow-wrap: anywhere; }
+.qbot-ptReqOps { flex: none; display: flex; gap: 6px; }
+/* 入群 AI 自动审批配置卡 */
+.qbot-ptJaResult { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.qbot-ptJaR { display: inline-flex; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.qbot-ptJaR.is-ok { color: var(--dsw-alias-state-success-primary, #20a162); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 12%, transparent); }
+.qbot-ptJaR.is-keep { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptJaR.is-fail { color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 10%, transparent); }
+.qbot-ptJaAutoState { min-width: 0; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 9px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.qbot-ptJaAutoState.is-on { color: var(--dsw-alias-state-success-primary, #20a162); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 10%, transparent); border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 24%, transparent); }
+.qbot-ptJaAutoState.is-off { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); border: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ptJaAutoDot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.qbot-ptJaEnableCheck { min-width: 0; display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; }
+.qbot-ptJaEnableCheck.is-on { border-color: color-mix(in srgb, var(--qbot-business) 45%, transparent); background: color-mix(in srgb, var(--qbot-business) 6%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-ptJaEnableText { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.qbot-ptJaEnableText strong { font-size: 12.5px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptJaEnableText span { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
+/* 空介绍处理：两张并列选项卡，选中态有边框/底色/勾选标记，形成层次。 */
+.qbot-ptJaEmptyOpts { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.qbot-btn.qbot-ptJaEmptyOpt { width: 100%; min-width: 0; height: auto; min-height: 62px; display: flex; align-items: flex-start; gap: 9px; padding: 10px; text-align: left; white-space: normal; border-radius: 10px; }
+.qbot-ptJaEmptyOpt:hover:not(:disabled) { border-color: color-mix(in srgb, var(--qbot-business) 38%, var(--dsw-alias-border-l2, #dfe1e5)); }
+.qbot-ptJaEmptyOpt.is-on { border-color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 8%, var(--dsw-alias-bg-layer-1, #fff)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--qbot-business) 12%, transparent); }
+.qbot-ptJaEmptyIcon { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; }
+.qbot-ptJaEmptyOpt.is-on .qbot-ptJaEmptyIcon { background: var(--qbot-business); color: #fff; }
+.qbot-ptJaEmptyText { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.qbot-ptJaEmptyText strong { font-size: 12px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptJaEmptyText span { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
+.qbot-ptJaEmptyCheck { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 50%; color: transparent; font-size: 10px; }
+.qbot-ptJaEmptyOpt.is-on .qbot-ptJaEmptyCheck { border-color: var(--qbot-business); background: var(--qbot-business); color: #fff; }
+/* 审批记录：统计条 + 卡片列表（申请人 / 结果 / 判定理由 / 申请理由）。 */
+.qbot-ptJaRecordList { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.qbot-ptJaRecord { min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-left: 3px solid var(--dsw-alias-label-tertiary, #8f959e); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptJaRecord.is-pass { border-left-color: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-ptJaRecord.is-keep { border-left-color: #d97706; }
+.qbot-ptJaRecord.is-decline, .qbot-ptJaRecord.is-error { border-left-color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-ptJaRecordHead { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qbot-ptJaRecordAvatar { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: color-mix(in srgb, var(--qbot-business) 14%, transparent); color: var(--qbot-business); font-size: 11px; font-weight: 700; }
+.qbot-ptJaRecordWho { min-width: 0; flex: 1 1 90px; font-size: 12.5px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-ptJaRecordAct { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptJaRecordAct.is-pass { color: var(--dsw-alias-state-success-primary, #20a162); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 12%, transparent); }
+.qbot-ptJaRecordAct.is-keep { color: #d97706; background: color-mix(in srgb, #d97706 12%, transparent); }
+.qbot-ptJaRecordAct.is-decline, .qbot-ptJaRecordAct.is-error { color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 10%, transparent); }
+.qbot-ptJaRecordTime { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); font-variant-numeric: tabular-nums; }
+.qbot-ptJaRecordRow { min-width: 0; display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; line-height: 1.55; }
+.qbot-ptJaRecordLabel { flex: none; min-width: 52px; color: var(--dsw-alias-label-tertiary, #8f959e); font-weight: 600; }
+.qbot-ptJaRecordValue, .qbot-ptJaRecordIntro { min-width: 0; flex: 1; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptJaRecordIntro { padding: 6px 9px; border-radius: 7px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-ptJaRecordErr { font-size: 11px; color: var(--dsw-alias-state-error-primary, #d54941); overflow-wrap: anywhere; }
+.qbot-ptMembers { min-width: 0; display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; padding: 2px; }
+.qbot-ptMemberRow { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.qbot-ptMemberRow:hover { background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.qbot-ptMemberName { min-width: 0; flex: 1; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; }
+.qbot-aboutLink { min-width: 0; color: var(--qbot-blue, #1677ff); font-size: 11.5px; font-weight: 500; line-height: 1.5; text-decoration: none; overflow-wrap: anywhere; }
 .qbot-aboutLink:hover { text-decoration: underline; }
 .qbot-aboutFoot { padding: 10px 2px 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1.7; text-align: center; }
 
@@ -834,7 +1233,8 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-idPickerItem { width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .qbot-idPickerItem:hover { background: var(--dsw-alias-bg-module-platform, #f2f3f5); }
 .qbot-idPickerItem.is-current { background: color-mix(in srgb, var(--qbot-blue, #1677ff) 10%, transparent); }
-.qbot-idPickerName { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; font-weight: 600; line-height: 1.4; }
+.qbot-idPickerHead { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.qbot-idPickerName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; font-weight: 600; line-height: 1.4; }
 .qbot-idPickerId { color: var(--dsw-alias-label-tertiary, #8f959e); font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
 .qbot-idPickerState { padding: 8px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; line-height: 1.5; text-align: center; }
 
@@ -910,6 +1310,9 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
   .qbot-schedDetailBody { padding: 12px 10px 16px; }
   .qbot-flowNode, .qbot-flowDecision { padding: 8px 10px; }
   .qbot-schedPresets { gap: 5px; }
+  .qbot-ptMutedOpsTop { flex-wrap: wrap; }
+  .qbot-ptMutedOpsSpacer { display: none; }
+  .qbot-ptJaEmptyOpts { grid-template-columns: minmax(0, 1fr); }
 }
 @container qbotpanel (max-width: 320px) {
   .qbot-schedSectionDesc { font-size: 11.5px; }
@@ -942,5 +1345,286 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 @container schedgroup (max-width: 560px) {
   .qbot-schedRow { flex-direction: column; align-items: stretch; gap: 8px; }
   .qbot-schedOps { width: 100%; margin-left: 0; justify-content: flex-start; align-self: auto; }
+}
+
+/* ── 配置清单（JSON 编辑器弹窗）────────────────────────────────────────── */
+.qbot-cmModal { position: relative; width: min(1080px, 100%); height: min(86vh, 820px); }
+.qbot-cmBody { flex: 1 1 auto; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 34%); gap: 14px; padding: 0 clamp(10px, 2.4%, 20px) 4px; }
+.qbot-cmEditorPane, .qbot-cmHelpPane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.qbot-cmPaneHead { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; }
+.qbot-cmPaneHead strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 700; }
+.qbot-cmStatus { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.qbot-cmStatus.is-ok { color: var(--dsw-alias-state-success-primary, #2ea121); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 12%, transparent); }
+.qbot-cmStatus.is-error { color: var(--dsw-alias-state-error-primary, #d54941); background: var(--dsw-alias-state-error-bg, #fee9e7); }
+.qbot-cmHelpCount { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11.5px; }
+
+/* 编辑器：行号槽 + 等宽文本域，二者行高严格一致（20px）。 */
+.qbot-cmCodeWrap { flex: 1 1 auto; min-height: 160px; display: flex; margin-top: 8px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 10px; overflow: hidden; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-cmGutter { flex: none; width: 46px; padding: 10px 8px 10px 0; overflow: hidden; text-align: right; background: var(--dsw-alias-bg-module-platform, #f7f8fa); border-right: 1px solid var(--dsw-alias-border-l1, #eef0f3); user-select: none; }
+.qbot-cmGutter div { height: 20px; line-height: 20px; font: 12px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-cmGutter div.is-err { color: var(--dsw-alias-state-error-primary, #d54941); font-weight: 700; }
+.qbot-cmCode { flex: 1 1 auto; min-width: 0; min-height: 0; resize: none; border: 0; outline: 0; padding: 10px 12px; background: transparent; color: var(--dsw-alias-label-primary, #1f2329); font: 12px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 2; white-space: pre; overflow: auto; }
+.qbot-cmCode:focus { outline: 0; }
+
+/* 校验结果列表：贴着编辑器下方，最多 4 行高度，超出滚动。 */
+.qbot-cmIssues { flex: none; max-height: 104px; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; padding-right: 2px; }
+.qbot-cmIssues.is-empty { max-height: none; color: var(--dsw-alias-state-success-primary, #2ea121); font-size: 12px; padding: 4px 2px; }
+.qbot-cmIssue { flex: none; display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; padding: 5px 9px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 7px; background: var(--dsw-alias-state-error-bg, #fee9e7); cursor: pointer; }
+.qbot-cmIssue:hover { border-color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-cmIssuePath { flex: none; max-width: 45%; color: var(--dsw-alias-state-error-primary, #d54941); font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-cmIssueMsg { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere; }
+
+/* 右侧帮助面板：搜索框 + 可折叠分组。 */
+.qbot-cmSearch { flex: none; width: 100%; height: 32px; margin-top: 8px; }
+.qbot-cmHelpScroll { flex: 1 1 auto; min-height: 0; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; display: flex; flex-direction: column; gap: 8px; }
+/* flex:none 是关键：若允许收缩，分组卡会被压扁且滚动容器永远不出现滚动条。 */
+.qbot-cmHelpGroup { flex: none; min-width: 0; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); overflow: hidden; }
+.qbot-cmHelpGroupHead { display: flex; align-items: center; gap: 7px; width: 100%; padding: 8px 10px; border: 0; background: transparent; cursor: pointer; text-align: left; }
+.qbot-cmHelpGroupHead strong { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; font-weight: 700; }
+.qbot-cmHelpChevron { flex: none; color: var(--qbot-blue); font-size: 12px; }
+.qbot-cmHelpGroupCount { margin-left: auto; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
+.qbot-cmHelpGroupDesc { margin: 0 10px 4px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1.5; }
+.qbot-cmHelpFields { display: flex; flex-direction: column; gap: 1px; padding: 0 6px 6px; }
+.qbot-cmHelpField { flex: none; min-width: 0; padding: 7px 8px; border-radius: 6px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-cmHelpFieldTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.qbot-cmHelpKey { min-width: 0; color: var(--qbot-blue); font: 600 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-cmHelpType { flex: none; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 4px; padding: 0 5px; font: 10.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.qbot-cmHelpText { margin: 4px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
+/* 字段帮助：限制 / 示例 / 配错后果，逐行对齐，标签定宽不抖动。 */
+.qbot-cmHelpLine { display: flex; align-items: baseline; gap: 6px; margin-top: 5px; min-width: 0; }
+.qbot-cmHelpTag { flex: none; padding: 1px 6px; border-radius: 4px; font-size: 10.5px; line-height: 1.6; font-weight: 600; white-space: nowrap; }
+.qbot-cmHelpTagRange { color: var(--qbot-blue); background: color-mix(in srgb, var(--qbot-blue) 10%, transparent); }
+.qbot-cmHelpTagExample { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-cmHelpValue { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.qbot-cmHelpNote { display: flex; align-items: baseline; gap: 6px; margin-top: 5px; min-width: 0; }
+.qbot-cmHelpNoteTag { flex: none; padding: 1px 6px; border-radius: 4px; color: var(--dsw-alias-state-warning-primary, #d98c00); background: color-mix(in srgb, var(--dsw-alias-state-warning-primary, #ffb400) 12%, transparent); font-size: 10.5px; line-height: 1.6; font-weight: 600; white-space: nowrap; }
+.qbot-cmHelpNoteText { min-width: 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+
+.qbot-cmFoot { border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-cmFootLeft { flex: 1 1 auto; min-width: 0; }
+.qbot-footOk { margin: 0; color: var(--dsw-alias-state-success-primary, #2ea121); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.qbot-cmLoadErr { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; color: var(--dsw-alias-state-error-primary, #d54941); background: var(--dsw-alias-bg-layer-1, #fff); font-size: 13px; }
+.qbot-cmLoadErr p { margin: 0; overflow-wrap: anywhere; }
+
+/* 窄屏：帮助面板移到编辑器下方，各占约一半高度。 */
+@media (max-width: 780px) {
+  .qbot-cmBody { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(200px, 1fr) minmax(180px, 1fr); }
+}
+
+/* ── 频道管理弹窗：与平台能力同一外壳，内部竖向 Tab ─────────────────── */
+.qbot-sectionIcon[data-tone="info"] { color: var(--qbot-blue, #1677ff); background: color-mix(in srgb, var(--qbot-blue, #1677ff) 12%, transparent); }
+.qbot-gvModal { width: min(980px, 100%); height: min(84vh, 800px); }
+.qbot-gvBody { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; display: flex; }
+.qbot-gvLayout { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
+.qbot-gvNav { flex: none; width: 150px; display: flex; flex-direction: column; gap: 4px; padding: 14px 10px; border-right: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); overflow-y: auto; overscroll-behavior: contain; }
+.qbot-gvNavItem { flex: none; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid transparent; border-radius: 9px; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.qbot-gvNavItem:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-gvNavItem.is-active { border-color: color-mix(in srgb, var(--qbot-blue, #1677ff) 32%, transparent); background: var(--dsw-alias-bg-layer-1, #fff); color: var(--qbot-blue, #1677ff); font-weight: 650; }
+.qbot-gvNavIcon { flex: none; width: 18px; text-align: center; font-size: 14px; }
+.qbot-gvContent { flex: 1 1 auto; min-width: 0; min-height: 0; padding: 16px 20px 20px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.qbot-gvScope { position: sticky; top: -16px; z-index: 3; display: flex; align-items: center; gap: 8px; min-width: 0; margin: -16px -20px 16px; padding: 9px 20px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-gvScopeDot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--qbot-blue, #1677ff); }
+.qbot-gvScopeName { min-width: 0; max-width: 220px; font-size: 12.5px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-gvScopeId { min-width: 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; overflow-wrap: anywhere; }
+.qbot-gvPane { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.qbot-gvPaneHead strong { display: block; color: var(--dsw-alias-label-primary, #1f2329); font-size: 14px; font-weight: 650; }
+.qbot-gvPaneHead p { margin: 4px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.qbot-gvPaneActions { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.qbot-gvCount { flex: 1 1 auto; min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; font-variant-numeric: tabular-nums; }
+.qbot-gvSearch { flex: 1 1 220px; min-width: 0; max-width: 320px; }
+.qbot-gvGuildGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.qbot-gvGuildCard { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 11px; background: var(--dsw-alias-bg-layer-1, #fff); text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.qbot-gvGuildCard:hover { border-color: color-mix(in srgb, var(--qbot-blue, #1677ff) 45%, var(--dsw-alias-border-l2, #e5e6eb)); }
+.qbot-gvGuildCard.is-on { border-color: var(--qbot-blue, #1677ff); background: color-mix(in srgb, var(--qbot-blue, #1677ff) 6%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-gvGuildAvatar { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--qbot-blue, #1677ff) 14%, transparent); color: var(--qbot-blue, #1677ff); font-size: 15px; font-weight: 700; }
+.qbot-gvGuildMain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qbot-gvGuildMain strong { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qbot-gvGuildMain small { color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; }
+.qbot-gvBadge { flex: none; padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--qbot-blue, #1677ff) 12%, transparent); color: var(--qbot-blue, #1677ff); font-size: 10.5px; }
+.qbot-gvEmpty { padding: 22px 12px; border: 1px dashed var(--dsw-alias-border-l2, #e5e6eb); border-radius: 10px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12.5px; line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
+/* 频道列表顶部引导：到开发者中心开启公开服务 / 扫码加入频道 */
+.qbot-gvSetup { min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--qbot-blue, #1677ff) 26%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--qbot-blue, #1677ff) 6%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-gvSetupHead { display: flex; align-items: center; gap: 7px; }
+.qbot-gvSetupIcon { flex: none; color: var(--qbot-blue, #1677ff); font-size: 14px; line-height: 1; }
+.qbot-gvSetupHead strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 650; }
+.qbot-gvSetupSteps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.qbot-gvSetupSteps li { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.qbot-gvSetupFoot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
+.qbot-gvSetupFoot > span { min-width: 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.qbot-gvSetupLink { flex: none; color: var(--qbot-blue, #1677ff); font-size: 11.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.qbot-gvSetupLink:hover { text-decoration: underline; }
+.qbot-gvInfoGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 10px; }
+.qbot-gvInfoCell { min-width: 0; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-gvInfoCell.is-wide { grid-column: 1 / -1; }
+.qbot-gvInfoLabel { display: block; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
+.qbot-gvInfoValue { display: block; margin-top: 4px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.qbot-gvList { min-width: 0; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; overflow: hidden; }
+.qbot-gvListHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-gvListHead strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; }
+.qbot-gvRow { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-gvRow:last-child { border-bottom: 0; }
+.qbot-gvRow.is-button { width: 100%; border-left: 0; border-right: 0; border-top: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.qbot-gvRow.is-button:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-gvRowMain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qbot-gvRowMain strong { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; overflow-wrap: anywhere; }
+.qbot-gvRowMain small { min-width: 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; overflow-wrap: anywhere; }
+.qbot-gvRowOps { flex: none; display: flex; align-items: center; gap: 6px; }
+.qbot-gvRowOps .qbot-btn { padding: 4px 9px; font-size: 11.5px; }
+.qbot-btnDanger { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-btnDanger:hover:not(:disabled) { border-color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-gvRowMore { flex: none; color: var(--qbot-blue, #1677ff); font-size: 11.5px; }
+.qbot-gvStack { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.qbot-gvFormRow { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; align-items: end; }
+.qbot-gvForm { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 13px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: color-mix(in srgb, var(--dsw-alias-bg-module-platform, #f7f8fa) 55%, transparent); }
+.qbot-gvKwCard { border-color: var(--qbot-blue, #1677ff); border-left-width: 3px; }
+.qbot-gvKwCard > .qbot-gvFormHead strong { color: var(--qbot-blue, #1677ff); }
+.qbot-gvFormHead strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; }
+.qbot-gvField { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.qbot-gvFieldLabel { color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; font-weight: 600; }
+.qbot-gvFieldHint { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; line-height: 1.5; }
+.qbot-gvField .qbot-input, .qbot-gvField .qbot-settingSelect { width: 100%; min-width: 0; }
+.qbot-gvInputShort { max-width: 220px; }
+.qbot-gvCheck { min-width: 0; display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
+.qbot-gvFormActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qbot-gvAiLogs { min-width: 0; display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.qbot-gvAiLog { flex: none; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 8px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-gvAiLogHead { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; }
+.qbot-gvAiLevel { flex: none; padding: 1px 7px; border-radius: 6px; background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); color: var(--dsw-alias-label-secondary, #646a73); font-size: 10.5px; font-weight: 600; }
+.qbot-gvAiLevel.is-light { color: #b26a00; background: color-mix(in srgb, #ff9f1a 15%, transparent); }
+.qbot-gvAiLevel.is-medium { color: var(--qbot-business); background: color-mix(in srgb, var(--qbot-business) 12%, transparent); }
+.qbot-gvAiLevel.is-severe { color: #d92b2b; background: color-mix(in srgb, #d92b2b 12%, transparent); }
+.qbot-gvAiLogBody { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.qbot-gvAiLogMeta { min-width: 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.qbot-gvDetail { min-width: 0; padding: 12px; border: 1px solid color-mix(in srgb, var(--qbot-blue, #1677ff) 32%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--qbot-blue, #1677ff) 5%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-gvDetailHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.qbot-gvDetailHead strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; }
+.qbot-gvEventGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 10px; }
+.qbot-gvEventCard { min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-gvEventCard strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; }
+.qbot-gvEventCard code { color: var(--qbot-blue, #1677ff); font-size: 10.5px; }
+.qbot-gvEventFields { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.qbot-gvEventLabel { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; }
+.qbot-gvEventField { padding: 2px 6px; border-radius: 5px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); color: var(--dsw-alias-label-secondary, #646a73); font-size: 10.5px; }
+/* 事件说明页：频道 OpenAPI 全量速查（按用途分组，方法与路径同时展示） */
+.qbot-gvDocIntro { min-width: 0; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--qbot-blue, #1677ff) 24%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--qbot-blue, #1677ff) 5%, var(--dsw-alias-bg-layer-1, #fff)); color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.qbot-gvDocGroups { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.qbot-gvDocGroup { min-width: 0; padding: 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-gvDocGroupHead { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 10px; }
+.qbot-gvDocGroupHead strong { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; font-weight: 650; }
+.qbot-gvDocGroupHead span { flex: none; min-width: 20px; padding: 1px 6px; border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10px; text-align: center; }
+.qbot-gvDocGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr)); gap: 8px; min-width: 0; }
+.qbot-gvDocCard { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-gvDocCardTop { display: flex; align-items: flex-start; gap: 7px; min-width: 0; }
+.qbot-gvDocMethod { flex: none; min-width: 45px; padding: 2px 4px; border-radius: 4px; font-size: 9.5px; font-weight: 700; line-height: 1.5; text-align: center; letter-spacing: .2px; }
+.qbot-gvDocMethod.is-get { color: var(--qbot-blue, #1677ff); background: color-mix(in srgb, var(--qbot-blue, #1677ff) 12%, transparent); }
+.qbot-gvDocMethod.is-post { color: var(--qbot-business, #722ed1); background: color-mix(in srgb, var(--qbot-business, #722ed1) 12%, transparent); }
+.qbot-gvDocMethod.is-patch { color: #b26a00; background: color-mix(in srgb, #ff9f1a 15%, transparent); }
+.qbot-gvDocMethod.is-put { color: #9254de; background: color-mix(in srgb, #9254de 12%, transparent); }
+.qbot-gvDocMethod.is-delete { color: #d92b2b; background: color-mix(in srgb, #d92b2b 12%, transparent); }
+.qbot-gvDocPath { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.qbot-gvDocDesc { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 10.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.qbot-gvDocNotes { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.qbot-gvDocNote { padding: 1px 5px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 4px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.qbot-gvDocSectionTitle { min-width: 0; margin-top: 4px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; font-weight: 650; }
+/* 接口权限：每个接口一行的表格式清单（auth_status=1 才是已授权）。 */
+.qbot-gvPermBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; }
+.qbot-gvPermTable { min-width: 0; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 10px; overflow: hidden; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-gvPermHead, .qbot-gvPermRow { display: grid; grid-template-columns: 58px minmax(0, 1.25fr) minmax(0, 1fr) 72px; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; }
+.qbot-gvPermHead { background: var(--dsw-alias-bg-module-platform, #f7f8fa); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; font-weight: 650; }
+.qbot-gvPermRow + .qbot-gvPermRow { border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-gvPermRow:hover { background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-gvPermPath { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.qbot-gvPermDesc { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.qbot-gvPermState { justify-self: start; flex: none; padding: 2px 7px; border-radius: 999px; font-size: 10.5px; line-height: 1.5; white-space: nowrap; }
+.qbot-gvPermState.is-ok { color: var(--dsw-alias-state-success-color, #27855b); background: color-mix(in srgb, var(--dsw-alias-state-success-color, #27855b) 12%, transparent); }
+.qbot-gvPermState.is-no { color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 10%, transparent); }
+.qbot-gvPermRaw { min-width: 0; }
+.qbot-gvPermRaw summary { cursor: pointer; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
+.qbot-gvPermRaw pre { max-height: 260px; margin: 8px 0 0; padding: 10px; overflow: auto; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); font-size: 10.5px; line-height: 1.55; }
+@media (max-width: 560px) {
+  .qbot-gvPermHead, .qbot-gvPermRow { grid-template-columns: 48px minmax(0, 1fr) 68px; }
+  .qbot-gvPermHead span:nth-child(3), .qbot-gvPermDesc { display: none; }
+}
+/* 二级弹窗（子频道 / 身份组编辑）：盖在主弹窗内容之上 */
+.qbot-gvSubOverlay { position: fixed; inset: 0; z-index: 10006; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgb(0 0 0 / 42%); }
+.qbot-gvSubModal { width: min(520px, 100%); max-height: min(86vh, 720px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 12px 40px rgb(0 0 0 / 22%); }
+.qbot-gvSubModal > .qbot-modalHead { position: sticky; top: 0; z-index: 2; background: var(--dsw-alias-bg-layer-1, #fff); }
+/* 二级弹窗内的吸顶提示：盖在滚动内容之上，5 秒自动消失（由组件定时器控制）。 */
+.qbot-gvSubToast { position: sticky; top: 52px; z-index: 3; margin: 0 16px 6px; }
+.qbot-gvSubModal > .qbot-gvForm { margin: 16px; }
+/* 子 Tab（内容管理 / AI 接管） */
+.qbot-gvSubTabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 3px; border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-gvSubTab { flex: none; padding: 6px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12px; cursor: pointer; }
+.qbot-gvSubTab:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-gvSubTab.is-on { background: var(--dsw-alias-bg-layer-1, #fff); color: var(--qbot-blue, #1677ff); font-weight: 650; box-shadow: 0 1px 3px rgb(31 35 41 / 10%); }
+/* 颜色选择器 + 十进制 ARGB */
+.qbot-gvColorRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.qbot-gvColorPick { flex: none; width: 44px; height: 34px; padding: 2px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 8px; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; }
+.qbot-gvColorNum { flex: 1 1 auto; min-width: 0; }
+/* ID 输入框（datalist 下拉 + 手动粘贴） */
+.qbot-gvIdInput { min-width: 0; display: flex; flex-direction: column; }
+.qbot-gvIdInput .qbot-input { width: 100%; min-width: 0; }
+/* 接口返回 JSON 展示框 */
+.qbot-gvResult { min-width: 0; max-height: 260px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-gvResult pre { margin: 0; padding: 12px; color: var(--dsw-alias-label-secondary, #646a73); font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+/* 发消息回执 + 排查说明 */
+.qbot-gvReceiptOk, .qbot-gvReceiptWarn { display: flex; flex-direction: column; gap: 4px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.qbot-gvReceiptOk code { color: var(--dsw-alias-label-primary, #1f2329); font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.qbot-gvReceiptOk span { color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-gvReceiptWarn { color: var(--dsw-alias-state-warning-primary, #d8961b); }
+.qbot-gvRawDetails { min-width: 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-gvRawDetails summary { cursor: pointer; }
+.qbot-gvRawDetails pre { margin: 8px 0 0; padding: 12px; border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); color: var(--dsw-alias-label-secondary, #646a73); font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: auto; overflow-wrap: anywhere; }
+.qbot-gvTip { background: color-mix(in srgb, var(--dsw-alias-state-info-bg, #e8f3ff) 40%, transparent); }
+.qbot-gvTip p { margin: 0; font-size: 12px; line-height: 1.7; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .qbot-gvNav { width: 112px; padding: 10px 6px; }
+  .qbot-gvContent { padding: 14px 12px 18px; }
+  .qbot-gvScope { margin: -14px -12px 16px; padding: 8px 12px; }
+  .qbot-ptNav { width: 130px; padding: 10px 6px; }
+  .qbot-ptNavItem { padding: 8px 7px; font-size: 12px; }
+  .qbot-ptContent { padding: 14px 12px 18px; }
+  .qbot-ptItemGrid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── AI 执行记录（群聊管理 / 频道管理共用；触发在 agent 聊天里） ── */
+/* 不设固定高度 / 不建嵌套滚动：整块跟着弹窗右侧内容一起滚，避免鼠标停在这里时滚轮被吞。 */
+.qbot-aiPanel { display: flex; flex-direction: column; min-width: 0; gap: 12px; }
+.qbot-aiHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex: none; }
+.qbot-aiHead strong { display: block; font-size: 15px; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-aiSub { margin: 3px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.5; }
+.qbot-aiDisclaimer { flex: none; margin: 0; padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; line-height: 1.55; }
+.qbot-aiBody { min-height: 120px; min-width: 0; padding: 14px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 12px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+/* 时间轴：左列时间 → 中间轴线/状态节点 → 右列事件卡（空状态也占一行）。 */
+.qbot-aiTimeline { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.qbot-aiTlRow { min-width: 0; display: grid; grid-template-columns: minmax(74px, 96px) 18px minmax(0, 1fr); align-items: stretch; }
+.qbot-aiTlTime { padding-top: 11px; text-align: right; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.qbot-aiTlNode { position: relative; display: flex; justify-content: center; }
+.qbot-aiTlNode::before { content: ""; position: relative; z-index: 1; width: 9px; height: 9px; margin-top: 14px; border-radius: 50%; background: var(--dsw-alias-state-success-primary, #27855b); box-shadow: 0 0 0 3px var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-aiTlNode::after { content: ""; position: absolute; top: 21px; bottom: -12px; left: 50%; width: 1px; transform: translateX(-50%); background: var(--dsw-alias-border-l2, #e5e6eb); }
+.qbot-aiTlRow:last-child .qbot-aiTlNode::after { display: none; }
+.qbot-aiTlRow.is-fail .qbot-aiTlNode::before { background: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-aiTlRow.is-empty .qbot-aiTlNode::before { background: var(--dsw-alias-border-l2, #e5e6eb); }
+.qbot-aiTlContent { min-width: 0; }
+.qbot-aiEmpty { margin: 0; padding: 16px 14px; border: 1px dashed var(--dsw-alias-border-l2, #e5e6eb); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.qbot-aiLog { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-left: 3px solid var(--dsw-alias-state-success-primary, #27855b); border-radius: 10px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-aiLog.is-fail { border-left-color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-aiLogHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.qbot-aiLogState { margin-left: auto; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; font-weight: 650; }
+.qbot-aiLog.is-fail .qbot-aiLogState { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-aiSrc { padding: 1px 6px; border-radius: 4px; font-size: 10px; line-height: 1.5; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-aiSrc.is-local { color: var(--dsw-alias-state-success-color, #27855b); }
+.qbot-aiSrc.is-llm { color: var(--qbot-blue, #1677ff); }
+.qbot-aiSrc.is-cache { color: #b06f00; }
+.qbot-aiLogAction { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12.5px; font-weight: 650; }
+.qbot-aiLogText { color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.qbot-aiBubble { min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.qbot-aiLogTarget { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; overflow-wrap: anywhere; }
+.qbot-aiUsage { display: flex; align-items: baseline; gap: 8px; flex: none; padding-top: 8px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
+.qbot-aiUsage > span:first-child { font-weight: 650; }
+@media (max-width: 640px) {
+  .qbot-aiLogHead { gap: 6px; }
+  .qbot-aiTlRow { grid-template-columns: minmax(56px, 72px) 14px minmax(0, 1fr); }
+  .qbot-aiTlTime { font-size: 10px; }
 }
 `;

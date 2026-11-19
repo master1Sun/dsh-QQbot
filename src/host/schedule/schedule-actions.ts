@@ -6,6 +6,7 @@
 import type { BotRuntime } from "../bots.js";
 import { sanitizeOutgoingText } from "../messaging/sanitize.js";
 import { assertLocalMediaPath, assertSafeMediaUrl, defaultAllowedRoots } from "../infra/net-guard.js";
+import { saveArchivedMedia, saveArchivedLocalMedia, mediaModeAllows, maxBytesFor } from "../infra/archive-media.js";
 
 /** 定时动作的参数来源（url 或本机路径二选一）。 */
 interface MediaSource {
@@ -63,6 +64,33 @@ function resolveSource(args: Record<string, unknown>): MediaSource | null {
   return null;
 }
 
+/**
+ * 归档定时动作发出的媒体（图片 / 文件）。
+ * 受「归档媒体保存」设置（archiveMedia）控制：未开启则不落地任何文件。
+ */
+async function archiveScheduledMedia(
+  ctx: ActionContext,
+  source: MediaSource,
+  kind: "image" | "file",
+  content: string,
+): Promise<void> {
+  const mode = ctx.bot.config.archiveMedia ?? "off";
+  if (!mediaModeAllows(mode, kind)) return;
+  const media = source.url
+    ? await saveArchivedMedia(source.url, { kind, logger: ctx.logger, maxBytes: maxBytesFor(kind, ctx.bot.config) })
+    : source.localPath
+      ? await saveArchivedLocalMedia(source.localPath, { kind, logger: ctx.logger, maxBytes: maxBytesFor(kind, ctx.bot.config) })
+      : null;
+  if (!media) return;
+  await ctx.bot.archiver.append({
+    kind: "proactive",
+    chat: `${ctx.scope}:${ctx.openid}`,
+    content,
+    note: `schedule:send_${kind}`,
+    media: [media],
+  });
+}
+
 export const SCHEDULED_ACTIONS: ScheduledAction[] = [
   {
     id: "send_message",
@@ -96,6 +124,8 @@ export const SCHEDULED_ACTIONS: ScheduledAction[] = [
         { content: typeof args.content === "string" ? args.content : void 0 },
       );
       ctx.logger.info(`[dsh-qqbot] 定时动作 send_image → ${ctx.scope}:${ctx.openid}`);
+      // 归档：图片落地保存，定时发出的图也能在归档弹窗里看到缩略图。
+      await archiveScheduledMedia(ctx, source, "image", typeof args.content === "string" ? args.content : "");
     },
   },
   {
@@ -122,6 +152,8 @@ export const SCHEDULED_ACTIONS: ScheduledAction[] = [
         },
       );
       ctx.logger.info(`[dsh-qqbot] 定时动作 send_file → ${ctx.scope}:${ctx.openid}`);
+      // 归档：文件落地保存（受「归档媒体保存」设置控制）。
+      await archiveScheduledMedia(ctx, source, "file", typeof args.content === "string" ? args.content : "");
     },
   },
   {

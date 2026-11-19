@@ -1,3 +1,4 @@
+import { type ArchivedMedia, type ArchiveMediaMode } from "./archive-media.js";
 export type ArchiveKind = "inbound" | "reply" | "proactive" | "session";
 export interface ArchiveRecord {
     kind: ArchiveKind;
@@ -14,6 +15,18 @@ export interface ArchiveRecord {
     sessionId?: string;
     /** 附加说明（过滤判定、错误等）。 */
     note?: string;
+    /** 随消息落地的图片（本地副本；平台原始 URL 有时效，故落地保存）。 */
+    media?: ArchivedMedia[];
+    /** 未保存的附件及原因（诊断用：平台无地址 / 语音 / 超限 / 下载失败等）。 */
+    mediaSkipped?: Array<{
+        name: string;
+        reason: string;
+    }>;
+    /**
+     * 记录时间（ISO）。缺省取写入时刻；异步补写媒体时可传入事件发生时刻，
+     * 避免图片下载耗时把记录顺序挪到后面。
+     */
+    ts?: string;
 }
 /** chat 键 -> 安全且稳定的目录名。 */
 export declare function chatDirName(chat: string): string;
@@ -22,6 +35,25 @@ export declare class Archiver {
     #private;
     constructor(enabled: () => boolean, logger: Logger, bot?: string);
     append(record: ArchiveRecord): Promise<void>;
+    /**
+     * 写入一条带媒体的记录：先把媒体落地到本地，再连同 media 一起落盘。
+     *
+     * 媒体落地需要走网络（平台的附件地址有实效），可能耗时数秒；因此调用方
+     * 应以 fire-and-forget 方式调用（`void archiver.appendWithMedia(...)`），
+     * 不阻塞消息处理。记录时间用传入的 ts 固定，保证下载慢也不会把记录挪到
+     * 后面（否则归档里这条消息会排到后续消息之后）。
+     *
+     * mode 为 "off" 时直接落文本记录，不下载任何附件。
+     */
+    appendWithMedia(record: ArchiveRecord, attachments: Array<{
+        content_type?: string;
+        url?: string;
+        filename?: string;
+    }> | undefined, mode?: ArchiveMediaMode, limits?: Partial<{
+        archiveMediaMaxImageMB?: number;
+        archiveMediaMaxVideoMB?: number;
+        archiveMediaMaxFileMB?: number;
+    }>): Promise<void>;
 }
 export interface ArchivedEntry extends ArchiveRecord {
     ts: string;

@@ -19,3 +19,9 @@ declare module "react-dom/client" {
     options?: { identifierPrefix?: string; onRecoverableError?: (error: unknown) => void },
   ): Root;
 }
+
+/** 平台能力群选择器下拉用 createPortal 挂到 body，避开祖先 overflow:hidden 裁切。 */
+declare module "react-dom" {
+  import type { ReactNode } from "react";
+  export function createPortal(children: ReactNode, container: Element | DocumentFragment): ReactNode;
+}

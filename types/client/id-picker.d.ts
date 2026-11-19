@@ -1,8 +1,9 @@
 /**
  * 接收方 openid 选择器（可搜索下拉）：候选来自消息归档聚合（archive.chats），
  * 每项显示「名称 + openid」，点击填入；同时保留手工输入（归档无记录时可直接粘贴）。
- * - 单聊候选显示用户昵称；群聊平台不下发群名，用该群最近发言者昵称辅助辨认。
- * - 输入框内容即过滤词：按 openid / 名称模糊匹配，清空后展示全部候选。
+ * - 单聊候选显示用户昵称；群聊优先显示归档/平台能力共享缓存里的真实群名 + 人数，
+ *   接口未返回时回退用该群最近发言者昵称辅助辨认。
+ * - 输入框内容即过滤词：按 openid / 名称 / 真实群名模糊匹配，清空后展示全部候选。
  */
 import * as React from "react";
 import type { RpcCall } from "./types.js";
@@ -38,4 +39,7 @@ export declare function OpenIdPicker(props: {
     error?: string;
     placeholder?: string;
     ariaLabel?: string;
+    /** 传入后自动补齐群资料（真实群名 + 人数）；不传则保持归档原始展示。 */
+    rpcCall?: RpcCall;
+    appId?: string;
 }): React.DetailedReactHTMLElement<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;

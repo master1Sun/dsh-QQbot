@@ -1,13 +1,18 @@
 /**
  * 接收方 openid 选择器（可搜索下拉）：候选来自消息归档聚合（archive.chats），
  * 每项显示「名称 + openid」，点击填入；同时保留手工输入（归档无记录时可直接粘贴）。
- * - 单聊候选显示用户昵称；群聊平台不下发群名，用该群最近发言者昵称辅助辨认。
- * - 输入框内容即过滤词：按 openid / 名称模糊匹配，清空后展示全部候选。
+ * - 单聊候选显示用户昵称；群聊优先显示归档/平台能力共享缓存里的真实群名 + 人数，
+ *   接口未返回时回退用该群最近发言者昵称辅助辨认。
+ * - 输入框内容即过滤词：按 openid / 名称 / 真实群名模糊匹配，清空后展示全部候选。
  */
 import * as React from "react";
+import { useGroupInfos } from "./group-info.js";
 import { fmt, h, t } from "./i18n/index.js";
 import type { RpcCall } from "./types.js";
 import { errText, val } from "./ui.js";
+
+/** 调用方未传 rpcCall 时不拉群资料，仅展示归档原始信息。 */
+const NOOP_RPC: RpcCall = async () => ({ ok: false, error: "" });
 
 /** 归档会话聚合项（与宿主 ArchivedChat 对应）。 */
 export interface ChatOption {
@@ -65,29 +70,42 @@ export function OpenIdPicker(props: {
   error?: string;
   placeholder?: string;
   ariaLabel?: string;
+  /** 传入后自动补齐群资料（真实群名 + 人数）；不传则保持归档原始展示。 */
+  rpcCall?: RpcCall;
+  appId?: string;
 }) {
-  const { chats, scope, value, onChange, readOnly, loading, error, placeholder, ariaLabel } = props;
+  const { chats, scope, value, onChange, readOnly, loading, error, placeholder, ariaLabel, rpcCall, appId } = props;
   const [open, setOpen] = React.useState(false);
 
   const pool = React.useMemo(() => chats.filter((c) => c.scope === scope), [chats, scope]);
+  // 与归档弹窗、平台能力群下拉共用缓存，避免重复打群资料接口（官方限频 30 QPM）。
+  const groupInfoMap = useGroupInfos(rpcCall ?? NOOP_RPC, appId ?? "", rpcCall ? pool.map((c) => c.openid) : []);
   const q = value.trim().toLowerCase();
   const list = q
     ? pool.filter(
         (c) =>
           c.openid.toLowerCase().includes(q) ||
           (c.name || "").toLowerCase().includes(q) ||
-          (c.lastSenderName || "").toLowerCase().includes(q),
+          (c.lastSenderName || "").toLowerCase().includes(q) ||
+          (groupInfoMap[c.openid]?.group_name || "").toLowerCase().includes(q),
       )
     : pool;
   const shown = list.slice(0, MAX_RENDER);
 
-  /** 首行标题：群聊固定「群聊」+ 最近发言成员提示（明确昵称只是辨认辅助）；单聊显示用户昵称。 */
+  /** 首行标题：群聊优先真实群名，回退「群聊 · 最近发言成员」；单聊显示用户昵称。 */
   const itemTitle = (c: ChatOption): string =>
     scope === "c2c"
       ? c.name || t("idpick.user")
-      : c.lastSenderName
-        ? fmt("idpick.groupRecentSpeaker", c.lastSenderName)
-        : t("sched.form.scopeGroup");
+      : groupInfoMap[c.openid]?.group_name
+        ? String(groupInfoMap[c.openid].group_name)
+        : c.lastSenderName
+          ? fmt("idpick.groupRecentSpeaker", c.lastSenderName)
+          : t("sched.form.scopeGroup");
+  /** 群人数：只在官方接口返回正数时展示徽标。 */
+  const memberNum = (c: ChatOption): number => {
+    const n = groupInfoMap[c.openid]?.group_member_num;
+    return typeof n === "number" && n > 0 ? n : 0;
+  };
   /** id 行前缀：显式标注这个 id 是谁的，避免群候选被误认为成员的用户 id。 */
   const idPrefix = scope === "group" ? t("idpick.groupIdLabel") : t("idpick.userIdLabel");
 
@@ -144,7 +162,12 @@ export function OpenIdPicker(props: {
                             setOpen(false);
                           },
                         },
-                        h("span", { className: "qbot-idPickerName" }, itemTitle(c)),
+                        h("span", { className: "qbot-idPickerHead" },
+                          h("span", { className: "qbot-idPickerName" }, itemTitle(c)),
+                          scope === "group" && memberNum(c) > 0
+                            ? h("span", { className: "qbot-convGroupMembers", title: fmt("archive.groupMemberNum", String(memberNum(c))) },
+                                fmt("archive.groupMembersShort", String(memberNum(c))))
+                            : null),
                         h("span", { className: "qbot-idPickerId" }, `${idPrefix}${c.openid}`),
                       ),
                     ),

@@ -63,6 +63,24 @@ export interface QqbotConfig {
   proactiveFallback: boolean;
   /** 消息本地归档（审计轨迹），写入 ~/.dsh/qqbot/archive/。 */
   archiveEnabled: boolean;
+  /**
+   * 归档媒体保存级别：
+   *   off        = 不保存任何媒体（默认，只留文本与文件名）
+   *   image     = 保存图片到 archive/images/
+   *   imageVideo= 保存图片与视频到 archive/images/ 与 archive/videos/
+   *   all       = 图片 / 视频 / 其它文件全部保存
+   * 未开启时归档里只有文字，图片与文件不会被落盘（省磁盘，也避免留存敏感内容）。
+   */
+  archiveMedia: "off" | "image" | "imageVideo" | "all";
+  /**
+   * 归档媒体单个体积上限（MB）。仅 bots.json 可配（设置页不展示），
+   * 修改 bots.json 对应字段后重启生效。
+   */
+  archiveMediaMaxImageMB: number;
+  /** 归档视频单个体积上限（MB），仅 bots.json 可配（设置页不展示）。 */
+  archiveMediaMaxVideoMB: number;
+  /** 归档其它文件单个体积上限（MB），仅 bots.json 可配（设置页不展示）。 */
+  archiveMediaMaxFileMB: number;
   /** 回复优先用 QQ Markdown（msg_type=2），平台拒绝时逐条回退纯文本。 */
   markdownReply: boolean;
   /**
@@ -133,12 +151,28 @@ export interface QqbotConfig {
    * 仅 bots.json 可配（设置页不展示）。
    */
   scheduleMaxPerChat: number;
+  /**
+   * 订阅频道私域全量消息事件（MESSAGE_CREATE，intents 1<<9）。
+   * 仅私域机器人可在开发者中心申请该权限；无权限却开启会导致 WebSocket 鉴权失败，默认关闭。
+   */
+  guildMessageEvents: boolean;
+  /**
+   * 订阅论坛事件（FORUM_*，intents 1<<28）。
+   * 仅私域机器人可用；用于「新帖自动回帖 / 评论@回复」，默认关闭。
+   */
+  forumEvents: boolean;
   /** 主动消息每日配额（0=不限制）；超出后停止主动发送并告警。 */
   quotaPerDay: number;
   /** 发给 QQ 用户的回复文案语言：zh=中文（默认）；en=英文。 */
   replyLocale: "zh" | "en";
   /** 出站回复净化：剥离模型输出中的 system-reminder / <think> 等隐藏标签块（防内部内容泄漏）。 */
   sanitizeReplies: boolean;
+  /**
+   * Markdown 图片强校验（平台 force_verify_image_resource，20260810）：
+   * 开启后 Markdown 消息里的图片资源转存失败即中断发送并报错（默认关闭，保持平台原有行为——
+   * 失败时消息仍发出但图片丢失）。
+   */
+  forceVerifyImage: boolean;
   /** 媒体 URL SSRF 防护：拒绝请求内网/保留地址（qqbot_send_* 工具的 url 来源）。 */
   ssrfGuard: boolean;
   /** 本地路径白名单：qqbot_send_* 工具只能发送工作区/插件数据目录内的文件。 */
@@ -308,6 +342,11 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     maxRepliesPerMessage: clampInt(pick("maxRepliesPerMessage"), 1, 5, 5),
     proactiveFallback: boolOr(pick("proactiveFallback"), false),
     archiveEnabled: boolOr(pick("archiveEnabled"), true),
+    archiveMedia: oneOf(pick("archiveMedia"), ["off", "image", "imageVideo", "all"], "off"),
+    // 归档媒体体积上限（MB）：仅 bots.json 可配（设置页不展示），默认 图8/视频64/文件32
+    archiveMediaMaxImageMB: clampInt(pick("archiveMediaMaxImageMB"), 1, 512, 8),
+    archiveMediaMaxVideoMB: clampInt(pick("archiveMediaMaxVideoMB"), 1, 2048, 64),
+    archiveMediaMaxFileMB: clampInt(pick("archiveMediaMaxFileMB"), 1, 1024, 32),
     markdownReply: boolOr(pick("markdownReply"), true),
     quoteReply: oneOf(pick("quoteReply"), ["off", "at", "all"], "at"),
     quoteMaxChars: clampInt(pick("quoteMaxChars"), 20, 1000, 120),
@@ -341,9 +380,12 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     memoryEnabled: boolOr(pick("memoryEnabled"), true),
     // 0 = 不限；默认 15（定时消息按群/单聊计数）
     scheduleMaxPerChat: clampInt(pick("scheduleMaxPerChat"), 0, 500, 15),
+    guildMessageEvents: boolOr(pick("guildMessageEvents"), false),
+    forumEvents: boolOr(pick("forumEvents"), false),
     quotaPerDay: clampInt(pick("quotaPerDay"), 0, 100000, 50),
     replyLocale: oneOf(pick("replyLocale"), ["zh", "en"], "zh"),
     sanitizeReplies: boolOr(pick("sanitizeReplies"), true),
+    forceVerifyImage: boolOr(pick("forceVerifyImage"), false),
     ssrfGuard: boolOr(pick("ssrfGuard"), true),
     localPathWhitelist: boolOr(pick("localPathWhitelist"), false),
     permissionInjection: boolOr(pick("permissionInjection"), true),

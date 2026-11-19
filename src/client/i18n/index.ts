@@ -18,14 +18,13 @@ export { cn, en };
 
 export const QQBOT_LOCALE_NAMESPACE = "dsh-qqbot";
 
-/** 宿主 locale id → 本模块语言标识。 */
-const HOST_TO_OURS: Readonly<Record<string, "cn" | "en">> = Object.freeze({
-  zh: "cn",
-  "zh-CN": "cn",
-  cn: "cn",
-  en: "en",
-  "en-US": "en",
-});
+/** 宿主 locale id → 本模块语言标识（兼容 zh-CN / zh_CN / en_US 等写法）。 */
+function hostLocaleToOurs(locale: string): "cn" | "en" {
+  const normalized = locale.trim().toLowerCase().replace(/_/g, "-");
+  if (normalized.startsWith("en")) return "en";
+  if (normalized.startsWith("zh") || normalized === "cn") return "cn";
+  return "cn";
+}
 
 /** 当前语言（默认 cn，与旧实现「中文为源语言」保持一致）。 */
 let currentLocale: "cn" | "en" = "cn";
@@ -46,12 +45,28 @@ let hostBound = false;
 export function setTranslator(next?: (key: string) => string | undefined) {
   lookup = typeof next === "function" ? next : undefined;
   hostBound = typeof next === "function";
+  // 宿主 locale id 可能不在常见写法里，直接用翻译结果反推语言，
+  // 保证 useLocale() 与 t() 始终一致（否则帮助面板会出现中英混排）。
+  syncLocaleFromTranslator();
   emit();
 }
 
-/** 设置当前语言（通常由宿主 locale 事件驱动）。 */
+/** 用一条中英值不同的探针文案，从宿主翻译函数反推当前语言。 */
+function probeLocale(): "cn" | "en" | null {
+  if (!hostBound || !lookup) return null;
+  const probe = lookup("common.langProbe");
+  if (typeof probe !== "string" || !probe) return null;
+  return probe === cn["common.langProbe"] ? "cn" : "en";
+}
+
+function syncLocaleFromTranslator(): void {
+  const mapped = probeLocale();
+  if (mapped) currentLocale = mapped;
+}
+
+/** 设置当前语言（通常由宿主 locale 事件驱动）；宿主翻译可用时以探针结果为准。 */
 export function setLocale(locale: string) {
-  const mapped = HOST_TO_OURS[locale] ?? (locale === "en" ? "en" : "cn");
+  const mapped = probeLocale() ?? hostLocaleToOurs(locale);
   if (mapped === currentLocale) return;
   currentLocale = mapped;
   emit();

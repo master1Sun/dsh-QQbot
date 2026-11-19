@@ -8,10 +8,10 @@
  * 事件映射：InboundMessage.raw（平台原始事件体）即 webhook 模式信封里的 d，
  * 组回 { eventType, payload: { op:0, id, t, d } } 喂给既有 rule.ts 管道。
  */
-import { QQBot } from "@tencent-connect/qqbot-nodejs";
+import { QQBot, type QQBotInboundMessage } from "@tencent-connect/qqbot-nodejs";
 import type { QqbotConfig } from "../../shared/config.js";
 import type { QqEnvelope } from "../../shared/types.js";
-export type WsState = "idle" | "connecting" | "connected" | "failed";
+export type WsState = "idle" | "connecting" | "connected" | "reconnecting" | "failed";
 export interface WsStatus {
     state: WsState;
     appId: string;
@@ -26,6 +26,10 @@ export interface QqWsSourceOptions {
     onEvent: (eventType: string, payload: QqEnvelope, deliveryId: string) => void;
     /** 原始网关事件（成员进出、表情、好友等 SDK 未单独封装的事件）出口。 */
     onRawEvent?: (eventType: string, data: unknown) => void;
+    /** 频道 READY 数据（含机器人在频道侧的 user.id），用于识别评论里的 @机器人。 */
+    onReady?: (data: unknown) => void;
+    /** 频道消息（kind=guild）：不进会话管线，交给频道 AI 接管服务审核。 */
+    onGuildMessage?: (message: QQBotInboundMessage) => void;
     /** 按钮回调（INTERACTION_CREATE，SDK 单独封装为 interaction 事件）出口。 */
     onInteraction?: (event: unknown) => void;
     /**

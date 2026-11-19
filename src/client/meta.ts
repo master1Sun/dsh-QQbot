@@ -71,6 +71,12 @@ export const SWITCH_DEFS: Array<{ key: string; label: string; desc: string; def:
     desc: t("feature.ssrfGuardHint"),
     def: true,
   },
+  {
+    key: "forceVerifyImage",
+    label: t("feature.forceVerifyImage"),
+    desc: t("feature.forceVerifyImageHint"),
+    def: false,
+  },
 ];
 
 export const COOLDOWN_OPTIONS = [0, 10_000, 30_000, 60_000, 120_000, 300_000, 600_000, 1_800_000];

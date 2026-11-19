@@ -51,7 +51,12 @@ export async function handleRawEvent(bot: BotRuntime, eventType: string, data: u
     const targetOpenid = eventType === "FRIEND_ADD" ? openid : (member.group_openid ?? "");
     if (!targetOpenid) return { handled: false };
     const locale: ReplyLocale = config.replyLocale === "en" ? "en" : "zh";
-    const nick = openid || tr(locale, "welcome.newFriend");
+    // 昵称优先走用户信息接口（失败回退 openid），避免欢迎语里显示一串 ID。
+    let nick = openid;
+    try {
+      const info = await bot.client.getUserInfo(openid);
+      if (info.username) nick = info.username;
+    } catch { /* 接口不可用时用 openid 兜底 */ }
     const template = config.welcomeMessage || tr(locale, "welcome.default");
     const text = template.replaceAll("{nick}", nick);
     try {
@@ -89,9 +94,53 @@ export async function handleRawEvent(bot: BotRuntime, eventType: string, data: u
     }
   }
 
+  // ── 入群申请（20260810 新事件；机器人是群管理员才收得到） ─────────────────
+  // 这里只做归档记录；实际审批走设置页「入群审批」卡（platform.join* RPC 拉实时列表）。
+  if (eventType === "GROUP_JOIN_REQUEST") {
+    const req = payload as {
+      group_openid?: string;
+      username?: string;
+      member_openid?: string;
+      apply_source?: string;
+      verify_info?: { method?: string; verify_message?: string };
+      auto_approved?: { strategy_id?: string };
+    };
+    const username = req.username || req.member_openid || "";
+    const source = req.apply_source === "invited" ? "受邀" : req.apply_source === "self_apply" ? "主动申请" : "申请";
+    const verify = req.verify_info?.verify_message ? `，验证消息「${req.verify_info.verify_message}」` : "";
+    const auto = req.auto_approved?.strategy_id ? "（已被平台自动审批策略通过）" : "";
+    void bot.archiver.append({
+      kind: "inbound",
+      event: eventType,
+      chat: req.group_openid ? `group:${req.group_openid}` : "",
+      content: `${username} ${source}入群${verify}${auto}`,
+      note: "join-request",
+    });
+    return { handled: true, note: `join-request ${username}` };
+  }
+
   // 撤回事件只记日志（对方撤回无法还原内容，ref-index 中的原文仍有价值）。
   if (eventType === "GROUP_MSG_RECALL" || eventType === "C2C_MSG_RECALL") {
     void bot.archiver.append({ kind: "inbound", event: eventType, chat: groupChatKey(payload), content: "", note: "recalled" });
+    return { handled: true, note: eventType };
+  }
+
+  // 其余群/好友生命周期事件：只归档，不自动动作（供回溯机器人在群内的事件线）。
+  const LIFECYCLE_EVENTS = new Set([
+    "GROUP_ADD_ROBOT", "GROUP_DEL_ROBOT", "GROUP_MEMBER_REMOVE",
+    "GROUP_MSG_RECEIVE", "GROUP_MSG_REJECT",
+    "FRIEND_DEL", "C2C_MSG_RECEIVE", "C2C_MSG_REJECT",
+  ]);
+  if (LIFECYCLE_EVENTS.has(eventType)) {
+    const group = typeof payload.group_openid === "string" ? payload.group_openid : "";
+    const who = typeof payload.member_openid === "string" ? payload.member_openid
+      : typeof payload.op_member_openid === "string" ? payload.op_member_openid
+      : typeof payload.openid === "string" ? payload.openid : "";
+    void bot.archiver.append({
+      kind: "inbound", event: eventType,
+      chat: group ? `group:${group}` : groupChatKey(payload),
+      content: "", note: `lifecycle${who ? `:${who.slice(0, 12)}` : ""}`,
+    });
     return { handled: true, note: eventType };
   }
   return { handled: false };

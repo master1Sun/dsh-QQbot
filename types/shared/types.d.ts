@@ -136,6 +136,10 @@ export interface QqMessagePayload {
         bot?: boolean;
         member_openid?: string;
         user_openid?: string;
+        /** 用户头像 URL（20261116 起单聊/群聊消息事件下发）。 */
+        avatar?: string;
+        /** 群内昵称（20261116 起群聊消息事件下发；群场景展示优先于 username）。 */
+        member_nickname?: string;
     };
     /** @ 的用户列表（GROUP_MESSAGE_CREATE 携带）。bot=true 为旧字段；QQ 平台官方用 is_you 标记「@ 的是本机器人」。 */
     mentions?: Array<{

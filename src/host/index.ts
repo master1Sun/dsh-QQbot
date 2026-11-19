@@ -20,6 +20,8 @@ import { createAdminService } from "./admin/admin.js";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { QrLoginManager } from "./qq/qr-login.js";
 import { createQqRule } from "./messaging/rule.js";
+import { ModerationService } from "./moderation/service.js";
+import { JoinApprovalService } from "./join-approval/service.js";
 import { installReplyPump } from "./messaging/reply.js";
 import { makeQqbotRoutes } from "./admin/routes.js";
 import { registerRpcChannel, type RpcFence, type RpcChannelOptions } from "./admin/rpc-channel.js";
@@ -52,6 +54,10 @@ import { ChatMemoryStore } from "./infra/memory.js";
 import { Outbox } from "./messaging/outbox.js";
 import { QuotaTracker } from "./infra/quota.js";
 import { handleRawEvent } from "./messaging/events.js";
+import { GuildModerationService } from "./guild-moderation/service.js";
+import { GuildReplyService } from "./guild-reply/service.js";
+import { GuildKeywordService } from "./guild-keyword-mod/service.js";
+import { AiOpsService } from "./ai-ops/service.js";
 import type { ApprovalInteractionEvent } from "./messaging/approval.js";
 import type { QqbotConfig } from "../shared/config.js";
 import { SILENT_MARKER, isSilentReply } from "../shared/types.js";
@@ -245,6 +251,39 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     const llm = (typeof host.get === "function" ? host.get("llm") : undefined) ?? host.llm;
     return llm as unknown as ScriptGenLlm | undefined;
   };
+  // AI 群规审核服务：共享同一份 LLM 服务与模型选择，按群配置启用。
+  const moderationService = new ModerationService(
+    { getLlm: getHostLlm, resolveModel: resolveModelSel },
+    logger,
+  );
+  // 入群 AI 自动审批服务：共享同一份 LLM 服务与模型选择，按群配置启用。
+  const joinApprovalService = new JoinApprovalService(
+    { getLlm: getHostLlm, resolveModel: resolveModelSel },
+    logger,
+  );
+  // 频道 AI 接管服务：共享同一份 LLM 服务与模型选择，按频道配置启用。
+  const guildModerationService = new GuildModerationService(
+    { getLlm: getHostLlm, resolveModel: resolveModelSel },
+    logger,
+  );
+  // 频道 AI 自动回帖服务：新帖/评论@由频道事件直接触发，与审核服务独立配置。
+  const guildReplyService = new GuildReplyService(
+    { getLlm: getHostLlm, resolveModel: resolveModelSel },
+    logger,
+  );
+  // 频道违规词自动处置服务：本地词表匹配（零模型调用），命中即禁言+删除，与 AI 审核独立配置。
+  const guildKeywordService = new GuildKeywordService(logger);
+  // AI 操作助手：群聊 / 频道管理对话框用。本地解析优先，LLM 仅在无法理解时做一次极短路由。
+  const aiOpsService = new AiOpsService({
+    getLlm: getHostLlm,
+    resolveModel: resolveModelSel,
+    getBots: () => bots,
+    moderation: moderationService,
+    joinApproval: joinApprovalService,
+    guildModeration: guildModerationService,
+    guildReply: guildReplyService,
+    logger,
+  });
   // tool 模式 AI 脚本生成器：genPrompt 非空的任务由它生成脚本并回填命令。
   const scriptGen: ScriptGenerator = createScriptGenerator({
     store: schedules,
@@ -503,6 +542,29 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       }
     },
     onRawEvent: (bot, eventType, data) => {
+      // 违规词自动处置：私域 MESSAGE_CREATE + 论坛 FORUM_*（本地匹配，零模型调用）。
+      if (eventType === "MESSAGE_CREATE") {
+        void guildKeywordService.reviewChannelMessage(bot, data).catch((error) => {
+          logger.warn("[dsh-qqbot] 违规词处置失败:", error instanceof Error ? error.message : error);
+        });
+      } else if (GuildKeywordService.handlesForum(eventType)) {
+        void guildKeywordService.reviewForum(bot, eventType, data).catch((error) => {
+          logger.warn("[dsh-qqbot] 违规词论坛处置失败:", error instanceof Error ? error.message : error);
+        });
+      }
+      // 频道自动回帖：私域 MESSAGE_CREATE + 论坛 FORUM_*（SDK 未归一化为 message）。
+      if (eventType === "MESSAGE_CREATE") {
+        void guildReplyService.handleChannelMessage(bot, data).catch((error) => {
+          logger.warn("[dsh-qqbot] 频道新帖回帖失败:", error instanceof Error ? error.message : error);
+        });
+        return;
+      }
+      if (GuildReplyService.handles(eventType)) {
+        void guildReplyService.handleForumEvent(bot, eventType, data).catch((error) => {
+          logger.warn("[dsh-qqbot] 论坛回帖失败:", error instanceof Error ? error.message : error);
+        });
+        return;
+      }
       void handleRawEvent(bot, eventType, data).then((outcome) => {
         if (outcome.handled) {
           logger.info(`[dsh-qqbot] 事件 ${eventType} 已处理（机器人 ${bot.appId}${outcome.note ? `：${outcome.note}` : ""}）`);
@@ -512,6 +574,39 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       }).catch((error) => {
         logger.error(`[dsh-qqbot] 事件 ${eventType} 处理失败:`, error);
       });
+    },
+    onGuildMessage: (bot, message) => {
+      // 违规词自动处置（本地词表，零模型调用）；命中即禁言+删除，与 AI 审核并行独立。
+      void guildKeywordService.reviewMessage(bot, message).catch((error) => {
+        logger.warn("[dsh-qqbot] 违规词处置失败:", error instanceof Error ? error.message : error);
+      });
+      void guildModerationService.review({
+        bot,
+        guildId: message.guildId ?? "",
+        channelId: message.channelId ?? "",
+        messageId: message.messageId ?? "",
+        sender: message.senderId ?? "",
+        senderName: message.senderName ?? "",
+        content: message.content ?? "",
+      }).catch((error) => {
+        logger.warn("[dsh-qqbot] 频道 AI 接管处理失败:", error instanceof Error ? error.message : error);
+      });
+      void guildReplyService.handleMessage(bot, {
+        guildId: message.guildId ?? "",
+        channelId: message.channelId ?? "",
+        messageId: message.messageId ?? "",
+        sender: message.senderId ?? "",
+        senderName: message.senderName ?? "",
+        content: message.content ?? "",
+        rawEventType: message.rawEventType,
+        raw: message.raw,
+      }).catch((error) => {
+        logger.warn("[dsh-qqbot] 频道 AI 回帖失败:", error instanceof Error ? error.message : error);
+      });
+    },
+    onReady: (appId, data) => {
+      const user = (data && typeof data === "object" ? data as { user?: { id?: unknown } } : {}).user;
+      guildReplyService.setBotUser(appId, user?.id);
     },
     onInteraction: (bot, event) => {
       void bot.approvals.handleInteraction(event as ApprovalInteractionEvent).then((consumed) => {
@@ -536,6 +631,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       schedules,
       memory,
       quota,
+      moderation: moderationService,
       logger,
       WebhookRuleId: ruleId,
     });
@@ -623,6 +719,9 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     },
   });
 
+  // 入群 AI 自动审批：启用配置后由后台每 5 分钟自动扫描一轮，无需在界面手动点「AI 自动审批」。
+  const stopJoinAuto = joinApprovalService.startAuto(bots);
+
   const admin = createAdminService({
     bots,
     gconf,
@@ -631,6 +730,12 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
     scriptGen,
     qr,
     logger,
+    moderation: moderationService,
+    joinApproval: joinApprovalService,
+    guildModeration: guildModerationService,
+    guildReply: guildReplyService,
+    guildKeyword: guildKeywordService,
+    aiOps: aiOpsService,
     runtimeReady: () => Boolean(runtime),
     entryConfig,
     listModels: async () => {
@@ -731,7 +836,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
   // 运行时缺失时由 startRuntimeRetry 后台自愈，恢复后会自动补注册。
 
   // AI 工具：让模型帮忙设置/取消/查看定时消息、发送主动消息与图片、管理长期记忆。
-  const disposeTools = registerQqbotTools(ctx, { bots, store: schedules, scriptGen, memory, logger });
+  const disposeTools = registerQqbotTools(ctx, { bots, store: schedules, scriptGen, memory, aiOps: aiOpsService, logger });
 
   // HTTP 路由：管理端点（status / qr / send）。
   const route = makeQqbotRoutes({ logger, admin });
@@ -777,6 +882,7 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       disposeRoute();
     } catch { /* 已卸载 */ }
     clearInterval(outboxTimer);
+    stopJoinAuto();
     if (runtimeRetryTimer) {
       clearInterval(runtimeRetryTimer);
       runtimeRetryTimer = null;

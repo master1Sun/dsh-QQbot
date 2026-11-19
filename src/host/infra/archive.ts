@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pluginDataDir } from "./store-file.js";
 import { toShanghaiISO } from "../../shared/time.js";
+import { removeArchivedMedia, collectArchivedMedia, type ArchivedMedia, type ArchiveMediaKind, type ArchiveMediaMode } from "./archive-media.js";
 
 export type ArchiveKind = "inbound" | "reply" | "proactive" | "session";
 
@@ -39,6 +40,15 @@ export interface ArchiveRecord {
   sessionId?: string;
   /** 附加说明（过滤判定、错误等）。 */
   note?: string;
+  /** 随消息落地的图片（本地副本；平台原始 URL 有时效，故落地保存）。 */
+  media?: ArchivedMedia[];
+  /** 未保存的附件及原因（诊断用：平台无地址 / 语音 / 超限 / 下载失败等）。 */
+  mediaSkipped?: Array<{ name: string; reason: string }>;
+  /**
+   * 记录时间（ISO）。缺省取写入时刻；异步补写媒体时可传入事件发生时刻，
+   * 避免图片下载耗时把记录顺序挪到后面。
+   */
+  ts?: string;
 }
 
 const LEGACY_DIRNAME = "_legacy";
@@ -106,6 +116,44 @@ async function readLines(path: string): Promise<string[]> {
     return raw.split("\n").map((l) => l.trim()).filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+/** 记录里引用的媒体（按类别 + 文件名）。 */
+function mediaFilesOf(record: unknown): Array<{ kind: ArchiveMediaKind; file: string }> {
+  const list = (record as ArchivedEntry | null)?.media;
+  if (!Array.isArray(list)) return [];
+  const out: Array<{ kind: ArchiveMediaKind; file: string }> = [];
+  for (const m of list) {
+    if (!m || typeof m !== "object") continue;
+    const kind = (m as ArchivedMedia).kind;
+    const file = String((m as ArchivedMedia).file ?? "");
+    if (!file) continue;
+    out.push({ kind: kind === "video" || kind === "file" ? kind : "image", file });
+  }
+  return out;
+}
+
+/**
+ * 清理不再被任何归档记录引用的媒体文件。
+ *
+ * 媒体按 URL 哈希命名，同一份媒体可能被多条记录引用；因此删记录时不能直接
+ * 删文件——要先全库扫一遍，剩下的孤儿文件才删。
+ */
+async function cleanupOrphanMedia(candidates: Set<string>): Promise<void> {
+  if (candidates.size === 0) return;
+  const stillUsed = new Set<string>();
+  for (const file of await listMonthFiles()) {
+    for (const line of await readLines(file.path)) {
+      for (const m of mediaFilesOf(safeParseRecord(line))) stillUsed.add(`${m.kind}:${m.file}`);
+    }
+  }
+  for (const key of candidates) {
+    if (stillUsed.has(key)) continue;
+    const sep = key.indexOf(":");
+    const kind = key.slice(0, sep) as ArchiveMediaKind;
+    const name = key.slice(sep + 1);
+    await removeArchivedMedia(kind === "video" || kind === "file" ? kind : "image", name);
   }
 }
 
@@ -255,7 +303,7 @@ export class Archiver {
 
   async append(record: ArchiveRecord): Promise<void> {
     if (!this.#enabled()) return;
-    const ts = toShanghaiISO(new Date());
+    const ts = record.ts ?? toShanghaiISO(new Date());
     const line = `${JSON.stringify({ ts, ...(this.#bot ? { bot: this.#bot } : {}), ...record })}\n`;
     try {
       await ensureMigration(this.#logger);
@@ -269,6 +317,33 @@ export class Archiver {
         this.#logger.error("[dsh-qqbot] 消息归档写入失败（仅提示一次）:", error);
       }
     }
+  }
+
+  /**
+   * 写入一条带媒体的记录：先把媒体落地到本地，再连同 media 一起落盘。
+   *
+   * 媒体落地需要走网络（平台的附件地址有实效），可能耗时数秒；因此调用方
+   * 应以 fire-and-forget 方式调用（`void archiver.appendWithMedia(...)`），
+   * 不阻塞消息处理。记录时间用传入的 ts 固定，保证下载慢也不会把记录挪到
+   * 后面（否则归档里这条消息会排到后续消息之后）。
+   *
+   * mode 为 "off" 时直接落文本记录，不下载任何附件。
+   */
+  async appendWithMedia(
+    record: ArchiveRecord,
+    attachments: Array<{ content_type?: string; url?: string; filename?: string }> | undefined,
+    mode: ArchiveMediaMode = "off",
+    limits?: Partial<{ archiveMediaMaxImageMB?: number; archiveMediaMaxVideoMB?: number; archiveMediaMaxFileMB?: number }>,
+  ): Promise<void> {
+    if (!this.#enabled()) return;
+    const ts = record.ts ?? toShanghaiISO(new Date());
+    const { saved: media, skipped } = await collectArchivedMedia(attachments, mode, this.#logger, limits);
+    await this.append({
+      ...record,
+      ts,
+      ...(media.length > 0 ? { media } : {}),
+      ...(skipped.length > 0 ? { mediaSkipped: skipped } : {}),
+    });
   }
 }
 
@@ -538,6 +613,7 @@ export async function removeArchiveChat(opts: { bot?: string; chat?: string; mon
     : (await listMonthFiles()).filter((f) => f.chatDir === dir);
   let removed = 0;
   const filesDeleted: string[] = [];
+  const mediaCandidates = new Set<string>();
   for (const file of files) {
     const lines = await readLines(file.path);
     if (lines.length === 0) continue;
@@ -548,8 +624,12 @@ export async function removeArchiveChat(opts: { bot?: string; chat?: string; mon
       const recBot = rec && typeof rec.bot === "string" ? rec.bot : "";
       const matchChat = recChat === chat;
       const matchBot = !bot || !recBot || recBot === bot;
-      if (matchChat && matchBot) removed += 1;
-      else kept.push(line);
+      if (matchChat && matchBot) {
+        removed += 1;
+        for (const m of mediaFilesOf(rec)) mediaCandidates.add(`${m.kind}:${m.file}`);
+      } else {
+        kept.push(line);
+      }
     }
     if (kept.length === 0) {
       await rm(file.path, { force: true });
@@ -565,6 +645,8 @@ export async function removeArchiveChat(opts: { bot?: string; chat?: string; mon
   } catch {
     // 目录不存在或不可读：忽略
   }
+  // 清理不再被引用的图片文件（同一张图被其它记录引用时保留）。
+  await cleanupOrphanMedia(mediaCandidates);
   return { removed, filesDeleted };
 }
 
@@ -577,6 +659,7 @@ export async function removeArchiveDay(opts: { day?: string; bot?: string } = {}
   const files = (await listMonthFiles()).filter((f) => f.month === day.slice(0, 7));
   let removed = 0;
   let fileDeleted = false;
+  const mediaCandidates = new Set<string>();
   for (const file of files) {
     const lines = await readLines(file.path);
     if (lines.length === 0) continue;
@@ -584,8 +667,12 @@ export async function removeArchiveDay(opts: { day?: string; bot?: string } = {}
     for (const line of lines) {
       const record = safeParseRecord(line);
       const isDay = !!record && typeof record.ts === "string" && record.ts.slice(0, 10) === day;
-      if (isDay && recordMatchesBot(record, bot)) removed += 1;
-      else kept.push(line);
+      if (isDay && recordMatchesBot(record, bot)) {
+        removed += 1;
+        for (const m of mediaFilesOf(record)) mediaCandidates.add(`${m.kind}:${m.file}`);
+      } else {
+        kept.push(line);
+      }
     }
     if (kept.length === 0) {
       await rm(file.path, { force: true });
@@ -594,5 +681,6 @@ export async function removeArchiveDay(opts: { day?: string; bot?: string } = {}
       await writeFile(file.path, `${kept.join("\n")}\n`, "utf8");
     }
   }
+  await cleanupOrphanMedia(mediaCandidates);
   return { removed, fileDeleted };
 }

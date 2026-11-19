@@ -154,6 +154,24 @@ export class RefIndex {
     return this.#entries.get(idx) ?? null;
   }
 
+  /**
+   * 列出某个聊天最近「可作为被动回复凭证」的消息。
+   * 条件：chat 匹配、有 msgId、入库时间不早于 sinceMs（默认 5 分钟内）、非机器人自己发的。
+   * 按入库时间倒序，最多 limit 条。供图文卡片等主动发送受限时选用被动回复。
+   */
+  recentByChat(chat: string, limit = 20, sinceMs = 5 * 60 * 1000): RefIndexEntry[] {
+    if (!chat) return [];
+    const cutoff = Date.now() - Math.max(0, sinceMs);
+    const out: RefIndexEntry[] = [];
+    for (const entry of this.#entries.values()) {
+      if (entry.chat !== chat || entry.fromBot || !entry.msgId) continue;
+      if (entry.at < cutoff) continue;
+      out.push(entry);
+    }
+    out.sort((a, b) => b.at - a.at);
+    return out.slice(0, Math.max(1, limit));
+  }
+
   /** 当前索引条数（状态展示）。 */
   get size(): number {
     return this.#entries.size;

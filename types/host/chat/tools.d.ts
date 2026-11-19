@@ -13,6 +13,7 @@ import { ScheduleStore } from "../schedule/schedule.js";
 import type { BotRuntimeManager } from "../bots.js";
 import type { ChatMemoryStore } from "../infra/memory.js";
 import type { ScriptGenerator } from "../schedule/script-gen.js";
+import type { AiOpsService } from "../ai-ops/service.js";
 export interface QqbotToolsContext {
     /** 多机器人运行时：按会话反查来源机器人（各自独立的状态 / 客户端）。 */
     bots: BotRuntimeManager;
@@ -21,8 +22,10 @@ export interface QqbotToolsContext {
     scriptGen?: ScriptGenerator;
     /** 每聊天长期记忆（qqbot_memory_* 工具）。 */
     memory?: ChatMemoryStore;
+    /** AI 操作助手：让 agent 在聊天里直接说人话操作群 / 频道。 */
+    aiOps?: AiOpsService;
     logger: Pick<Console, "info" | "warn" | "error">;
 }
-export declare function buildQqbotTools({ bots, store, scriptGen, memory, logger }: QqbotToolsContext): ToolDefinition[];
+export declare function buildQqbotTools({ bots, store, scriptGen, memory, aiOps, logger }: QqbotToolsContext): ToolDefinition[];
 /** 把工具注册到 host（全局）；返回卸载函数。 */
 export declare function registerQqbotTools(ctx: Context, deps: QqbotToolsContext): () => void;

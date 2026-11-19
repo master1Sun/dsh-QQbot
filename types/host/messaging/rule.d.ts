@@ -3,6 +3,7 @@ import type { Agent as LiveAgent } from "@deepseek-ai/dsh-agent";
 import type { BotRuntime } from "../bots.js";
 import type { ScheduleStore } from "../schedule/schedule.js";
 import type { ChatMemoryStore } from "../infra/memory.js";
+import type { ModerationService } from "../moderation/service.js";
 export interface QqRuleContext {
     /** 按 AppID 取机器人运行时；取不到或事件无归属时返回主机器人。 */
     resolveBot: (appId?: string) => BotRuntime | undefined;
@@ -15,8 +16,10 @@ export interface QqRuleContext {
     memory?: ChatMemoryStore;
     /** 主动消息每日配额（/广播 等命令消耗）。 */
     quota?: import("../infra/quota.js").QuotaTracker;
+    /** AI 群规审核服务（群级开关开启时审消息并按等级禁言）。 */
+    moderation?: ModerationService;
     logger: Pick<Console, "info" | "warn" | "error">;
     /** webhook 规则 id 构造器（来自 @deepseek-ai/dsh-webhook；运行时有值时由宿主注入）。 */
     WebhookRuleId?: (name: string) => string;
 }
-export declare function createQqRule({ resolveBot, agents, schedules, memory, quota, logger, WebhookRuleId, }: QqRuleContext): WebhookRule<"qq">;
+export declare function createQqRule({ resolveBot, agents, schedules, memory, quota, moderation, logger, WebhookRuleId, }: QqRuleContext): WebhookRule<"qq">;

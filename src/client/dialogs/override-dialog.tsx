@@ -181,6 +181,8 @@ export function OverrideDialog(props: {
       ovField(t("group.openid"), t("group.openidHintPicker"),
         h(OpenIdPicker, {
           chats: archiveChats.chats,
+          rpcCall,
+          appId,
           scope: "group",
           value: String(draft.openid ?? ""),
           readOnly: Boolean(editOpenid),

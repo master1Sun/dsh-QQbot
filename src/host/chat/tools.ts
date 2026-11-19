@@ -12,12 +12,16 @@ import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 import type { JsonValue } from "@deepseek-ai/dsh-util-values";
 import type { JsonSchemaNode, ToolDefinition, ToolOutputDefinition, ToolRunContext } from "@deepseek-ai/dsh-tools";
 import { MAX_SCHEDULES_PER_CHAT, ScheduleStore, type ScheduleEntry } from "../schedule/schedule.js";
-import type { BotRuntimeManager } from "../bots.js";
+import type { BotRuntimeManager, BotRuntime } from "../bots.js";
 import type { ChatMemoryStore } from "../infra/memory.js";
 import type { ScriptGenerator } from "../schedule/script-gen.js";
 import type { BotState } from "../../shared/types.js";
 import { assertLocalMediaPath, assertSafeMediaUrl, defaultAllowedRoots } from "../infra/net-guard.js";
 import { sanitizeOutgoingText } from "../messaging/sanitize.js";
+import { saveArchivedMedia, saveArchivedLocalMedia, mediaModeAllows, maxBytesFor } from "../infra/archive-media.js";
+import type { AiOpsService } from "../ai-ops/service.js";
+import type { AiEntity, AiScope } from "../ai-ops/catalog.js";
+import { describeApi, findApiEntries, matchExecutableApi, type ApiMethod } from "../ai-ops/api-catalog.js";
 
 export interface QqbotToolsContext {
   /** 多机器人运行时：按会话反查来源机器人（各自独立的状态 / 客户端）。 */
@@ -27,6 +31,8 @@ export interface QqbotToolsContext {
   scriptGen?: ScriptGenerator;
   /** 每聊天长期记忆（qqbot_memory_* 工具）。 */
   memory?: ChatMemoryStore;
+  /** AI 操作助手：让 agent 在聊天里直接说人话操作群 / 频道。 */
+  aiOps?: AiOpsService;
   logger: Pick<Console, "info" | "warn" | "error">;
 }
 
@@ -112,7 +118,40 @@ async function guardMediaSource(
   }
 }
 
-export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: QqbotToolsContext): ToolDefinition[] {
+export function buildQqbotTools({ bots, store, scriptGen, memory, aiOps, logger }: QqbotToolsContext): ToolDefinition[] {
+  /**
+   * 归档一条「机器人主动发出的媒体」（图片 / 视频 / 文件）。
+   *
+   * 媒体先落地成本地副本（平台的发送结果不回传可长期访问的地址），再写入
+   * 归档记录，前端归档弹窗才能显示出站媒体的缩略图。
+   * 未开启归档媒体保存（archiveMedia=off）或落地失败时只跳过 media，
+   * 不影响发送本身。
+   */
+  const archiveOutboundMedia = async (
+    bot: BotRuntime,
+    scope: "group" | "c2c",
+    openid: string,
+    source: { url?: string; localPath?: string },
+    kind: "image" | "video" | "file",
+    content?: string,
+  ): Promise<void> => {
+    const mode = bot.config.archiveMedia ?? "off";
+    if (!mediaModeAllows(mode, kind)) return;
+    const media = source.url
+      ? await saveArchivedMedia(source.url, { kind, logger, maxBytes: maxBytesFor(kind, bot.config) })
+      : source.localPath
+        ? await saveArchivedLocalMedia(source.localPath, { kind, logger, maxBytes: maxBytesFor(kind, bot.config) })
+        : null;
+    if (!media) return;
+    await bot.archiver.append({
+      kind: "proactive",
+      chat: `${scope}:${openid}`,
+      content: content ?? "",
+      note: kind,
+      media: [media],
+    });
+  };
+
   /** 按会话反查来源机器人；未绑定聊天时抛出模型可读的错误。 */
   const requireBot = (exec: { agent?: { id?: unknown } }): {
     appId: string;
@@ -130,6 +169,54 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
       throw new Error("当前会话绑定的 QQ 聊天已失效：请用户在群里重新发一条消息。");
     }
     return { appId: bot.appId, state: bot.state, ...chat };
+  };
+
+  /** 聊天里没有设置页那种「已加载成员表」，这里按当前聊天上下文自动拉一份极简实体表。 */
+  const loadAiEntities = async (
+    bot: BotRuntime, scope: AiScope, groupOpenid: string, guildId: string,
+  ): Promise<AiEntity[]> => {
+    const out: AiEntity[] = [];
+    const nameOf = (v: unknown): string => (typeof v === "string" || typeof v === "number" ? String(v) : "");
+    try {
+      if (scope === "group") {
+        const { members } = await bot.client.listGroupMembers(groupOpenid, "");
+        for (const m of members.slice(0, 300)) {
+          const row = m as unknown as Record<string, unknown>;
+          const id = nameOf(row.member_openid ?? row.openid ?? row.user_openid);
+          if (!id) continue;
+          out.push({ id, name: nameOf(row.username ?? row.nickname ?? row.nick) || id, kind: "member" });
+        }
+      } else if (guildId) {
+        const [chRes, roleRes, memRes] = await Promise.allSettled([
+          bot.client.listGuildChannels(guildId),
+          bot.client.listGuildRoles(guildId),
+          bot.client.listGuildMembers(guildId, { limit: 100 }),
+        ]);
+        if (chRes.status === "fulfilled" && Array.isArray(chRes.value)) {
+          for (const c of chRes.value as Array<Record<string, unknown>>) {
+            const id = nameOf(c.id);
+            if (id) out.push({ id, name: nameOf(c.name) || id, kind: "channel" });
+          }
+        }
+        if (roleRes.status === "fulfilled" && Array.isArray(roleRes.value)) {
+          for (const r of roleRes.value as Array<Record<string, unknown>>) {
+            const id = nameOf(r.id ?? r.role_id);
+            if (id) out.push({ id, name: nameOf(r.name) || id, kind: "role" });
+          }
+        }
+        if (memRes.status === "fulfilled" && Array.isArray(memRes.value.members)) {
+          for (const m of (memRes.value.members as Array<Record<string, unknown>>).slice(0, 300)) {
+            const user = (m.user && typeof m.user === "object" ? m.user : {}) as Record<string, unknown>;
+            const id = nameOf(user.id ?? m.member_openid);
+            if (!id) continue;
+            out.push({ id, name: nameOf(user.username ?? m.nick) || id, kind: "member" });
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn("[dsh-qqbot] AI 操作实体表加载失败，改用 ID 解析:", error instanceof Error ? error.message : error);
+    }
+    return out;
   };
 
   return [
@@ -456,6 +543,8 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
         await bot.client.sendImage({ scope, openid }, source, { content: a.content });
         bot.state.counters.proactive += 1;
         logger.info(`[dsh-qqbot] AI 发送图片（机器人 ${appId}）→ ${scope}:${openid}`);
+        // 归档：把发出的图片落地保存，设置页的归档弹窗才能显示缩略图。
+        void archiveOutboundMedia(bot, scope, openid, source, "image", a.content);
         return { ok: true, sent: true };
       },
     },
@@ -489,6 +578,8 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
         await bot.client.sendFile({ scope, openid }, source, { fileName: a.fileName, content: a.content });
         bot.state.counters.proactive += 1;
         logger.info(`[dsh-qqbot] AI 发送文件（机器人 ${appId}）→ ${scope}:${openid}`);
+        // 归档：文件落地保存（受「归档媒体保存」设置控制）。
+        void archiveOutboundMedia(bot, scope, openid, source, "file", a.content);
         return { ok: true, sent: true };
       },
     },
@@ -564,6 +655,192 @@ export function buildQqbotTools({ bots, store, scriptGen, memory, logger }: Qqbo
         bot.state.counters.proactive += 1;
         logger.info(`[dsh-qqbot] AI 审批请求「${title.slice(0, 40)}」→ ${decision}（机器人 ${bot.appId}）`);
         return { ok: true, decision, approved: decision === "allow" };
+      },
+    },
+    {
+      name: "qqbot_manage",
+      description: [
+        "在用户直接要求管理当前 QQ 群 / 频道时调用：禁言或解除成员、移出群、拉黑、查看或审批入群申请、发消息、开关 AI 群规审核 / 入群审批 / 频道 AI 接管 / 自动回帖、查看子频道与成员、创建或删除子频道、全员禁言、撤回消息等。",
+        "把用户的原话原样放进 instruction，工具会在当前会话绑定的聊天上下文里执行，并把执行结果返回给用户。绝大多数指令本地解析、不额外调用模型；设置页「执行记录」Tab 会同步留痕。官方 OpenAPI 用法可查 qqbot_api_help，白名单接口可用 qqbot_api_call 执行。",
+      ].join(" "),
+      parameters: {
+        type: "object",
+        properties: {
+          instruction: { type: "string", description: "用户要求操作的原话，例如：禁言张三 10 分钟 / 开启AI群规审核" },
+          guildId: { type: "string", description: "频道操作时指定频道 ID；群聊操作留空" },
+          channelId: { type: "string", description: "频道发消息 / 撤回消息时指定子频道 ID" },
+          entities: {
+            type: "array",
+            description: "可选：当前对话里提到的成员 / 子频道 / 身份组 {id,name,kind}；留空时工具会自动从当前群/频道拉取",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                kind: { type: "string", enum: ["member", "channel", "role"] },
+              },
+              required: ["id", "name", "kind"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["instruction"],
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        if (!aiOps) throw new Error("AI 操作助手服务不可用，请重启 dsh web 后再试。");
+        const a = (args ?? {}) as {
+          instruction?: unknown; guildId?: unknown; channelId?: unknown; entities?: unknown;
+        };
+        const instruction = typeof a.instruction === "string" ? a.instruction.trim() : "";
+        if (!instruction) throw new Error("instruction 必填：请传入用户要求操作的原话。");
+        const chat = requireBot(exec);
+        const guildId = typeof a.guildId === "string" ? a.guildId.trim() : "";
+        if (chat.scope !== "group" && !guildId) {
+          throw new Error("当前是单聊会话，没有可管理的群。请在 QQ 群里对话，或在 guildId 里指定频道。");
+        }
+        const scope: AiScope = guildId ? "guild" : "group";
+        let entities: AiEntity[] = Array.isArray(a.entities)
+          ? a.entities.flatMap((row) => {
+              if (!row || typeof row !== "object") return [];
+              const r = row as Record<string, unknown>;
+              const id = typeof r.id === "string" ? r.id : "";
+              const name = typeof r.name === "string" ? r.name : id;
+              const kind = r.kind === "channel" || r.kind === "role" ? r.kind : "member";
+              return id ? [{ id, name, kind }] : [];
+            })
+          : [];
+        // 只读/开关类指令不需要昵称解析，跳过实体表拉取，少打一次 OpenAPI。
+        const needsEntities = /禁言|解除|移出|拉黑|黑名单|通过|拒绝|审批|删除|删掉|撤回|发送|创建/.test(instruction);
+        if (needsEntities && !entities.length) {
+          const bot = bots.get(chat.appId);
+          if (bot) entities = await loadAiEntities(bot, scope, chat.scope === "group" ? chat.openid : "", guildId);
+        }
+        const out = await aiOps.chat({
+          appId: chat.appId,
+          scope,
+          text: instruction,
+          groupOpenid: scope === "group" ? chat.openid : "",
+          guildId,
+          channelId: typeof a.channelId === "string" ? a.channelId.trim() : "",
+          entities,
+        });
+        return {
+          ok: out.ok,
+          reply: out.reply,
+          source: out.source,
+          action: out.action?.a ?? "",
+          usedLlm: out.usedLlm,
+          chat: scope === "group" ? `group:${chat.openid}` : `guild:${guildId}`,
+        };
+      },
+    },
+    {
+      name: "qqbot_api_help",
+      description: [
+        "按需查询本插件已接入的 QQ 官方 OpenAPI 用法（HTTP 方法 / 路径 / 参数 / 权限限制），覆盖频道与群聊两个场景。",
+        "仅当用户明确要求某个官方接口、或 qqbot_manage 覆盖不了时才调用；不要一次拉全量。可用 qqbot_api_call 执行白名单内的接口。",
+      ].join(" "),
+      parameters: {
+        type: "object",
+        properties: {
+          scope: { type: "string", enum: ["guild", "group"], description: "场景：guild=频道，group=群聊；默认根据当前会话判断" },
+          keyword: { type: "string", description: "接口关键词，如 身份组 / pins / threads / 禁言 / 黑名单 / panels；留空返回精简清单" },
+          limit: { type: "number", description: "最多返回几条（1-48，默认 12）" },
+        },
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        const a = (args ?? {}) as { scope?: unknown; keyword?: unknown; limit?: unknown };
+        const keyword = typeof a.keyword === "string" ? a.keyword.trim().slice(0, 60) : "";
+        const limit = typeof a.limit === "number" ? a.limit : 12;
+        // scope 显式指定优先；否则按当前会话（群聊会话→group，其余→guild）
+        let scope = a.scope === "group" || a.scope === "guild" ? a.scope : "";
+        if (!scope) {
+          try { scope = requireBot(exec).scope === "group" ? "group" : "guild"; } catch { scope = "guild"; }
+        }
+        const rows = findApiEntries(keyword, limit, scope);
+        return {
+          ok: true,
+          scope,
+          count: rows.length,
+          hint: scope === "group"
+            ? "路径里的 {group_openid} 由 qqbot_api_call 从当前会话自动填充；{member_openid} 等从 params 填充。"
+            : "路径里的 {guild_id} / {channel_id} 等由 qqbot_api_call 从 guildId、channelId、params 自动填充。",
+          apis: rows.map(describeApi),
+        };
+      },
+    },
+    {
+      name: "qqbot_api_call",
+      description: [
+        "执行白名单内的 QQ 官方 OpenAPI（先 qqbot_api_help 查用法）：频道场景可操作身份组/消息/精华/日程/帖子/权限；群聊场景可操作群资料/成员/禁言/入群审批/黑名单/消息/面板。",
+        "只允许本插件已接入的接口；路径占位符从 scope 对应的上下文与 params 填充，禁止手拼其它路径。群聊的 {group_openid} 自动取当前会话。写操作立即生效，用户明确要求再调用。",
+      ].join(" "),
+      parameters: {
+        type: "object",
+        properties: {
+          scope: { type: "string", enum: ["guild", "group"], description: "场景：guild=频道，group=群聊；默认根据当前会话判断" },
+          method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"], description: "HTTP 方法" },
+          path: { type: "string", description: "qqbot_api_help 返回的官方路径模板" },
+          guildId: { type: "string", description: "频道 ID；{guild_id} 占位符由它填充" },
+          channelId: { type: "string", description: "子频道 ID；{channel_id} 占位符由它填充" },
+          params: { type: "object", description: "其余路径占位符，如 {user_id,role_id,message_id,strategy_id,panel_id,member_openid}" },
+          query: { type: "object", description: "URL 查询参数，如 {limit:20,cursor:\"xxx\"}" },
+          body: { type: "object", description: "请求体 JSON（POST / PUT / PATCH）" },
+        },
+        required: ["method", "path"],
+        additionalProperties: false,
+      },
+      output: OBJECT_OUTPUT,
+      async execute(args: unknown, exec: ToolRunContext) {
+        const a = (args ?? {}) as Record<string, unknown>;
+        const method = typeof a.method === "string" ? a.method.toUpperCase() : "";
+        const inputPath = typeof a.path === "string" ? a.path.trim() : "";
+        const chat = requireBot(exec);
+        // scope 显式指定优先；否则按当前会话（群聊→group，其余→guild）
+        let scope = a.scope === "group" || a.scope === "guild" ? a.scope : "";
+        if (!scope) scope = chat.scope === "group" ? "group" : "guild";
+        const matched = matchExecutableApi(method, inputPath, scope);
+        if (!matched) throw new Error(`接口不在${scope === "group" ? "群聊" : "频道"}白名单：${method} ${inputPath}。请先调用 qqbot_api_help 查看支持的接口。`);
+        const template = matched.entry[1];
+        const guildId = typeof a.guildId === "string" ? a.guildId.trim() : matched.values.guild_id ?? "";
+        const channelId = typeof a.channelId === "string" ? a.channelId.trim() : matched.values.channel_id ?? "";
+        if (template.includes("{guild_id}") && !guildId) throw new Error("该接口需要 guildId（频道 ID）。");
+        if (template.includes("{channel_id}") && !channelId) throw new Error("该接口需要 channelId（子频道 ID）。");
+        const bot = bots.get(chat.appId);
+        if (!bot) throw new Error("机器人运行时不可用，请稍后重试。");
+        const params = (a.params && typeof a.params === "object" ? a.params : {}) as Record<string, unknown>;
+        const placeholders: Record<string, string> = {
+          ...matched.values,
+          guild_id: guildId,
+          channel_id: channelId,
+          // 群聊场景：当前会话的群 openid 自动填充
+          group_openid: chat.scope === "group" ? chat.openid : "",
+        };
+        for (const [key, value] of Object.entries(params)) {
+          if (typeof value === "string" || typeof value === "number") placeholders[key] = String(value).trim();
+        }
+        const path = template.replace(/\{([a-z_]+)\}/g, (_m, key: string) => {
+          const value = placeholders[key] ?? "";
+          if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
+            throw new Error(`路径参数 ${key} 缺失或非法（只允许字母、数字、_、-）。${key === "group_openid" ? "当前会话不是群聊，请在 QQ 群里对话。" : ""}`);
+          }
+          return value;
+        });
+        const query = (a.query && typeof a.query === "object" ? a.query : {}) as Record<string, string | number | boolean>;
+        const raw = await bot.client.request(method as ApiMethod, path, a.body, query);
+        const json = JSON.stringify(raw);
+        return {
+          ok: true,
+          scope,
+          method,
+          path,
+          truncated: json.length > 4000,
+          data: json.length > 4000 ? `${json.slice(0, 4000)}…（结果已截断）` : raw,
+        };
       },
     },
     {

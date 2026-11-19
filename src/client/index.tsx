@@ -52,7 +52,10 @@ import {
 import { CSS_TEXT } from "./styles.js";
 import { AddBotView } from "./add-bot-view.js";
 import { ArchiveDialog } from "./dialogs/archive-dialog.js";
+import { ConfigManifestDialog } from "./dialogs/config-manifest-dialog.js";
 import { OverrideDialog } from "./dialogs/override-dialog.js";
+import { PlatformToolsDialog } from "./dialogs/platform-tools-dialog.js";
+import { GuildManagerDialog } from "./dialogs/guild-manager-dialog.js";
 import { ScheduleDialog } from "./dialogs/schedule-dialog.js";
 import { WorkspacePickerDialog } from "./dialogs/workspace-picker.js";
 import { setRpcCall } from "./right-panel/api.js";
@@ -69,8 +72,6 @@ declare const __PLUGIN_VERSION__: string;
 const PLUGIN_AUTHOR = "master1Sun";
 const PLUGIN_LICENSE = "MIT";
 const PLUGIN_REPO_URL = "https://github.com/master1Sun/dsh-QQbot";
-const PLUGIN_REPO_LABEL = "github.com/master1Sun/dsh-QQbot";
-const pluginVersion = typeof __PLUGIN_VERSION__ === "string" && __PLUGIN_VERSION__ ? __PLUGIN_VERSION__ : "0.0.0";
 
 const RPC_CHANNEL = "/qqbot-settings";
 
@@ -132,10 +133,16 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [scheduleOpen, setScheduleOpen] = React.useState(false);
   const [archiveOpen, setArchiveOpen] = React.useState(false);
   const [pickerOpen, setPickerOpen] = React.useState(false);
+  /** 配置清单（JSON 编辑）弹窗。 */
+  const [manifestOpen, setManifestOpen] = React.useState(false);
   /** 按群配置编辑目标 openid；空串=新增覆盖，null=弹窗关闭。 */
   const [overrideEdit, setOverrideEdit] = React.useState<string | null>(null);
 
   const [notice, setNotice] = React.useState("");
+  /** 平台能力弹窗：入口在「管理」Tab，操作结果提示由弹窗内部吸顶展示。 */
+  const [platformOpen, setPlatformOpen] = React.useState(false);
+  /** 频道管理弹窗（竖向 Tab：频道 / 子频道 / 成员 / 身份组 / 消息）。 */
+  const [guildOpen, setGuildOpen] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
   const [refreshing, setRefreshing] = React.useState(false);
   const [reconnecting, setReconnecting] = React.useState(false);
@@ -197,7 +204,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
 
   // 弹窗是否打开（ref 供 effect 读取，避免加入依赖导致弹窗关闭时重复触发滚动）。
   const dialogOpenRef = React.useRef(false);
-  dialogOpenRef.current = Boolean(scheduleOpen || archiveOpen || pickerOpen || overrideEdit !== null);
+  dialogOpenRef.current = Boolean(scheduleOpen || archiveOpen || pickerOpen || overrideEdit !== null || manifestOpen || platformOpen || guildOpen);
 
   // 提示条渲染在页面顶部，长页面滚动后可能落在视口外：提示变化时自动滚动到可见区域。
   // 弹窗打开期间不滚动：弹窗内有内联提示，且弹窗保存成功后不应把主界面拉回顶部。
@@ -462,18 +469,18 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           className: "qbot-botCard",
           onClick: () => { setDetailAppId(bot.appId); setDetailTab("runtime"); setNotice(""); setPage("detail"); },
         },
-          h("div", { className: "qbot-botCardBody" },
-            h("div", { className: "qbot-botTop" },
-              h("div", { className: "qbot-botIdentity" },
-                h("span", { className: "qbot-botAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
-                h("div", { className: "qbot-botName" },
-                  h("h3", null, bot.appIdMasked),
-                  h("p", null, fmt("notice.sourceSavedAt", bot.source === "qr" ? t("qr.tabScan") : t("qr.tabManual"), formatTime(bot.savedAt))))),
-              h("div", { className: "qbot-botTools" },
-                h("div", { className: "qbot-botHealthGroup" },
-                  StateLabel({ tone: st.tone, text: st.text }),
-                  h("span", { className: "qbot-lastChecked" }, bot.primary ? t("status.primaryBot") : (bot.enabled ? t("status.enabled") : t("status.disabled"))))),
-            h("div", { className: "qbot-botChevron", "aria-hidden": "true" }))));
+          h("div", { className: "qbot-botCardHead" },
+            h("span", { className: "qbot-botAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
+            h("span", { className: "qbot-botCardTitle" },
+              h("strong", null, bot.appIdMasked),
+              h("span", { className: "qbot-botCardMeta" }, fmt("notice.sourceSavedAt",
+                bot.source === "qr" ? t("qr.tabScan") : t("qr.tabManual"), formatTime(bot.savedAt))))),
+          h("div", { className: "qbot-botCardStatus" },
+            StateLabel({ tone: st.tone, text: st.text }),
+            h("span", { className: "qbot-botCardRole" }, bot.primary ? t("status.primaryBot") : (bot.enabled ? t("status.enabled") : t("status.disabled")))),
+          h("div", { className: "qbot-botCardFoot" },
+            h("span", null, t("list.cardOpen")),
+            h("span", { className: "qbot-botCardArrow", "aria-hidden": "true" }, "→")));
       }),
       (bots?.bots.length ?? 0) === 0
         ? h("div", { className: "qbot-surfaceCard" },
@@ -482,8 +489,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
               h("div", { className: "qbot-emptyCopy" },
                 h("h3", null, t("list.empty")),
                 h("p", null, t("list.emptyHint")))))
-        : null,
-      h("p", { className: "qbot-hint" }, t("list.cardHint"))),
+        : null),
+    h("p", { className: "qbot-hint" }, t("list.cardHint")),
 )
 
 
@@ -549,8 +556,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   /** 详情页横向 Tab：运行 / 配置 / 管理，默认「运行」。标签是函数内常量，t() 不会冻结语言。 */
   const detailTabs: Array<{ id: "runtime" | "config" | "manage"; label: string; count: number }> = [
     { id: "runtime", label: t("detail.groupRuntime"), count: (status ? 1 : 0) + 2 },
-    { id: "config", label: t("detail.groupConfig"), count: 4 },
-    { id: "manage", label: t("detail.groupManage"), count: 2 },
+    { id: "config", label: t("detail.groupConfig"), count: 5 },
+    { id: "manage", label: t("detail.groupManage"), count: 3 },
   ];
   const detailTabBar = h("div", { className: "qbot-detailTabs", role: "tablist" },
     detailTabs.map((tb) =>
@@ -800,6 +807,23 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             h("option", { value: "zh" }, t("replyLocale.zh")),
             h("option", { value: "en" }, "English")),
         }),
+        // 归档媒体保存：默认「不保存」，开启后聊天里的图片/视频/文件会落地到
+        // ~/.dsh/qqbot/archive/images|videos|files/，归档弹窗里可直接看到。
+        SettingRow({
+          rowKey: "archiveMedia",
+          label: t("feature.archiveMedia"),
+          desc: t("feature.archiveMediaHint"),
+          control: h("select", {
+            className: "qbot-settingSelect",
+            value: String(form.archiveMedia ?? "off"),
+            onChange: (e: any) => void saveField("archiveMedia", e.target.value),
+            "aria-label": t("feature.archiveMedia"),
+          },
+            h("option", { value: "off" }, t("feature.archiveMediaOff")),
+            h("option", { value: "image" }, t("feature.archiveMediaImage")),
+            h("option", { value: "imageVideo" }, t("feature.archiveMediaImageVideo")),
+            h("option", { value: "all" }, t("feature.archiveMediaAll"))),
+        }),
         // 欢迎语开关与文案已从界面移除（默认开启），仅通过 bots.json 配置 welcomeEnabled / welcomeMessage。
         SettingRow({
           rowKey: "bannedWords",
@@ -851,9 +875,33 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           h("span", { className: "qbot-hint" }, t("group.overrideHint")),
           h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setOverrideEdit("") }, t("group.add")))),
       undefined, { icon: "▦", tone: "info", summary: groupSummary }),
+
+    // ── 配置清单入口：整份配置以 JSON 查看/编辑/校验/写回（高级用户，放在最后）──
+    actionCard({
+      icon: "{ }", tone: "business",
+      title: t("manifest.entryTitle"), desc: t("manifest.entryDesc"),
+      summary: t("manifest.entrySummary"),
+      disabled: !detailBot, onClick: () => setManifestOpen(true),
+    }),
       ] : [
 
-    // ── 连接与移除 ──
+    // ── 平台能力入口：整卡可点，群管理 / 通用能力在独立弹窗里操作 ──
+    actionCard({
+      icon: "⚡", tone: "success",
+      title: t("pt.tabTitle"), desc: t("pt.tabHint"),
+      summary: t("pt.tabSummary"),
+      disabled: !detailBot, onClick: () => setPlatformOpen(true),
+    }),
+
+    // ── 频道管理入口：整卡可点，频道能力在独立弹窗里用竖向 Tab 切换 ──
+    actionCard({
+      icon: "◈", tone: "info",
+      title: t("gv.title"), desc: t("gv.hint"),
+      summary: t("gv.summary"),
+      disabled: !detailBot, onClick: () => setGuildOpen(true),
+    }),
+
+    // ── 连接与移除（放在管理 Tab 最下面；关于已移到页面底部页脚） ──
     sectionCard(t("conn.title"), t("conn.hint"),
       h("div", { className: "qbot-settingList" },
           detailBot
@@ -895,30 +943,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
                   onClick: () => void removeBot(detailBot),
                 }, t("conn.remove")),
               })
-            : null), undefined, { danger: true, icon: "!", tone: "danger", summary: connSummary }),
-
-    // ── 关于（版本 / 作者 / 许可证 / 开源地址） ──
-    sectionCard(t("detail.aboutTitle"), t("detail.aboutHint"),
-      h("div", { className: "qbot-aboutList" },
-        h("div", { className: "qbot-aboutRow" },
-          h("span", null, t("detail.aboutVersion")),
-          h("code", null, `v${pluginVersion}`)),
-        h("div", { className: "qbot-aboutRow" },
-          h("span", null, t("detail.aboutAuthor")),
-          h("strong", null, PLUGIN_AUTHOR)),
-        h("div", { className: "qbot-aboutRow" },
-          h("span", null, t("detail.aboutLicense")),
-          h("strong", null, PLUGIN_LICENSE)),
-        h("div", { className: "qbot-aboutRow" },
-          h("span", null, t("detail.aboutRepo")),
-          h("a", {
-            className: "qbot-aboutLink",
-            href: PLUGIN_REPO_URL,
-            target: "_blank", rel: "noreferrer noopener",
-          }, PLUGIN_REPO_LABEL)),
-        h("div", { className: "qbot-aboutFoot" },
-          h("span", null, fmt("detail.aboutCopyright", PLUGIN_AUTHOR)))),
-      undefined, { icon: "ⓘ", tone: "info", summary: `v${pluginVersion}` })])));
+            : null), undefined, { danger: true, icon: "!", tone: "danger", summary: connSummary })])));
 
   const addBotView = h(AddBotView, {
     rpcCall,
@@ -932,6 +957,23 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     },
     onBack: () => setPage("list"),
   });
+
+  // ── 页面底部页脚（版本 / 作者 / 许可证 / 开源地址）──────────────────────
+  // 作为每个视图内容的末尾片段渲染：宿主把 .qbot-panel 当滚动/裁剪区时，
+  // 放在 panel 之后的页脚在长页面（详情/添加）会被挤出可视区，故随视图走。
+  const pageFoot = h("footer", { className: "qbot-pageFoot" },
+    h("div", { className: "qbot-pageFootBody" },
+      h("span", null, `© ${new Date().getFullYear()} ${PLUGIN_AUTHOR}`),
+      h("span", { className: "qbot-pageFootDot" }, "·"),
+      h("span", null, `${PLUGIN_LICENSE} License`),
+      h("span", { className: "qbot-pageFootDot" }, "·"),
+      h("a", {
+        className: "qbot-aboutLink",
+        href: PLUGIN_REPO_URL,
+        target: "_blank", rel: "noreferrer noopener",
+        "aria-label": t("detail.aboutRepo"),
+      }, "GitHub")),
+    h("div", { className: "qbot-pageFootCopy" }, t("detail.aboutCopyright")));
 
   // ═══ 页面骨架：标题栏 + 面板（无左侧导航栏，导航由面板内按钮承担） ═══════════
 
@@ -968,7 +1010,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         )
       : null,
       h("div", { className: "qbot-panel", id: "qbot-panel" },
-        page === "list" ? listView : page === "add" ? addBotView : detailView),
+        page === "list"
+          ? h(React.Fragment, null, listView, pageFoot)
+          : page === "add"
+            ? h(React.Fragment, null, addBotView, pageFoot)
+            : h(React.Fragment, null, detailView, pageFoot)),
     pickerOpen
       ? h(WorkspacePickerDialog, {
           rpcCall,
@@ -1016,6 +1062,35 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     // ── 消息归档弹窗（自包含组件） ──
     archiveOpen
       ? h(ArchiveDialog, { rpcCall, detailAppId, onClose: () => setArchiveOpen(false) })
+      : null,
+    // ── 配置清单（JSON 编辑）弹窗 ──
+    manifestOpen
+      ? h(ConfigManifestDialog, {
+          appId: detailAppId,
+          rpcCall,
+          onClose: () => setManifestOpen(false),
+          onSaved: () => {
+            void refresh(detailAppId || undefined);
+            setNotice(t("manifest.savedNotice"));
+          },
+        })
+      : null,
+    // ── 平台能力弹窗（自包含组件：选群 / 群管理 / 通用能力） ──
+    platformOpen
+      ? h(PlatformToolsDialog, {
+          rpcCall,
+          appId: detailAppId || detailBot?.appId || "",
+          groups: Array.isArray(form.allowGroups) ? (form.allowGroups as string[]) : [],
+          onClose: () => setPlatformOpen(false),
+        })
+      : null,
+    // ── 频道管理弹窗（自包含组件：竖向 Tab 的频道 OpenAPI 能力） ──
+    guildOpen
+      ? h(GuildManagerDialog, {
+          rpcCall,
+          appId: detailAppId || detailBot?.appId || "",
+          onClose: () => setGuildOpen(false),
+        })
       : null,
     // ── 全局自定义确认框（window.confirm 的替代，置顶于所有弹窗） ──
     h(ConfirmHost, null));

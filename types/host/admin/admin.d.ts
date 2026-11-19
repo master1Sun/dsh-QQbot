@@ -5,6 +5,12 @@ import type { ScriptGenerator } from "../schedule/script-gen.js";
 import type { BotRuntimeManager } from "../bots.js";
 import { type GlobalConfig } from "../infra/store-file.js";
 import type { QqbotConfig } from "../../shared/config.js";
+import type { ModerationService } from "../moderation/service.js";
+import type { JoinApprovalService } from "../join-approval/service.js";
+import type { GuildModerationService } from "../guild-moderation/service.js";
+import type { GuildReplyService } from "../guild-reply/service.js";
+import type { GuildKeywordService } from "../guild-keyword-mod/service.js";
+import type { AiOpsService } from "../ai-ops/service.js";
 export interface AdminServiceContext {
     /** 多机器人运行时：所有按 appId 的查询 / 操作入口。 */
     bots: BotRuntimeManager;
@@ -31,6 +37,18 @@ export interface AdminServiceContext {
             label: string;
         }>;
     }>;
+    /** AI 群规审核服务（配置读写 / 日志；设置页「AI 群规审核」区使用）。 */
+    moderation?: ModerationService;
+    /** 入群 AI 自动审批服务（配置读写 / 执行 / 日志）。 */
+    joinApproval?: JoinApprovalService;
+    /** 频道 AI 接管服务（配置读写 / 日志；频道管理弹窗使用）。 */
+    guildModeration?: GuildModerationService;
+    /** 频道 AI 自动回帖服务（配置读写 / 日志）。 */
+    guildReply?: GuildReplyService;
+    /** 频道违规词自动处置服务（配置读写 / 日志；发言管理 Tab 使用）。 */
+    guildKeyword?: GuildKeywordService;
+    /** AI 操作助手（群聊管理 / 频道管理对话式操作，本地优先省 token）。 */
+    aiOps?: AiOpsService;
 }
 export declare function createAdminService(ctx: AdminServiceContext): {
     status: () => {
@@ -84,6 +102,10 @@ export declare function createAdminService(ctx: AdminServiceContext): {
                     maxRepliesPerMessage?: number;
                     proactiveFallback?: boolean;
                     archiveEnabled?: boolean;
+                    archiveMedia?: "off" | "image" | "imageVideo" | "all";
+                    archiveMediaMaxImageMB?: number;
+                    archiveMediaMaxVideoMB?: number;
+                    archiveMediaMaxFileMB?: number;
                     markdownReply?: boolean;
                     quoteReply?: "off" | "at" | "all";
                     quoteMaxChars?: number;

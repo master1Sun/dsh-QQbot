@@ -20,7 +20,7 @@ export declare const QQBOT_LOCALE_NAMESPACE = "dsh-qqbot";
  * 传空则退化为直接读本地字典（用于 verify/render 等无宿主的场景）。
  */
 export declare function setTranslator(next?: (key: string) => string | undefined): void;
-/** 设置当前语言（通常由宿主 locale 事件驱动）。 */
+/** 设置当前语言（通常由宿主 locale 事件驱动）；宿主翻译可用时以探针结果为准。 */
 export declare function setLocale(locale: string): void;
 /** 读取当前语言。 */
 export declare function getLocale(): "cn" | "en";

@@ -191,6 +191,7 @@ function blankEntry(detailAppId: string) {
     goal: "",
     notifyWhen: "",
     verify: false,
+    atEveryone: false,
     tool: "",
     args: {} as Record<string, unknown>,
   };
@@ -363,6 +364,7 @@ export function ScheduleManager(props: {
               goal: String(entry.goal ?? ""),
               notifyWhen: String(entry.notifyWhen ?? ""),
               verify: entry.verify === true,
+              atEveryone: entry.atEveryone === true,
               tool: typeof entry.tool === "string" ? entry.tool : "",
               args: entry.args && typeof entry.args === "object" ? { ...entry.args } : {},
             },
@@ -477,6 +479,8 @@ export function ScheduleManager(props: {
             ...(String(e.parsePrompt ?? "").trim() ? { parsePrompt: String(e.parsePrompt).trim() } : {}),
           }
         : { content: String(e.content ?? "").trim() }),
+      // @全体成员：仅群聊 text 任务携带（宿主侧会再校验 scope/mode）。
+      ...(e.mode === "text" && e.scope === "group" ? { atEveryone: e.atEveryone === true } : {}),
       // 任务契约：ai / tool 模式通用（text 是固定句子直发，无需分诊）。
       ...(e.mode === "ai" || e.mode === "tool"
         ? {
@@ -1015,8 +1019,32 @@ export function ScheduleManager(props: {
         "aria-label": t("sched.content"),
       }),
     );
-    // text 模式是固定句子直发，无分诊/校验，只渲染内容；ai 模式追加任务契约。
-    if (e.mode !== "ai") return contentRow;
+    // text 模式：群聊任务追加「@全体成员」勾选（平台限制：管理员 + 每群每天 1 次）；
+    // ai 模式追加任务契约。
+    if (e.mode !== "ai") {
+      if (e.scope !== "group") return contentRow;
+      const atEveryoneRow = editRow(
+        t("sched.form.atEveryone"),
+        t("sched.form.atEveryoneHint"),
+        h(
+          "div",
+          { className: "qbot-checkRow" },
+          h("input", {
+            type: "checkbox",
+            className: "qbot-checkbox",
+            checked: e.atEveryone === true,
+            onChange: (ev: any) => setEditField("atEveryone", ev.target.checked),
+            "aria-label": t("sched.form.atEveryone"),
+          }),
+          h(
+            "span",
+            { className: "qbot-checkText" },
+            e.atEveryone === true ? t("sched.form.atEveryoneOn") : t("sched.form.atEveryoneOff"),
+          ),
+        ),
+      );
+      return h("div", { className: "qbot-schedFieldCol" }, contentRow, atEveryoneRow);
+    }
     return h("div", { className: "qbot-schedFieldCol" }, contentRow, ...contractFields(e));
   };
 
@@ -1161,6 +1189,8 @@ export function ScheduleManager(props: {
                       t("sched.form.recipientHintPicker"),
                       h(OpenIdPicker, {
                         chats: archiveChats.chats,
+                        rpcCall,
+                        appId: detailAppId,
                         scope: ed.scope === "group" ? "group" : "c2c",
                         value: String(ed.openid ?? ""),
                         loading: archiveChats.loading,

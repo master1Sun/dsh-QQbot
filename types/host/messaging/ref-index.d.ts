@@ -46,6 +46,12 @@ export declare class RefIndex {
     record(entry: RefIndexEntry): void;
     /** 按索引键取回原文；不存在返回 null。 */
     resolve(idx: string): RefIndexEntry | null;
+    /**
+     * 列出某个聊天最近「可作为被动回复凭证」的消息。
+     * 条件：chat 匹配、有 msgId、入库时间不早于 sinceMs（默认 5 分钟内）、非机器人自己发的。
+     * 按入库时间倒序，最多 limit 条。供图文卡片等主动发送受限时选用被动回复。
+     */
+    recentByChat(chat: string, limit?: number, sinceMs?: number): RefIndexEntry[];
     /** 当前索引条数（状态展示）。 */
     get size(): number;
 }

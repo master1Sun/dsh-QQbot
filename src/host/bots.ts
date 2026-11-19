@@ -16,6 +16,7 @@ import { createValueFilterState } from "./infra/value-filter.js";
 import { Archiver } from "./infra/archive.js";
 import { RefIndex } from "./messaging/ref-index.js";
 import { SelfOpenidStore } from "./messaging/self-id.js";
+import { UserProfileStore } from "./messaging/user-profile.js";
 import { TypingKeeper } from "./messaging/typing.js";
 import { ApprovalManager } from "./messaging/approval.js";
 import { QqApiClient } from "./qq/api.js";
@@ -54,6 +55,14 @@ export interface BotRuntime {
   selfOpenids: Map<string, string>;
   /** 自身 openid 学习结果的持久化存储。 */
   selfStore: SelfOpenidStore;
+  /**
+   * 用户资料缓存：openid → { 昵称, 头像 URL }。
+   * 20261116 起消息事件 author 携带 username/avatar/member_nickname，收消息时学习；
+   * 供归档头像等展示场景查询（缓存缺失时回退 GET /v2/users/{openid}/info）。
+   */
+  readonly userProfiles: Map<string, { name: string; avatar: string }>;
+  /** 用户资料学习结果的持久化存储（防抖写盘，重启后头像昵称不丢）。 */
+  profileStore: UserProfileStore;
 }
 
 export interface BotRuntimeManagerOptions {
@@ -70,6 +79,10 @@ export interface BotRuntimeManagerOptions {
   onEvent: (bot: BotRuntime, eventType: string, payload: QqEnvelope, deliveryId: string) => void;
   /** 原始网关事件出口（成员进出/表情/好友等），由 index.ts 分派给事件处理器。 */
   onRawEvent?: (bot: BotRuntime, eventType: string, data: unknown) => void;
+  /** 频道 READY 事件（含频道侧 bot user id），用于评论@识别。 */
+  onReady?: (appId: string, data: unknown) => void;
+  /** 频道消息出口（kind=guild），由 index.ts 分派给频道 AI 接管服务。 */
+  onGuildMessage?: (bot: BotRuntime, message: import("@tencent-connect/qqbot-nodejs").QQBotInboundMessage) => void;
   /** 按钮回调（INTERACTION_CREATE）出口，由 index.ts 分派给审批管理器。 */
   onInteraction?: (bot: BotRuntime, event: unknown) => void;
   /**
@@ -226,6 +239,7 @@ export class BotRuntimeManager {
 
       let isNew = false;
       let credentialChanged = false;
+      let intentsChanged = false;
       if (!bot) {
         bot = this.#create(stored, secret, config);
         this.#bots.set(stored.appId, bot);
@@ -233,6 +247,9 @@ export class BotRuntimeManager {
         credentialChanged = true;
       } else {
         credentialChanged = bot.appSecret !== secret;
+        // intents 只在 IDENTIFY 时生效：开启/关闭私域消息或论坛事件必须重连。
+        intentsChanged = bot.config.guildMessageEvents !== config.guildMessageEvents
+          || bot.config.forumEvents !== config.forumEvents;
         bot.stored = stored;
         bot.enabled = stored.enabled;
         bot.appSecret = secret;
@@ -248,7 +265,7 @@ export class BotRuntimeManager {
       }
       const state = bot.ws.status.state;
       // 新建 / 凭据变化 / 之前没连上 → 重新发起连接；已连接的不打断。
-      if (isNew || credentialChanged || state === "idle" || state === "failed") {
+      if (isNew || credentialChanged || intentsChanged || state === "idle" || state === "failed") {
         void bot.ws.start(config);
       }
     }
@@ -290,6 +307,8 @@ export class BotRuntimeManager {
       valueFilterState: createValueFilterState(),
       presets: { agentPreset: "", permissionPreset: "" },
       selfOpenids: new Map(),
+      userProfiles: new Map(),
+      profileStore: undefined as unknown as UserProfileStore,
       // 占位：下面立即替换（对象需要自引用闭包）
       client: undefined as unknown as QqApiClient,
       ws: undefined as unknown as QqWsSource,
@@ -319,6 +338,13 @@ export class BotRuntimeManager {
     void bot.selfStore.load(bot.appId).then((map) => {
       for (const [group, id] of map) bot.selfOpenids.set(group, id);
     });
+    // 已学习的用户资料异步读回（归档头像昵称重启不丢）。
+    bot.profileStore = new UserProfileStore(this.#options.logger);
+    void bot.profileStore.load(bot.appId).then((map) => {
+      for (const [openid, profile] of map) {
+        if (!bot.userProfiles.has(openid)) bot.userProfiles.set(openid, profile);
+      }
+    });
     bot.ws = new QqWsSource({
       logger: this.#options.logger,
       onEvent: (eventType, payload, deliveryId) => {
@@ -327,6 +353,12 @@ export class BotRuntimeManager {
       },
       onRawEvent: (eventType, data) => {
         this.#options.onRawEvent?.(bot, eventType, data);
+      },
+      onReady: (data) => {
+        this.#options.onReady?.(bot.appId, data);
+      },
+      onGuildMessage: (message) => {
+        this.#options.onGuildMessage?.(bot, message);
       },
       onInteraction: (event) => {
         this.#options.onInteraction?.(bot, event);

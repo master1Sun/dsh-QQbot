@@ -188,8 +188,8 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
       // false：普通被动回复（msg_id，无卡片）。
       const sendOnce = (withQuote: boolean) =>
         bot.client.sendReply(record.target, chunk, withQuote
-          ? { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown, quoteMsgId: record.selfIdx }
-          : { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown });
+          ? { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown, quoteMsgId: record.selfIdx, forceVerifyImage: bot.config.forceVerifyImage }
+          : { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown, forceVerifyImage: bot.config.forceVerifyImage });
       try {
         let channel = quoteReply ? "被动(引用)" : "被动";
         let result: { mode: "markdown" | "text"; id?: string };

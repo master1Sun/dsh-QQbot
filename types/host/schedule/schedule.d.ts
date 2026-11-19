@@ -83,6 +83,12 @@ export interface ScheduleEntry {
      * 跳过不投递、不消耗主动消息配额，并把原因记入 lastSkipReason。
      */
     gate?: "always" | "nonempty" | "changed";
+    /**
+     * 群聊任务：发送时 @全体成员（文本前注入 <qqbot-at-everyone />）。
+     * 平台限制：机器人需为该群管理员，且每个群每天仅可发送 1 次（20261026）。
+     * 仅 text 模式群聊任务生效；单聊任务忽略。
+     */
+    atEveryone?: boolean;
     /** gate=changed：上次成功发送内容的指纹（sha1 前 16 位），避免明文驻留。 */
     lastDigest?: string;
     /** 最近一次「跳过发送」的时刻（上海时间 ISO）。 */

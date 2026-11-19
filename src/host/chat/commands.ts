@@ -127,13 +127,24 @@ export interface CommandOutcome {
   reply?: string;
 }
 
+/**
+ * 剥离开头连续的 @提及（群 @机器人场景：content 形如 "<@openid> /help"）。
+ * 与 rule.ts 的 AT_TEXT_PATTERN 同格式：<@id> / <@!id>，id 至少 8 位。
+ * 只剥离开头，避免误伤消息正文里出现的 @。
+ */
+function stripLeadingMentions(text: string): string {
+  return text.replace(/^(?:\s*<@!?[A-Za-z0-9_-]{8,}>)+/, "").trim();
+}
+
 /** 解析并执行命令；非命令返回 { handled: false }。 */
 export async function runCommand(
   text: string,
   { scope, openid, sender, msgId }: { scope: ReplyTarget["scope"]; openid: string; sender: string; msgId: string },
   ctx: CommandContext,
 ): Promise<CommandOutcome> {
-  const trimmed = text.trim();
+  // 群里必须 @机器人才能唤起回复，content 因此带 <@id> 前缀；先剥离再判命令，
+  // 否则 "@机器人 /help" 因开头是 <@ 被判非命令，掉进 AI 对话。单聊无此前缀，不受影响。
+  const trimmed = stripLeadingMentions(text);
   if (!trimmed.startsWith("/")) return { handled: false };
   const [rawCmd, ...rest] = trimmed.split(/\s+/);
   const cmd = (rawCmd ?? "").toLowerCase();

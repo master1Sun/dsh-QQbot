@@ -44,6 +44,12 @@ export interface StoredBotConfig {
     proactiveFallback?: boolean;
     /** 消息本地归档（审计轨迹）。 */
     archiveEnabled?: boolean;
+    /** 归档媒体保存级别：off / image / imageVideo / all。 */
+    archiveMedia?: "off" | "image" | "imageVideo" | "all";
+    /** 归档媒体单个体积上限（MB），仅 bots.json 可配（设置页不展示）。 */
+    archiveMediaMaxImageMB?: number;
+    archiveMediaMaxVideoMB?: number;
+    archiveMediaMaxFileMB?: number;
     /** 回复优先用 QQ Markdown。 */
     markdownReply?: boolean;
     /** 出站引用范围：off=不引用；at=仅群 @；all=群聊全部回复。 */
@@ -121,7 +127,7 @@ export interface StoredBotConfig {
     [key: string]: unknown;
 }
 /** 行为配置字段（config.get / config.save 序列化时统一引用，不含传输/凭据字段）。 */
-export declare const BOT_CONFIG_FIELDS: readonly ["workspacePath", "agentPreset", "permissionPreset", "model", "secretEnv", "allowC2c", "allowGroups", "allowUsers", "atContextMessages", "groupBufferMax", "replyChunkChars", "maxRepliesPerMessage", "proactiveFallback", "archiveEnabled", "markdownReply", "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs", "quoteReply", "quoteMaxChars", "respondToBots", "multimodalInbound", "voiceTranscription", "asrEndpoint", "sttBaseUrl", "sttApiKey", "sttModel", "ttsReply", "ttsBaseUrl", "ttsApiKey", "ttsModel", "ttsVoice", "typingIndicator", "approvalButtons", "fileIngestion", "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords", "memoryEnabled", "quotaPerDay", "replyLocale", "scheduleMaxPerChat", "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "permissionInjection", "permissionAdmins", "groupOverrides"];
+export declare const BOT_CONFIG_FIELDS: readonly ["workspacePath", "agentPreset", "permissionPreset", "model", "secretEnv", "allowC2c", "allowGroups", "allowUsers", "atContextMessages", "groupBufferMax", "replyChunkChars", "maxRepliesPerMessage", "proactiveFallback", "archiveEnabled", "archiveMedia", "archiveMediaMaxImageMB", "archiveMediaMaxVideoMB", "archiveMediaMaxFileMB", "markdownReply", "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs", "quoteReply", "quoteMaxChars", "respondToBots", "multimodalInbound", "voiceTranscription", "asrEndpoint", "sttBaseUrl", "sttApiKey", "sttModel", "ttsReply", "ttsBaseUrl", "ttsApiKey", "ttsModel", "ttsVoice", "typingIndicator", "approvalButtons", "fileIngestion", "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords", "memoryEnabled", "quotaPerDay", "replyLocale", "scheduleMaxPerChat", "guildMessageEvents", "forumEvents", "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "permissionInjection", "permissionAdmins", "groupOverrides"];
 /**
  * 行为配置默认值（与 config.ts resolveConfig 的缺省值一致）。
  * 建库 / 加载时把每个机器人 config 补齐到这份完整结构，使 bots.json 自包含、

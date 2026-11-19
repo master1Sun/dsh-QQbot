@@ -109,6 +109,12 @@ export interface ScheduleEntry {
    * 跳过不投递、不消耗主动消息配额，并把原因记入 lastSkipReason。
    */
   gate?: "always" | "nonempty" | "changed";
+  /**
+   * 群聊任务：发送时 @全体成员（文本前注入 <qqbot-at-everyone />）。
+   * 平台限制：机器人需为该群管理员，且每个群每天仅可发送 1 次（20261026）。
+   * 仅 text 模式群聊任务生效；单聊任务忽略。
+   */
+  atEveryone?: boolean;
   /** gate=changed：上次成功发送内容的指纹（sha1 前 16 位），避免明文驻留。 */
   lastDigest?: string;
   /** 最近一次「跳过发送」的时刻（上海时间 ISO）。 */
@@ -395,6 +401,8 @@ export class ScheduleStore {
       gate: mode === "tool"
         ? input.gate === "nonempty" ? "nonempty" : input.gate === "changed" ? "changed" : "always"
         : void 0,
+      // @全体：仅群聊任务生效（平台限制：管理员 + 每群每天 1 次）。
+      atEveryone: scope === "group" && mode === "text" && (input.atEveryone === true || input.atEveryone === "true") ? true : void 0,
       // 编辑已禁用的任务时保留禁用态，避免「改一下内容就被重新启用」。
       enabled: input.enabled === void 0 ? existing?.enabled ?? true : Boolean(input.enabled),
       ...(input.createdBy ? { createdBy: input.createdBy } : {}),
@@ -598,6 +606,12 @@ export class ScheduleStore {
         return { ok: false, error: "发送门控（gate）必须是 always / nonempty / changed" };
       }
       entry.gate = mode === "tool" ? patch.gate : void 0;
+    }
+    // @全体：仅群聊 text 任务生效；切到单聊 / 非 text 模式自动清除。
+    if (patch.atEveryone !== void 0) {
+      entry.atEveryone = entry.scope === "group" && mode === "text" && (patch.atEveryone === true || patch.atEveryone === "true") ? true : void 0;
+    } else if (entry.scope !== "group" || mode !== "text") {
+      entry.atEveryone = void 0;
     }
     // ⑦ 任务契约（ai / tool 生效）。
     if (patch.goal !== void 0) {
@@ -989,9 +1003,11 @@ export class Scheduler {
           } else if (entry.mode === "tool") {
             throw new Error("tool 执行器未配置，无法运行该定时任务");
           } else {
+            const text = sanitizeOutgoingText(entry.content, { enabled: bot.config.sanitizeReplies });
+            // @全体成员：群聊 text 任务勾选后注入平台标记（需管理员，每群每天 1 次）。
             await bot.client.sendText(
               { scope: entry.scope, openid: entry.openid },
-              sanitizeOutgoingText(entry.content, { enabled: bot.config.sanitizeReplies })
+              entry.atEveryone && entry.scope === "group" ? `<qqbot-at-everyone />${text}` : text
             );
           }
           if (skip?.skipped) {
@@ -1074,9 +1090,10 @@ export class Scheduler {
       } else if (entry.mode === "tool") {
         throw new Error("tool 执行器未配置，无法运行该定时任务");
       } else {
+        const text = sanitizeOutgoingText(entry.content, { enabled: bot.config.sanitizeReplies });
         await bot.client.sendText(
           { scope: entry.scope, openid: entry.openid },
-          sanitizeOutgoingText(entry.content, { enabled: bot.config.sanitizeReplies })
+          entry.atEveryone && entry.scope === "group" ? `<qqbot-at-everyone />${text}` : text
         );
       }
       entry.lastSentAt = toShanghaiISO(new Date());

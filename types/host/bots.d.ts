@@ -2,6 +2,7 @@ import { createValueFilterState } from "./infra/value-filter.js";
 import { Archiver } from "./infra/archive.js";
 import { RefIndex } from "./messaging/ref-index.js";
 import { SelfOpenidStore } from "./messaging/self-id.js";
+import { UserProfileStore } from "./messaging/user-profile.js";
 import { TypingKeeper } from "./messaging/typing.js";
 import { ApprovalManager } from "./messaging/approval.js";
 import { QqApiClient } from "./qq/api.js";
@@ -41,6 +42,17 @@ export interface BotRuntime {
     selfOpenids: Map<string, string>;
     /** 自身 openid 学习结果的持久化存储。 */
     selfStore: SelfOpenidStore;
+    /**
+     * 用户资料缓存：openid → { 昵称, 头像 URL }。
+     * 20261116 起消息事件 author 携带 username/avatar/member_nickname，收消息时学习；
+     * 供归档头像等展示场景查询（缓存缺失时回退 GET /v2/users/{openid}/info）。
+     */
+    readonly userProfiles: Map<string, {
+        name: string;
+        avatar: string;
+    }>;
+    /** 用户资料学习结果的持久化存储（防抖写盘，重启后头像昵称不丢）。 */
+    profileStore: UserProfileStore;
 }
 export interface BotRuntimeManagerOptions {
     logger: Pick<Console, "info" | "warn" | "error">;
@@ -59,6 +71,10 @@ export interface BotRuntimeManagerOptions {
     onEvent: (bot: BotRuntime, eventType: string, payload: QqEnvelope, deliveryId: string) => void;
     /** 原始网关事件出口（成员进出/表情/好友等），由 index.ts 分派给事件处理器。 */
     onRawEvent?: (bot: BotRuntime, eventType: string, data: unknown) => void;
+    /** 频道 READY 事件（含频道侧 bot user id），用于评论@识别。 */
+    onReady?: (appId: string, data: unknown) => void;
+    /** 频道消息出口（kind=guild），由 index.ts 分派给频道 AI 接管服务。 */
+    onGuildMessage?: (bot: BotRuntime, message: import("@tencent-connect/qqbot-nodejs").QQBotInboundMessage) => void;
     /** 按钮回调（INTERACTION_CREATE）出口，由 index.ts 分派给审批管理器。 */
     onInteraction?: (bot: BotRuntime, event: unknown) => void;
     /**

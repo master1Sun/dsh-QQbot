@@ -87,6 +87,12 @@ export interface StoredBotConfig {
   proactiveFallback?: boolean;
   /** 消息本地归档（审计轨迹）。 */
   archiveEnabled?: boolean;
+  /** 归档媒体保存级别：off / image / imageVideo / all。 */
+  archiveMedia?: "off" | "image" | "imageVideo" | "all";
+  /** 归档媒体单个体积上限（MB），仅 bots.json 可配（设置页不展示）。 */
+  archiveMediaMaxImageMB?: number;
+  archiveMediaMaxVideoMB?: number;
+  archiveMediaMaxFileMB?: number;
   /** 回复优先用 QQ Markdown。 */
   markdownReply?: boolean;
   /** 出站引用范围：off=不引用；at=仅群 @；all=群聊全部回复。 */
@@ -168,7 +174,8 @@ export interface StoredBotConfig {
 export const BOT_CONFIG_FIELDS = [
   "workspacePath", "agentPreset", "permissionPreset", "model", "secretEnv",
   "allowC2c", "allowGroups", "allowUsers", "atContextMessages", "groupBufferMax",
-  "replyChunkChars", "maxRepliesPerMessage", "proactiveFallback", "archiveEnabled",
+  "replyChunkChars", "maxRepliesPerMessage", "proactiveFallback", "archiveEnabled", "archiveMedia",
+  "archiveMediaMaxImageMB", "archiveMediaMaxVideoMB", "archiveMediaMaxFileMB",
   "markdownReply", "groupFullReply", "valueThreshold", "groupCooldownMs", "senderCooldownMs",
   "quoteReply", "quoteMaxChars", "respondToBots",
   "multimodalInbound", "voiceTranscription", "asrEndpoint",
@@ -177,6 +184,7 @@ export const BOT_CONFIG_FIELDS = [
   "approvalButtons", "fileIngestion",
   "welcomeEnabled", "welcomeMessage", "reactionRecall", "bannedWords",
   "memoryEnabled", "quotaPerDay", "replyLocale", "scheduleMaxPerChat",
+  "guildMessageEvents", "forumEvents",
   "sanitizeReplies", "ssrfGuard", "localPathWhitelist", "permissionInjection", "permissionAdmins", "groupOverrides",
 ] as const;
 
@@ -201,6 +209,10 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   maxRepliesPerMessage: 5,
   proactiveFallback: false,
   archiveEnabled: true,
+  archiveMedia: "off",
+  archiveMediaMaxImageMB: 8,
+  archiveMediaMaxVideoMB: 64,
+  archiveMediaMaxFileMB: 32,
   markdownReply: true,
   quoteReply: "at",
   quoteMaxChars: 120,
@@ -228,6 +240,8 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   reactionRecall: true,
   bannedWords: [],
   memoryEnabled: true,
+  guildMessageEvents: false,
+  forumEvents: false,
   quotaPerDay: 50,
   replyLocale: "zh",
   scheduleMaxPerChat: 15,

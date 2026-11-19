@@ -25,6 +25,7 @@ import type { ScheduleStore } from "../schedule/schedule.js";
 import type { ChatMemoryStore } from "../infra/memory.js";
 import type { QqbotConfig } from "../../shared/config.js";
 import { configForGroup } from "../../shared/config.js";
+import type { ModerationService } from "../moderation/service.js";
 import {
   addGroupMessage,
   enqueueRecord,
@@ -53,6 +54,8 @@ export interface QqRuleContext {
   memory?: ChatMemoryStore;
   /** 主动消息每日配额（/广播 等命令消耗）。 */
   quota?: import("../infra/quota.js").QuotaTracker;
+  /** AI 群规审核服务（群级开关开启时审消息并按等级禁言）。 */
+  moderation?: ModerationService;
   logger: Pick<Console, "info" | "warn" | "error">;
   /** webhook 规则 id 构造器（来自 @deepseek-ai/dsh-webhook；运行时有值时由宿主注入）。 */
   WebhookRuleId?: (name: string) => string;
@@ -320,15 +323,45 @@ function liveAgent(agents: QqRuleContext["agents"], sessionId: string | undefine
   }
 }
 
+/**
+ * 学习消息发送者的资料（20261116 平台新增：单聊下发 username/avatar，
+ * 群聊下发 member_nickname 及 avatar）。存进 bot.userProfiles 供归档头像等展示场景查询。
+ * 群聊展示名优先群昵称（member_nickname），回退全局昵称（username）。
+ */
+function learnUserProfile(bot: BotRuntime, payload: QqMessagePayload): void {
+  const author = payload.author;
+  if (!author) return;
+  const openid = String(author.member_openid ?? author.id ?? "").trim();
+  if (!openid) return;
+  const name = String(author.member_nickname ?? author.username ?? "").trim();
+  const avatar = String(author.avatar ?? "").trim();
+  if (!name && !avatar) return;
+  const prev = bot.userProfiles.get(openid);
+  if (!prev || prev.name !== name || prev.avatar !== avatar) {
+    bot.userProfiles.set(openid, { name, avatar });
+    bot.profileStore.scheduleSave(bot.appId, bot.userProfiles);
+  }
+}
+
+/** 事件里最适合展示的发送者名称：群聊优先群昵称，回退全局昵称。 */
+function senderDisplayName(payload: QqMessagePayload): string {
+  const author = payload.author;
+  if (!author) return "";
+  return String(author.member_nickname ?? author.username ?? "").trim();
+}
+
 export function createQqRule({
   resolveBot,
   agents,
   schedules,
   memory,
   quota,
+  moderation,
   logger,
   WebhookRuleId,
 }: QqRuleContext): WebhookRule<"qq"> {
+  /** AI 审核去重：同一 (群:发送者:内容) 在 10s 内只审一次，避免 @ 孪生事件重复调用模型。 */
+  const moderationSeen = new Map<string, number>();
   // WebhookRuleId 来自可选 peer @deepseek-ai/dsh-webhook；缺失时退化为原样 id，
   // 保证运行时不可用时规则仍可构造（插件整体已降级运行）。
   const makeRuleId = WebhookRuleId ?? ((name: string) => name);
@@ -346,6 +379,8 @@ export function createQqRule({
       const { eventType, payload } = parsed;
       const content = (payload.content ?? "").trim();
       const sender = senderIdOf(payload);
+      // 学习发送者昵称/头像（群昵称优先），供归档头像与界面展示。
+      learnUserProfile(bot, payload);
       const target = replyTargetOf(eventType, payload);
       const group = payload.group_openid ?? "";
       // 生效配置 = 按群覆盖合并（群 > 机器人默认；单聊与未覆盖群直接用机器人配置）。
@@ -377,6 +412,23 @@ export function createQqRule({
           `groupFullReply=${config.groupFullReply} valueThreshold=${config.valueThreshold} noThreshold=${noThreshold} isAt=${diagIsAt}`,
         );
       }
+      // ── AI 群规审核（仅在群消息、且该群显式开启时；异步不阻塞回复链路） ──
+      // 放在回复/去重的 early-return 之前：即使本条不回复（groupFullReply=false、
+      // 孪生事件去重等），审核照常进行。审核服务内部再判开关/白名单/管理员权限。
+      if (moderation && group && content
+        && (eventType === "GROUP_MESSAGE_CREATE" || eventType === "GROUP_AT_MESSAGE_CREATE")) {
+        const mKey = `${group}:${sender}:${content.replace(/\s+/g, "").slice(0, 120)}`;
+        const last = moderationSeen.get(mKey) ?? 0;
+        if (Date.now() - last > 10_000) {
+          moderationSeen.set(mKey, Date.now());
+          if (moderationSeen.size > 2000) {
+            const cutoff = Date.now() - 10_000;
+            for (const [k, t] of moderationSeen) if (t < cutoff) moderationSeen.delete(k);
+          }
+          void moderation.review({ bot, groupId: group, sender, senderName: senderDisplayName(payload), content });
+        }
+      }
+
       // ── 群 @ 消息孪生事件富化 ───────────────────────────────────────
       // 群里 @ 一条消息会同时推 GROUP_MESSAGE_CREATE（带 msg_idx/selfIdx）与
       // GROUP_AT_MESSAGE_CREATE（带可靠 @ 信号）。去重后仅首事件建会话并回复，
@@ -414,23 +466,27 @@ export function createQqRule({
         if (group && config.groupBufferMax > 0) {
           addGroupMessage(state, group, {
             senderId: sender,
-            senderName: payload.author?.username ?? "",
+            senderName: senderDisplayName(payload),
             content,
             timestamp: payload.timestamp ?? "",
           }, config.groupBufferMax);
         }
         // 其他机器人消息默认忽略（respondToBots 开启时放行，由用户自行承担互相触发风险）。
-        if (!config.groupFullReply || !content || (payload.author?.bot === true && !config.respondToBots)) return null;
+        // 图片/表情包等附件消息 content 为空（内容在 attachments 里），不能因空文本丢弃。
+        const hasAttachments = (payload.attachments ?? []).length > 0;
+        if (!config.groupFullReply || (!content && !hasAttachments) || (payload.author?.bot === true && !config.respondToBots)) return null;
         if (!target || !allowed(config.allowGroups, target.openid) || !allowed(config.allowUsers, sender)) return null;
-        void bot.archiver.append({
+        void bot.archiver.appendWithMedia({
           kind: "inbound",
           event: eventType,
           chat: "group:" + target.openid,
           group: target.openid,
           sender,
-          senderName: payload.author?.username,
+          senderName: senderDisplayName(payload),
           content,
-        });
+        }, payload.attachments, config.archiveMedia, config);
+        // 纯附件消息（无文字）只归档，不进入回复流程，避免对群里每张图都产生回应。
+        if (!content) return null;
         // 敏感词：命中即撤回原消息并跳过回复。
         if (await enforceBannedWords(bot, "GROUP_MESSAGE_CREATE", payload, content, logger)) return null;
         // 去重登记：QQ 对 @ 消息会同时推送 GROUP_MESSAGE_CREATE 与 GROUP_AT_MESSAGE_CREATE
@@ -509,13 +565,14 @@ export function createQqRule({
       }
 
       state.counters.received += 1;
-      void bot.archiver.append({
+      // 图片附件：平台的附件地址有实效，落地成本地副本再归档（异步，不阻塞处理）。
+      void bot.archiver.appendWithMedia({
         kind: "inbound",
         event: eventType,
         chat: target.scope + ":" + target.openid,
         group: eventType === "C2C_MESSAGE_CREATE" ? undefined : target.openid,
         sender,
-        senderName: payload.author?.username,
+        senderName: senderDisplayName(payload),
         content,
         ...(hasAttachments
           ? {
@@ -524,7 +581,7 @@ export function createQqRule({
                 .join(",")}`,
             }
           : {}),
-      });
+      }, payload.attachments, config.archiveMedia, config);
 
       // QQ 重推去重。
       if (!markSeen(state, delivery.deliveryId)) return null;
