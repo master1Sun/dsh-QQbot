@@ -53,27 +53,34 @@ export function ArchivedMediaView(props: {
   const [loading, setLoading] = React.useState(false);
   const holderRef = React.useRef<HTMLDivElement | null>(null);
 
-  const load = React.useCallback(async () => {
-    if (!file || loading) return;
+  const load = React.useCallback(async (): Promise<string> => {
+    if (!file || loading) return "";
+    if (mediaCache.has(key)) {
+      const cached = mediaCache.get(key) ?? "";
+      setSrc(cached);
+      return cached;
+    }
     setLoading(true);
     try {
       const res = await rpcCall("archive.media", { kind, file });
       if (!res.ok) {
         setFailed(true);
-        return;
+        return "";
       }
       const data = (res as any).value ?? (res as any).data ?? {};
       const mime = String(data.mime ?? "application/octet-stream");
       const base64 = String(data.base64 ?? "");
       if (!base64) {
         setFailed(true);
-        return;
+        return "";
       }
       const url = `data:${mime};base64,${base64}`;
       mediaCache.set(key, url);
       setSrc(url);
+      return url;
     } catch {
       setFailed(true);
+      return "";
     } finally {
       setLoading(false);
     }
@@ -104,21 +111,23 @@ export function ArchivedMediaView(props: {
   const label = item.name || (kind === "image" ? t("archive.image") : kind === "video" ? t("archive.video") : t("archive.file"));
   const sizeText = humanSize(Number(item.size ?? 0));
 
+  /** 下载文件：数据已在缓存时直接下载，否则取回后立刻触发，无需二次点击。 */
+  const downloadFile = async () => {
+    const url = src || await load();
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = label;
+    a.click();
+  };
+
   if (kind === "file") {
     // 文件不做内联预览：给一个可下载的入口（base64 data URL 直接下载）。
     return h("div", { className: "qbot-archMedia is-file", ref: holderRef },
       h("button", {
         type: "button",
         className: "qbot-archMediaBtn is-file",
-        onClick: () => {
-          if (!src) void load();
-          else {
-            const a = document.createElement("a");
-            a.href = src;
-            a.download = label;
-            a.click();
-          }
-        },
+        onClick: () => void downloadFile(),
         title: label,
         "aria-label": label,
       },

@@ -279,6 +279,10 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     at: string; appId: string; groupId: string; sender: string; senderName: string;
     content: string; level: string; reason: string; category: string; minutes: number; error?: string; noticeError?: string;
     strikeCount?: number; baseMinutes?: number; escalated?: boolean;
+    /** 管理员/群主：只静默记录，未通知/撤回/禁言。 */
+    privileged?: boolean;
+    recalled?: boolean; recallError?: string;
+    source?: "llm" | "behavior" | "local";
   }
   /** 群内当前被禁言的成员（platform.mute.get）。 */
   interface MutedMember {
@@ -302,7 +306,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
   /** 自定义规则自测：输入一段文本，用当前草稿规则跑一次纯判定（不处罚、不记日志）。 */
   const [modTestText, setModTestText] = React.useState("");
   const [modTestResult, setModTestResult] = React.useState<{
-    level: string; category: string; reason: string; minutes: number;
+    level: string; category: string; reason: string; minutes: number; rule?: string;
   } | null>(null);
   const [modLogs, setModLogs] = React.useState<ModLog[]>([]);
   const [modLogsLoaded, setModLogsLoaded] = React.useState(false);
@@ -323,7 +327,8 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
   const modDraft = (): ModConfig => ({
     enabled: modCfg.enabled,
     categories: modCfg.categories,
-    rules: modRulesText.split(/[\n，,]+/).map((s) => s.trim()).filter(Boolean),
+    // 规则按行拆（占位符写明「每行一条」）；按逗号拆会把「禁止发广告，违者踢出」这类复合规则割裂。
+    rules: modRulesText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
     whitelist: modWhiteText.split(/[\n，,\s]+/).map((s) => s.trim()).filter(Boolean),
     durations: {
       light: Math.max(1, Math.min(43200, Number(modCfg.durations.light) || 10)),
@@ -359,7 +364,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
       appId, groupOpenid: group, content: modTestText, config: modDraft(),
     });
     if (!res.ok) throw new Error(errText(res));
-    setModTestResult(val(res) as { level: string; category: string; reason: string; minutes: number });
+    setModTestResult(val(res) as { level: string; category: string; reason: string; minutes: number; rule?: string });
   });
   const loadModLogs = () => void run("mod.logs", async () => {
     const res = await rpcCall("moderation.logs", { appId, groupOpenid: group, limit: 100 });
@@ -998,6 +1003,8 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
                             fmt("pt.modTestCat", t(`pt.modCat.${modTestResult.category}`)))
                         : null,
                       h("span", { className: "qbot-ptModTestChip" },
+                        fmt("pt.modTestRule", modTestResult.rule || t("pt.modTestNoRule"))),
+                      h("span", { className: "qbot-ptModTestChip" },
                         fmt("pt.modTestDuration", fmtDuration(modTestResult.minutes))))
                   : null)),
             modStep("4", t("pt.modSecDuration"), "",
@@ -1026,7 +1033,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     h("div", { className: "qbot-ptModStat" },
       h("strong", null, String(recentLogs.length)), h("span", null, t("pt.modStatTotal"))),
     h("div", { className: "qbot-ptModStat is-ok" },
-      h("strong", null, String(recentLogs.filter((l) => !l.error && l.minutes > 0).length)), h("span", null, t("pt.modStatMuted"))),
+      h("strong", null, String(recentLogs.filter((l) => !l.error && !l.privileged && l.minutes > 0).length)), h("span", null, t("pt.modStatMuted"))),
     h("div", { className: "qbot-ptModStat is-esc" },
       h("strong", null, String(recentLogs.filter((l) => (l.strikeCount ?? 0) > 1).length)), h("span", null, t("pt.modStatEsc"))),
     h("div", { className: "qbot-ptModStat is-fail" },
@@ -1047,7 +1054,16 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
           h("span", { className: "qbot-ptModRecReasonTag" }, t("pt.modReasonLabel")),
           h("span", null, log.reason || log.category)),
         h("div", { className: "qbot-ptModRecChips" },
-          h("span", { className: "qbot-ptModChip" }, fmt("pt.modDuration", fmtDuration(log.minutes))),
+          log.privileged
+            ? h("span", { className: "qbot-ptModChip is-meta" }, t("pt.modSilent"))
+            : h("span", { className: "qbot-ptModChip" }, fmt("pt.modDuration", fmtDuration(log.minutes))),
+          log.source
+            ? h("span", { className: "qbot-ptModChip is-meta" },
+                t(log.source === "behavior" ? "pt.modSourceBehavior" : log.source === "local" ? "pt.modSourceLocal" : "pt.modSourceLlm"))
+            : null,
+          log.recalled
+            ? h("span", { className: "qbot-ptModChip is-ok" }, t("pt.modRecalled"))
+            : null,
           typeof log.strikeCount === "number"
             ? h("span", { className: "qbot-ptModChip is-strike" }, fmt("pt.modStrikeShort", String(log.strikeCount)))
             : null,
@@ -1146,12 +1162,16 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
       ? h("div", { className: "qbot-ptEmpty" },
           h("span", { className: "qbot-ptEmptyIcon" }, "⌁"),
           h("span", null, t("pt.groupNoSelect")))
-      : perm !== "admin"
-        ? h("div", { className: "qbot-ptPermTip" }, t("pt.modNeedAdmin"))
-        : h(React.Fragment, null,
-            subNav(modTabs, modInnerTab, pickModTab),
-            h("div", { className: "qbot-ptModPane" },
-              modInnerTab === "config" ? modConfigPane : modInnerTab === "logs" ? modLogsPane : mutedPane)));
+      : perm === "checking" || perm === "idle"
+        ? h("div", { className: "qbot-ptPermTip" }, t("pt.permChecking"))
+        : perm === "error"
+          ? h("div", { className: "qbot-ptPermTip" }, fmt("pt.permUnknown", permMsg))
+          : perm !== "admin"
+            ? h("div", { className: "qbot-ptPermTip" }, t("pt.modNeedAdmin"))
+            : h(React.Fragment, null,
+                subNav(modTabs, modInnerTab, pickModTab),
+                h("div", { className: "qbot-ptModPane" },
+                  modInnerTab === "config" ? modConfigPane : modInnerTab === "logs" ? modLogsPane : mutedPane)));
 
   /** 入群 AI 自动审批 pane：与 AI 审核一致的 Hero + 分组步骤 + 沉底保存布局。 */
   const joinAutoPane = h(React.Fragment, null,
@@ -1652,7 +1672,8 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
         break;
       case "moderation":
         if (!canAdmin) break;
-        if (modInnerTab === "config") loadModeration();
+        // 配置只在首次进入（或切群后重置）时拉取，切子 Tab 回来不覆盖未保存的草稿。
+        if (modInnerTab === "config") { if (!modCfgLoaded) loadModeration(); }
         else if (modInnerTab === "logs") loadModLogs();
         else if (modInnerTab === "muted") loadMuted();
         break;

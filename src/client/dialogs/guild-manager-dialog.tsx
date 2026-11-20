@@ -128,7 +128,8 @@ function friendlyError(message: string): string {
 /** QQ 身份组颜色是 32 位 ARGB 十进制（高 8 位 alpha）。与 <input type=color> 的 #RRGGBB 互转。 */
 function argbToHex(v: unknown): string {
   const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return "#7b00cc";
+  // 0 是合法的「无颜色」（ARGB 全 0 → #000000），与数字框保持一致，不再回退成紫色。
+  if (!Number.isFinite(n) || n < 0) return "#7b00cc";
   const rgb = n & 0x00ffffff;
   return `#${rgb.toString(16).padStart(6, "0")}`;
 }
@@ -764,7 +765,8 @@ export function GuildManager(props: {
     if (!guild) return;
     const name = roleName.trim();
     if (!name) { notifyError(t("gv.roleName")); return; }
-    const color = intOf(roleColor, 4294967295) || 4294967295;
+    // 0 是合法颜色值，只有解析失败/缺失时才回退默认白色。
+    const color = intOf(roleColor, 4294967295) ?? 4294967295;
     const body = { name, color, hoist: roleHoist ? 1 : 0 };
     if (roleEditId) {
       await call("guild.role.patch", { guildId: guild.id, roleId: roleEditId, body }, t("gv.roleUpdated"));
@@ -779,7 +781,7 @@ export function GuildManager(props: {
   const openRoleDialog = (r?: RoleItem) => {
     if (r) {
       setRoleEditId(str(r.id)); setRoleName(r.name ?? "");
-      setRoleColor(String(r.color || 4294967295)); setRoleColorHex(argbToHex(r.color));
+      setRoleColor(String(r.color ?? 4294967295)); setRoleColorHex(argbToHex(r.color));
       setRoleHoist(r.hoist === 1);
     } else {
       setRoleEditId(""); setRoleName(""); setRoleColor("4294967295");

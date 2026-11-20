@@ -84,6 +84,12 @@ export function errText(err: unknown): string {
   if (err == null) return t("common.unknownError");
   if (typeof err === "string") return err;
   if (typeof err === "object") {
+    // RPC 失败信封 { ok:false, error:{ code, message } }：取内层错误，
+    // 否则会走到下面的 JSON.stringify，把整个信封原文弹给用户。
+    const envelope = err as { ok?: unknown; error?: unknown };
+    if (envelope.ok === false && envelope.error != null && envelope.error !== err) {
+      return errText(envelope.error);
+    }
     const e = err as { message?: unknown; code?: unknown };
     if (typeof e.message === "string" && e.message) return e.message;
     if (typeof e.code === "string" && e.code) return e.code;

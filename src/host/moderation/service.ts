@@ -10,11 +10,23 @@
  */
 import type { BotRuntime } from "../bots.js";
 import { ModerationStore, modKey, type ModerationConfig, type ModerationLog } from "./store.js";
-import { CATEGORY_LABELS, moderateMessage, minutesForLevel, type ModerateDeps } from "./moderate.js";
+import {
+  CATEGORY_DEFS, CATEGORY_LABELS, moderateMessage, minutesForLevel,
+  type ModerateDeps, type ModerationVerdict, type ModerationContext,
+} from "./moderate.js";
 import { escalateDuration } from "../../shared/moderation-escalation.js";
 
 const ADMIN_ROLES = new Set(["admin", "owner"]);
 const ADMIN_CACHE_MS = 5 * 60_000;
+// ADMIN_ROLES 仅用于判断机器人自身是否群管理员（禁言接口权限）；不区分违规发送者角色。
+/** 刷屏窗口：10 秒内 ≥ 6 条视为高频刷屏；30 秒内同内容 ≥ 4 条视为重复刷屏。 */
+const FLOOD_WINDOW_MS = 60_000;
+const FLOOD_FAST_MS = 10_000;
+const FLOOD_FAST_COUNT = 6;
+const FLOOD_REPEAT_MS = 30_000;
+const FLOOD_REPEAT_COUNT = 4;
+/** 同一成员刷屏被处置后的冷却期：期间持续阻断回复，但不重复 @/禁言/累计计数。 */
+const FLOOD_PUNISH_COOLDOWN_MS = 60_000;
 
 /** 把分钟数写成人类可读的时长。 */
 function durationText(minutes: number): string {
@@ -32,7 +44,8 @@ function noticeMarkdown(params: {
   sender: string;
   category: string;
   reason: string;
-  rules: string[];
+  /** 命中的那一条规则（模型给出或行为检测给出）；只显示这一条，不罗列整份群规。 */
+  rule: string;
   minutes: number;
   baseMinutes: number;
   strikeCount: number;
@@ -41,13 +54,12 @@ function noticeMarkdown(params: {
   escalateOn: boolean;
   capMinutes: number;
 }): string {
-  const { sender, category, reason, rules, minutes, baseMinutes, strikeCount, nextMinutes, windowDays, escalateOn, capMinutes } = params;
+  const { sender, category, reason, rule, minutes, baseMinutes, strikeCount, nextMinutes, windowDays, escalateOn, capMinutes } = params;
   const clean = (value: string, max = 160) =>
     String(value ?? "").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) || "—";
   const categoryName = CATEGORY_LABELS[category] ?? "本群公约";
-  const ruleText = rules.filter(Boolean).slice(0, 5)
-    .map((r, i) => `${i + 1}. ${clean(r, 60)}`)
-    .join(" / ") || "本群已启用的内置分类与平台公共规范";
+  // 只写命中的那一条规则；模型没给出时退回分类名，绝不罗列整份群规。
+  const ruleText = clean(rule || categoryName, 120);
   const at = `<qqbot-at-user id="${sender.replace(/["<>]/g, "")}" />`;
   return [
     `${at} 你刚发的消息违反了本群公约，按群规${minutes > 0 ? `将禁言 ${durationText(minutes)}` : "将收到警告"}。`,
@@ -78,8 +90,12 @@ export class ModerationService {
   readonly store = new ModerationStore();
   readonly #deps: ModerateDeps;
   readonly #logger: Pick<Console, "info" | "warn" | "error">;
-  /** appId::groupId → { admin: boolean; at: number } */
+  /** appId::groupId → { admin: boolean; at: number }（机器人自身是否管理员） */
   readonly #adminCache = new Map<string, { admin: boolean; at: number }>();
+  /** appId::groupId::sender → 最近消息（刷屏行为检测，纯内存滑动窗口）。 */
+  readonly #floodWindows = new Map<string, Array<{ at: number; id: string; norm: string }>>();
+  /** appId::groupId::sender → 上次刷屏处置时间（冷却期内只阻断回复，不重复处罚）。 */
+  readonly #floodPunished = new Map<string, number>();
 
   constructor(deps: ModerateDeps, logger: Pick<Console, "info" | "warn" | "error">) {
     this.#deps = deps;
@@ -107,6 +123,118 @@ export class ModerationService {
   }
 
   /**
+   * 本地预筛：只对「本地能 100% 确定、绝不会误伤」的违规直接出判定，跳过模型调用省 token。
+   * 目前只覆盖一类：自定义规则里的极短精确词（如「1」「+1」「皮皮涛」）——整条消息
+   * 归一化后正好等于该词才命中。单条看像正常内容的短词，模型最容易判 none，本地整条
+   * 匹配反而又准又省；不做到处的子串匹配（避免「1楼」「版本1」误伤）。
+   * 语义类违规（辱骂/广告/色情/违法）本地判不准，一律返回 null 走 AI（带上下文）。
+   */
+  #localVerdict(content: string, cfg: ModerationConfig): ModerationVerdict | null {
+    const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+    const msg = norm(content);
+    if (!msg) return null;
+    // ① 自定义规则里的极短精确词：整条消息 == 规则词才命中（不做到处的子串匹配，避免「1楼」误伤）。
+    for (const raw of cfg.rules) {
+      const word = norm(raw);
+      if (!word || word.length > 12) continue; // 长规则是自然语言，交给模型按语境判断
+      if (msg === word) {
+        return { level: "light", category: "custom", reason: `消息内容命中本群禁止词「${raw}」`, rule: raw };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 刷屏/骚扰行为检测：模型只看单条消息，识别不出「短时间内连发/重复灌水」，
+   * 这里在消息进审核前按滑动窗口做本地判定，命中直接走统一处置链路。
+   * 返回 true 表示已处置或处于冷却期（调用方应阻断后续回复）。
+   */
+  async observe(params: {
+    bot: BotRuntime;
+    groupId: string;
+    sender: string;
+    senderName: string;
+    content: string;
+    messageId?: string;
+  }): Promise<boolean> {
+    const { bot, groupId, sender, senderName, content, messageId } = params;
+    // sender 为空时不判刷屏：无法禁言、且会把不同人归到同一窗口 key 互相连累。
+    if (!groupId || !sender || !content.trim()) return false;
+    let cfg: ModerationConfig;
+    try {
+      cfg = await this.store.getConfig(bot.appId, groupId);
+    } catch {
+      return false;
+    }
+    // 只有显式开启审核、且启用了「刷屏骚扰」分类时才做行为检测；白名单/机器人自己/无管理员权限同样跳过。
+    if (!cfg.enabled || !cfg.categories.includes("flood")) return false;
+    if (cfg.whitelist.includes(sender)) return false;
+    if (bot.selfOpenids.get(groupId) === sender) return false;
+    if (!await this.#isAdmin(bot, groupId)) return false;
+
+    // #floodCheck 是同步的；命中后「检查冷却 → 占位 → await 处置」必须一气呵成，
+    // 两个并发的孪生事件才会有一个真正处置，另一个直接复用冷却占位（JS 单线程下无竞态）。
+    const verdict = this.#floodCheck(bot.appId, groupId, sender, content, messageId);
+    if (!verdict) return false;
+    const punishKey = `${modKey(bot.appId, groupId)}::${sender}`;
+    const lastPunished = this.#floodPunished.get(punishKey) ?? 0;
+    if (Date.now() - lastPunished < FLOOD_PUNISH_COOLDOWN_MS) return true; // 冷却期内仍阻断回复，但不再重复处罚
+    this.#floodPunished.set(punishKey, Date.now()); // 同步占位，先于任何 await
+    if (this.#floodPunished.size > 3000) {
+      const cutoff = Date.now() - FLOOD_PUNISH_COOLDOWN_MS;
+      for (const [k, v] of this.#floodPunished) if (v < cutoff) this.#floodPunished.delete(k);
+    }
+    try {
+      await this.#dispose({ bot, groupId, sender, senderName, content, messageId, cfg, verdict, source: "behavior" });
+    } catch (error) {
+      this.#logger.warn("[dsh-qqbot] AI 审核刷屏处置异常:", error instanceof Error ? error.message : error);
+    }
+    return true;
+  }
+
+  /** 纯同步滑动窗口：高频连发或短时间重复同一内容即判刷屏，命中返回可直接处置的判定。 */
+  #floodCheck(appId: string, groupId: string, sender: string, content: string, messageId?: string): ModerationVerdict | null {
+    const key = `${modKey(appId, groupId)}::${sender || "?"}`;
+    const now = Date.now();
+    const norm = content.replace(/\s+/g, "").toLowerCase();
+    // 窗口里记 (时间, 去重键)：消息 id 缺失时用「发送者+规范化内容+时间」近似，避免孪生事件重复计数。
+    const id = messageId || `${sender}:${norm.slice(0, 80)}:${now}`;
+    const arr = this.#floodWindows.get(key) ?? [];
+    const cutoff = now - FLOOD_WINDOW_MS;
+    const recent = arr.filter((x) => x.at >= cutoff);
+    // 重推的同一条消息：只保留原记录，不再追加（否则孪生事件会被算成两条刷屏）。
+    if (!recent.some((x) => x.id === id)) recent.push({ at: now, id, norm });
+    this.#floodWindows.set(key, recent);
+    // 容量淘汰：先删已过期的，仍超限则按 last.at 从旧到新淘汰（活跃群也能回收）。
+    if (this.#floodWindows.size > 3000) {
+      for (const [k, v] of this.#floodWindows) if (!v.length || v[v.length - 1]!.at < cutoff) this.#floodWindows.delete(k);
+      if (this.#floodWindows.size > 3000) {
+        const byAge = [...this.#floodWindows.entries()]
+          .sort((a, b) => (a[1][a[1].length - 1]?.at ?? 0) - (b[1][b[1].length - 1]?.at ?? 0));
+        for (const [k] of byAge.slice(0, this.#floodWindows.size - 3000)) this.#floodWindows.delete(k);
+      }
+    }
+
+    const fast = recent.filter((x) => x.at >= now - FLOOD_FAST_MS).length;
+    if (fast >= FLOOD_FAST_COUNT) {
+      return {
+        level: "light", category: "flood",
+        reason: `${FLOOD_FAST_MS / 1000} 秒内连续发送 ${fast} 条消息，构成刷屏`,
+        rule: CATEGORY_DEFS.flood || "刷屏骚扰",
+      };
+    }
+    const repeats = norm ? recent.filter((x) => x.at >= now - FLOOD_REPEAT_MS && x.norm === norm).length : 0;
+    if (norm && repeats >= FLOOD_REPEAT_COUNT) {
+      return {
+        level: "light", category: "flood",
+        reason: `${FLOOD_REPEAT_MS / 1000} 秒内重复发送「${norm.slice(0, 20)}」${repeats} 次，构成灌水`,
+        rule: CATEGORY_DEFS.flood || "刷屏骚扰",
+      };
+    }
+    return null;
+  }
+
+  /**
    * 审核一条群消息。返回是否「已处置」（调用方可据此决定是否继续正常回复链路）。
    * 任何异常都被吞掉并记日志——审核绝不能阻断正常消息处理。
    */
@@ -116,8 +244,12 @@ export class ModerationService {
     sender: string;
     senderName: string;
     content: string;
+    /** 违规消息的 msg_id；提供时命中违规会先撤回原消息再处置。 */
+    messageId?: string;
+    /** 对话语境（前文群聊 + 被引用的原话），帮模型分辨玩笑/互怼/引用与真违规。 */
+    context?: ModerationContext;
   }): Promise<{ actioned: boolean; level: string; reason: string }> {
-    const { bot, groupId, sender, senderName, content } = params;
+    const { bot, groupId, sender, senderName, content, messageId, context } = params;
     const noop = { actioned: false, level: "none", reason: "" };
     if (!groupId || !content.trim()) return noop;
 
@@ -134,15 +266,40 @@ export class ModerationService {
     // 管理员权限：没权限直接跳过（也省模型调用）。
     if (!await this.#isAdmin(bot, groupId)) return noop;
 
+    // 本地能确定的违规直接处置，不调模型（省 token）；拿不准的才走下面的 AI 审核。
+    const local = this.#localVerdict(content, cfg);
+    if (local) {
+      return this.#dispose({ bot, groupId, sender, senderName, content, messageId, cfg, verdict: local, source: "local" });
+    }
+
     let verdict;
     try {
-      verdict = await moderateMessage(this.#deps, bot.appId, content, cfg);
+      verdict = await moderateMessage(this.#deps, bot.appId, content, cfg, context);
     } catch (error) {
       this.#logger.warn("[dsh-qqbot] AI 审核模型调用失败:", error instanceof Error ? error.message : error);
       return noop;
     }
     if (verdict.level === "none") return noop;
+    return this.#dispose({ bot, groupId, sender, senderName, content, messageId, cfg, verdict, source: "llm" });
+  }
 
+  /**
+   * 命中后的统一处置：撤回 → @ 通知 → 禁言 → 累计违规与落日志。
+   * 所有违规成员一视同仁：不区分管理员/群主/普通成员，命中即走完整处置
+   * （平台若禁止禁言某角色，由接口返回错误并记入日志，不影响其余处置）。
+   */
+  async #dispose(params: {
+    bot: BotRuntime;
+    groupId: string;
+    sender: string;
+    senderName: string;
+    content: string;
+    messageId?: string;
+    cfg: ModerationConfig;
+    verdict: ModerationVerdict;
+    source: "llm" | "behavior" | "local";
+  }): Promise<{ actioned: boolean; level: string; reason: string }> {
+    const { bot, groupId, sender, senderName, content, messageId, cfg, verdict, source } = params;
     // 叠加惩罚：按「机器人 + 群 + 成员」独立计数，算法/系数/阶梯/封顶全部取自本群配置。
     // 关掉叠加时每次只按等级基础时长；窗口天数也可配（连续 N 天无违规从 0 重计）。
     const baseMinutes = minutesForLevel(cfg, verdict.level);
@@ -164,16 +321,28 @@ export class ModerationService {
       baseMinutes,
       strikeCount,
       escalated: cfg.escalateEnabled && strikeCount > 1 && minutes > baseMinutes,
+      source,
     };
-    // 禁言前先在群里 @ 本人说明违规原因与处置依据，同时公开提醒其他成员。
-    // 通知失败不能阻断禁言（例如机器人没开主动消息权限）。
+    // 先撤回违规原消息（需要机器人管理员权限，上方已校验）。
+    if (messageId) {
+      try {
+        await bot.client.recall({ scope: "group", openid: groupId }, messageId);
+        log.recalled = true;
+      } catch (error) {
+        log.recallError = error instanceof Error ? error.message : String(error);
+        this.#logger.warn("[dsh-qqbot] AI 审核撤回违规消息失败:", log.recallError);
+      }
+    }
+
+    // 在群里 @ 本人说明违反了哪条规则与处置依据，同时公开提醒其他成员。
+    // 所有成员一视同仁；通知失败也不阻断禁言（例如机器人没开主动消息权限）。
     if (sender) {
       try {
         await bot.client.sendMarkdown({ scope: "group", openid: groupId }, noticeMarkdown({
           sender,
           category: verdict.category,
           reason: verdict.reason,
-          rules: cfg.rules,
+          rule: verdict.rule || "",
           minutes,
           baseMinutes,
           strikeCount,
@@ -212,10 +381,10 @@ export class ModerationService {
       `[dsh-qqbot] AI 审核命中：群 ${groupId.slice(0, 8)}… ${senderName || sender.slice(0, 8)} → ${verdict.level}（${verdict.category}）`
       + ` 第 ${strikeCount} 次违规`
       + (log.error ? " 禁言失败" : ` 禁言 ${minutes} 分钟`)
-      + (log.noticeError ? "（@ 通知失败）" : ""),
+      + (log.recalled ? " 已撤回" : "") + (log.noticeError ? "（@ 通知失败）" : ""),
     );
-    // 不阻断正常回复链路：即使命中也返回 actioned=false，让消息照常进入会话（审核与回复解耦）。
-    return { actioned: false, level: verdict.level, reason: verdict.reason };
+    // 命中违规 → actioned=true：上层据此阻断该条消息的正常回复链路（违规内容不再让机器人接话）。
+    return { actioned: true, level: verdict.level, reason: verdict.reason };
   }
 
   /**
@@ -227,7 +396,7 @@ export class ModerationService {
     groupId: string;
     content: string;
     config?: ModerationConfig;
-  }): Promise<{ level: string; category: string; reason: string; minutes: number; rules: string[] }> {
+  }): Promise<{ level: string; category: string; reason: string; minutes: number; rules: string[]; rule: string }> {
     const { appId, groupId, content } = params;
     if (!content.trim()) throw new Error("测试内容不能为空");
     const cfg = params.config ?? await this.store.getConfig(appId, groupId);
@@ -239,6 +408,8 @@ export class ModerationService {
       // 自测按「首犯」演示：直接套用当前叠加配置，自定义阶梯模式下显示第 1 档时长。
       minutes: escalateDuration(minutesForLevel(cfg, verdict.level), cfg, 1),
       rules: cfg.rules,
+      // 命中的那一条规则（内置分类名或自定义规则原文），供自测结果精确展示。
+      rule: verdict.rule || "",
     };
   }
 }

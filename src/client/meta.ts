@@ -5,31 +5,39 @@
 
 import { fmt, t } from "./i18n/index.js";
 
-export const FIELD_LABELS: Record<string, string> = {
-  workspacePath: t("session.workspace"),
-  agentPreset: t("session.preset"),
-  model: t("session.model"),
-  valueThreshold: t("tune.groupValueThreshold"),
-  atContextMessages: t("tune.atContext"),
-  groupCooldownMs: t("tune.minGroupInterval"),
-  senderCooldownMs: t("tune.sameSenderInterval"),
-  replyChunkChars: t("tune.chunkChars"),
-  maxRepliesPerMessage: t("tune.maxReplies"),
-  quoteMaxChars: t("policy.quoteLimit"),
-  quotaPerDay: t("quota.daily"),
-};
+/**
+ * 以下三项必须在渲染时调用，不能在模块顶层求值成常量：
+ * 模块加载早于宿主 setTranslator()/setLocale()，顶层 t() 会冻结在默认中文。
+ */
+export function fieldLabels(): Record<string, string> {
+  return {
+    workspacePath: t("session.workspace"),
+    agentPreset: t("session.preset"),
+    model: t("session.model"),
+    valueThreshold: t("tune.groupValueThreshold"),
+    atContextMessages: t("tune.atContext"),
+    groupCooldownMs: t("tune.minGroupInterval"),
+    senderCooldownMs: t("tune.sameSenderInterval"),
+    replyChunkChars: t("tune.chunkChars"),
+    maxRepliesPerMessage: t("tune.maxReplies"),
+    quoteMaxChars: t("policy.quoteLimit"),
+    quotaPerDay: t("quota.daily"),
+  };
+}
 
 /** 数值项说明：写清「影响什么 + 什么时候生效」，配置界面直接展示。 */
-export const FIELD_HELP: Record<string, string> = {
-  valueThreshold: t("tune.groupValueThresholdHint"),
-  atContextMessages: t("tune.atContextHint"),
-  groupCooldownMs: t("tune.minGroupIntervalHint"),
-  senderCooldownMs: t("tune.sameSenderIntervalHint"),
-  replyChunkChars: t("tune.chunkCharsHint"),
-  maxRepliesPerMessage: t("tune.maxRepliesHint"),
-  quoteMaxChars: t("policy.quoteLimitHint"),
-  quotaPerDay: t("quota.dailyHint"),
-};
+export function fieldHelp(): Record<string, string> {
+  return {
+    valueThreshold: t("tune.groupValueThresholdHint"),
+    atContextMessages: t("tune.atContextHint"),
+    groupCooldownMs: t("tune.minGroupIntervalHint"),
+    senderCooldownMs: t("tune.sameSenderIntervalHint"),
+    replyChunkChars: t("tune.chunkCharsHint"),
+    maxRepliesPerMessage: t("tune.maxRepliesHint"),
+    quoteMaxChars: t("policy.quoteLimitHint"),
+    quotaPerDay: t("quota.dailyHint"),
+  };
+}
 
 /**
  * 开关项说明：逐条写清开启/关闭后的实际行为。
@@ -44,40 +52,42 @@ export const FIELD_HELP: Record<string, string> = {
  * 另有以下**字段**（非开关）同样不出现在设置页：
  *   secretEnv（默认空，AppSecret 凭据引用）
  */
-export const SWITCH_DEFS: Array<{ key: string; label: string; desc: string; def: boolean }> = [
-  {
-    key: "groupFullReply",
-    label: t("policy.fullGroupReply"),
-    desc: t("policy.fullGroupReplyHint"),
-    def: true,
-  },
-  {
-    key: "respondToBots",
-    label: t("policy.respondBots"),
-    desc: t("policy.respondBotsHint"),
-    def: false,
-  },
-  // archiveEnabled / memoryEnabled / fileIngestion 已从界面移除（默认常开，仅 bots.json 可配）——
-  // 见本文件顶部注释；配置解析与默认值仍在 shared/config.ts 与 store-file.ts 中保留。
-  {
-    key: "approvalButtons",
-    label: t("feature.buttonApproval"),
-    desc: t("feature.buttonApprovalHint"),
-    def: true,
-  },
-  {
-    key: "ssrfGuard",
-    label: t("feature.ssrfGuard"),
-    desc: t("feature.ssrfGuardHint"),
-    def: true,
-  },
-  {
-    key: "forceVerifyImage",
-    label: t("feature.forceVerifyImage"),
-    desc: t("feature.forceVerifyImageHint"),
-    def: false,
-  },
-];
+export function switchDefs(): Array<{ key: string; label: string; desc: string; def: boolean }> {
+  return [
+    {
+      key: "groupFullReply",
+      label: t("policy.fullGroupReply"),
+      desc: t("policy.fullGroupReplyHint"),
+      def: true,
+    },
+    {
+      key: "respondToBots",
+      label: t("policy.respondBots"),
+      desc: t("policy.respondBotsHint"),
+      def: false,
+    },
+    // archiveEnabled / memoryEnabled / fileIngestion 已从界面移除（默认常开，仅 bots.json 可配）——
+    // 见本文件顶部注释；配置解析与默认值仍在 shared/config.ts 与 store-file.ts 中保留。
+    {
+      key: "approvalButtons",
+      label: t("feature.buttonApproval"),
+      desc: t("feature.buttonApprovalHint"),
+      def: true,
+    },
+    {
+      key: "ssrfGuard",
+      label: t("feature.ssrfGuard"),
+      desc: t("feature.ssrfGuardHint"),
+      def: true,
+    },
+    {
+      key: "forceVerifyImage",
+      label: t("feature.forceVerifyImage"),
+      desc: t("feature.forceVerifyImageHint"),
+      def: false,
+    },
+  ];
+}
 
 export const COOLDOWN_OPTIONS = [0, 10_000, 30_000, 60_000, 120_000, 300_000, 600_000, 1_800_000];
 

@@ -44,6 +44,20 @@ export function wdLabel(v: number): string {
   return isEnglish() ? hit?.en ?? String(v) : hit?.label ?? String(v);
 }
 
+/**
+ * 用运行时能力判断是否为合法 IANA 时区：正则会误杀 Etc/GMT+8、
+ * America/Argentina/Buenos_Aires 等合法写法（本机时区也会被放进下拉候选）。
+ */
+function isValidTimeZone(tz: string): boolean {
+  if (!tz) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 常用时区（下拉选择，避免手输 IANA 出错）。
  *  刻意做成函数：模块级只求值一次会把标签冻结在首次导入时的语言上。 */
 function tzOptions(): Array<{ value: string; label: string }> {
@@ -430,7 +444,7 @@ export function ScheduleManager(props: {
       }
     }
     const tz = String(e.tz || DEFAULT_TZ).trim() || DEFAULT_TZ;
-    if ((e.type === "cron" || e.type === "at") && !/^[A-Za-z]+(\/[A-Za-z_+-]+)?$|^UTC$/.test(tz)) {
+    if ((e.type === "cron" || e.type === "at") && !isValidTimeZone(tz)) {
       setScheduleModal((prev) => (prev ? { ...prev, editError: t("sched.form.tzInvalid") } : prev));
       return;
     }

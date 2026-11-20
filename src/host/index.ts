@@ -465,7 +465,9 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
 
   const scheduler = new Scheduler({
     store: schedules,
-    resolveBot: (appId?: string) => (appId ? bots.get(appId) : undefined) ?? bots.primary(),
+    // 区分「未指定 appId」（回落主机器人）与「指定了但机器人不存在/已删除」（返回 undefined，
+    // 由调度器记为「机器人不可用」并跳过）——否则定时任务会拿主机器人向目标发送，身份错乱。
+    resolveBot: (appId?: string) => (appId ? bots.get(appId) : bots.primary()),
     quota,
     generateAndSend,
     executeTool,

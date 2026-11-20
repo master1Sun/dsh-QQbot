@@ -586,10 +586,12 @@ export function ArchiveDialog(props: {
   }
 
   // 右栏按月分组：倒序记录里同月连续成组，预扫描出每条被动回复引用的「最近一条用户消息」。
+  // records 是 order=desc（索引 0 最新），触发某条回复的用户消息在时间上更早、索引更大，
+  // 因此必须从后往前（最旧→最新）遍历：回复取到的是它之前刚出现过的最近一条入站消息。
   const quoteByIndex: Array<{ name: string; content: string } | null> = new Array(visible.length).fill(null);
   {
     let lastInbound: { name: string; content: string } | null = null;
-    for (let i = 0; i < visible.length; i += 1) {
+    for (let i = visible.length - 1; i >= 0; i -= 1) {
       const r = visible[i];
       const isBot = r.kind === "reply" || r.kind === "proactive";
       const name = isBot

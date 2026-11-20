@@ -356,7 +356,9 @@ function checkType(value: unknown, meta: ConfigFieldMeta): IssueCode | null {
     case "string":
       return typeof value === "string" ? null : "type";
     case "number":
-      if (typeof value !== "number" || !Number.isFinite(value)) return "type";
+      // 后端 resolveConfig 对每个数值字段走 clampInt（只认安全整数），小数会被当无效值
+      // 回落默认——必须在编辑器这层拦住，否则「保存成功但重开变默认值」。
+      if (typeof value !== "number" || !Number.isSafeInteger(value)) return "type";
       if ((meta.min !== undefined && value < meta.min) || (meta.max !== undefined && value > meta.max)) return "range";
       return null;
     case "boolean":
@@ -373,9 +375,9 @@ function checkType(value: unknown, meta: ConfigFieldMeta): IssueCode | null {
 /** 类型期望的中文描述，用于错误提示。 */
 export function expectText(meta: ConfigFieldMeta, lang: 0 | 1): string {
   const zh = meta.type === "string[]" ? "字符串数组" : meta.type === "boolean" ? "布尔值 true/false"
-    : meta.type === "number" ? "数字" : meta.type === "object" ? "对象" : meta.type === "enum" ? "枚举值" : "字符串";
+    : meta.type === "number" ? "整数" : meta.type === "object" ? "对象" : meta.type === "enum" ? "枚举值" : "字符串";
   const en = meta.type === "string[]" ? "array of strings" : meta.type === "boolean" ? "boolean true/false"
-    : meta.type === "number" ? "number" : meta.type === "object" ? "object" : meta.type === "enum" ? "enum value" : "string";
+    : meta.type === "number" ? "integer" : meta.type === "object" ? "object" : meta.type === "enum" ? "enum value" : "string";
   return lang === 0 ? zh : en;
 }
 

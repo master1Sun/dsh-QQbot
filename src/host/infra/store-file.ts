@@ -11,6 +11,7 @@
  *  - 行为配置（工作区目录 / 消息回复策略 / 回复调优）同样按机器人独立保存，每个机器人一份完整 config；
  *  - 全部机器人默认同时连接（enabled），不存在「只连一个」的切换语义。
  */
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -39,15 +40,39 @@ export function readStoreJson<T>(path: string): Promise<T | null> {
   return readJson<T>(path);
 }
 
-/** 原子写入（tmp + rename），凭据文件限制 0600。 */
+/**
+ * 同一进程内按目标路径串行的写队列。bots.json 等文件常被多个 RPC 并发
+ * 「读-改-写」，若两次写共用同一个 tmp 文件会互相覆盖甚至把文件写坏。
+ */
+const writeChains = new Map<string, Promise<unknown>>();
+
+/** 原子写入（随机 tmp + rename），凭据文件限制 0600；同路径写串行化。 */
 export async function writeJson(path: string, value: unknown, { privateFile = false } = {}): Promise<void> {
+  const prev = writeChains.get(path) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(() => writeJsonOnce(path, value, privateFile));
+  writeChains.set(path, next);
+  try {
+    await next;
+  } finally {
+    // 仅当队列尾部仍是本次写入时才清理，避免误删后一个等待中的写。
+    if (writeChains.get(path) === next) writeChains.delete(path);
+  }
+}
+
+async function writeJsonOnce(path: string, value: unknown, privateFile: boolean): Promise<void> {
   await mkdir(pluginDataDir(), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
+  // tmp 名带随机后缀：同进程并发写不同内容时不会复用同一个临时文件。
+  const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
   const text = JSON.stringify(value, null, 2);
-  await writeFile(tmp, text, privateFile ? { mode: 0o600 } : "utf8");
-  if (!privateFile) await writeFile(tmp, text, "utf8");
-  await rm(path, { force: true });
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, text, privateFile ? { mode: 0o600, encoding: "utf8" } : "utf8");
+    // Windows 上 rename 无法覆盖已存在文件，先删目标；POSIX 可直接覆盖，这里统一先删更安全。
+    await rm(path, { force: true });
+    await rename(tmp, path);
+  } catch (error) {
+    await rm(tmp, { force: true });
+    throw error;
+  }
 }
 
 /** 原子写入插件数据目录下的任意 JSON 文件。 */

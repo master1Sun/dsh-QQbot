@@ -984,12 +984,8 @@ export class Scheduler {
           scheduleNext(entry);
           continue;
         }
-        if (this.#ctx.quota && !(await this.#ctx.quota.tryConsume(1, bot.appId))) {
-          // 配额耗尽：5 分钟后重试（不报错误）。按该机器人自己的池判定。
-          entry.nextRunAt = toShanghaiISOOrNull(new Date(now.getTime() + 5 * 6e4));
-          continue;
-        }
         // interval + weekdays：非限定星期跳过本次（顺延到下一个间隔点）。
+        // 必须放在配额预扣之前——本次没有投递，不能白扣一次主动消息额度。
         if (entry.type === "interval" && entry.weekdays?.length) {
           const off = tzOffsetMs(now.getTime(), entry.tz || SHANGHAI_TZ);
           const wd = new Date(now.getTime() + off).getUTCDay();
@@ -998,6 +994,11 @@ export class Scheduler {
             scheduleNext(entry);
             continue;
           }
+        }
+        if (this.#ctx.quota && !(await this.#ctx.quota.tryConsume(1, bot.appId))) {
+          // 配额耗尽：5 分钟后重试（不报错误）。按该机器人自己的池判定。
+          entry.nextRunAt = toShanghaiISOOrNull(new Date(now.getTime() + 5 * 6e4));
+          continue;
         }
         try {
           let skip: ScheduleSkipResult | void = undefined;

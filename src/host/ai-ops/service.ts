@@ -352,8 +352,10 @@ export class AiOpsService {
     }
     if (action.a === "g.logs") {
       if (!moderation) return this.#needService("AI 群规审核");
+      // 与其它 g.* 一致要求明确群上下文：否则 listLogs 不过滤 groupId，会跨群汇总处罚记录。
+      if (!req.groupOpenid) return this.#needTarget();
       const logs = await moderation.store.listLogs({ appId: bot.appId, groupId: req.groupOpenid, limit: 30 });
-      return { ok: true, reply: `最近有 ${logs.length} 条审核/处罚记录。`, data: { logs } };
+      return { ok: true, reply: `本群最近有 ${logs.length} 条审核/处罚记录。`, data: { logs } };
     }
 
     // ── 频道管理 ────────────────────────────────────────────────────────────

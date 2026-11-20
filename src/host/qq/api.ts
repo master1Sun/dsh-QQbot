@@ -401,11 +401,11 @@ export class QqApiClient {
    * 回复一条消息：按配置尝试 Markdown，单条被平台拒绝时回退纯文本（引用卡片保留）。
    * 其他错误（网络/限流/凭据）视为结果不确定，直接抛出由上层处理。
    *
-   * ⚠️ 引用（quoteMsgId）与 msg_id 不可同传——实测组合矩阵：
-   *   msg_id + message_reference → 引用显示，但手机端同一条内容出现两次（电脑端正常）；
+   * ⚠️ 引用（quoteMsgId）与 msg_id 必须同传——实测组合矩阵（详见用户手册 8.5）：
+   *   仅 message_reference       → 手机端同一条内容出现两次；
    *   仅 msg_id                  → 两端都不显示引用；
-   *   仅 message_reference       → 唯一「有引用且内容只出现一次」的组合（走主动消息通道，不传 msg_id）。
-   * 调用方带 quoteMsgId 时应省略 msgId/msgSeq（由上层 reply.ts 保证）。
+   *   msg_id + message_reference → 唯一「有引用且内容只出现一次」的组合（当前做法）。
+   * 调用方带 quoteMsgId 时必须同时传 msgId/msgSeq（由上层 reply.ts 保证）。
    */
   async sendReply(
     target: ReplyTarget,
@@ -420,7 +420,9 @@ export class QqApiClient {
         return { mode: "markdown", id };
       } catch (error) {
         const code = (error as Error & { code?: number }).code;
-        if (!MARKDOWN_REJECTION_CODES.has(Number(code)) && code !== undefined) throw error;
+        // 只有「平台明确拒绝且确定未发送」的码才回退重发；无 code（网络/超时）或
+        // 未知码一律抛出，交给上层投递出箱，避免结果不确定时重发造成两条消息。
+        if (!MARKDOWN_REJECTION_CODES.has(Number(code))) throw error;
         this.#options.logger.warn?.(
           `[dsh-qqbot] Markdown 回复被平台拒绝（code=${String(code)}），本条回退纯文本（引用卡片保留）`,
         );

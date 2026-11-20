@@ -41,7 +41,7 @@ function issueText(issue: ManifestIssue, lang: Lang): string {
 function typeBadge(meta: ConfigFieldMeta, lang: Lang): string {
   switch (meta.type) {
     case "string": return lang === 0 ? "字符串" : "string";
-    case "number": return lang === 0 ? "数字" : "number";
+    case "number": return lang === 0 ? "整数" : "integer";
     case "boolean": return "boolean";
     case "string[]": return "string[]";
     case "enum": return lang === 0 ? "枚举" : "enum";

@@ -27,6 +27,7 @@ import type { QqbotConfig } from "../../shared/config.js";
 import { configForGroup } from "../../shared/config.js";
 import { shanghaiDay } from "../../shared/time.js";
 import type { ModerationService } from "../moderation/service.js";
+import type { ModerationContext } from "../moderation/moderate.js";
 import {
   addGroupMessage,
   enqueueRecord,
@@ -361,8 +362,13 @@ export function createQqRule({
   logger,
   WebhookRuleId,
 }: QqRuleContext): WebhookRule<"qq"> {
-  /** AI 审核去重：同一 (群:发送者:内容) 在 10s 内只审一次，避免 @ 孪生事件重复调用模型。 */
-  const moderationSeen = new Map<string, number>();
+  /**
+   * AI 审核去重 + 结果复用：同一 (群:发送者:内容) 在 10s 内只审一次。
+   * 缓存的是「进行中/已完成的判定 Promise」（单飞）：先占位再 await，孪生事件并发到达时
+   * 复用同一个 Promise，避免两条事件各自 await 完整 LLM 流程造成重复撤回/禁言/计数；
+   * 命中结论也能让第二条一并按违规阻断回复（否则它会漏过去回复违规内容）。
+   */
+  const moderationSeen = new Map<string, { at: number; promise: Promise<boolean> }>();
   // WebhookRuleId 来自可选 peer @deepseek-ai/dsh-webhook；缺失时退化为原样 id，
   // 保证运行时不可用时规则仍可构造（插件整体已降级运行）。
   const makeRuleId = WebhookRuleId ?? ((name: string) => name);
@@ -413,20 +419,56 @@ export function createQqRule({
           `groupFullReply=${config.groupFullReply} valueThreshold=${config.valueThreshold} noThreshold=${noThreshold} isAt=${diagIsAt}`,
         );
       }
-      // ── AI 群规审核（仅在群消息、且该群显式开启时；异步不阻塞回复链路） ──
+      // ── AI 群规审核（仅在群消息、且该群显式开启时） ──
       // 放在回复/去重的 early-return 之前：即使本条不回复（groupFullReply=false、
       // 孪生事件去重等），审核照常进行。审核服务内部再判开关/白名单/管理员权限。
-      if (moderation && group && content
+      // 命中违规（actioned）时直接阻断本条消息的后续回复链路——违规内容不再让机器人接话。
+      // 命中本地敏感词的消息直接走后面的 enforceBannedWords 撤回，不烧 AI 审核（省 token）。
+      if (moderation && group && content && !bannedHit(bot.config, content)
         && (eventType === "GROUP_MESSAGE_CREATE" || eventType === "GROUP_AT_MESSAGE_CREATE")) {
+        // 刷屏/骚扰是跨消息行为，模型只看单条识别不出：先在去重之前做本地窗口检测。
+        if (await moderation.observe({
+          bot, groupId: group, sender, senderName: senderDisplayName(payload), content, messageId: payload.id,
+        })) {
+          logger.info(`[dsh-qqbot] 群消息命中刷屏行为检测，已处置并阻断回复: ${content.slice(0, 40)}`);
+          return null;
+        }
         const mKey = `${group}:${sender}:${content.replace(/\s+/g, "").slice(0, 120)}`;
-        const last = moderationSeen.get(mKey) ?? 0;
-        if (Date.now() - last > 10_000) {
-          moderationSeen.set(mKey, Date.now());
+        const cached = moderationSeen.get(mKey);
+        let reviewPromise: Promise<boolean>;
+        if (cached && Date.now() - cached.at < 10_000) {
+          // 10s 内的孪生/重推事件：复用首次判定（含进行中的）Promise，不重复调用模型。
+          reviewPromise = cached.promise;
+        } else {
+          // 组装语境：① 当前消息之前的群聊（审核发生在 addGroupMessage 之前，缓冲里天然
+          // 不含本条；再按内容剔除一遍，防孪生事件在 10s 后重审时把自己算进前文）；
+          // ② 本条消息引用的原话（refIndex 尽力恢复，拿不到就只有前文）。
+          const recent = recentGroupMessages(state, group, 2, 1200)
+            .filter((m) => !(m.senderId === sender && m.content.trim() === content))
+            .map((m) => ({ sender: m.senderName || m.senderId, content: m.content }));
+          const refIdx = parseRefIdx(payload).refIdx;
+          const quoted = refIdx ? bot.refIndex.resolve(refIdx) : null;
+          const modContext: ModerationContext = {
+            recent,
+            ...(quoted && quoted.content.trim()
+              ? { quoted: { sender: quoted.senderName || quoted.sender, content: quoted.content } }
+              : {}),
+          };
+          // 先同步占位再 await：两条孪生事件并发到达时只会有一个真正执行 review。
+          reviewPromise = moderation.review({
+            bot, groupId: group, sender, senderName: senderDisplayName(payload), content,
+            messageId: payload.id, context: modContext,
+          }).then((result) => result.actioned).catch(() => false);
+          moderationSeen.set(mKey, { at: Date.now(), promise: reviewPromise });
           if (moderationSeen.size > 2000) {
             const cutoff = Date.now() - 10_000;
-            for (const [k, t] of moderationSeen) if (t < cutoff) moderationSeen.delete(k);
+            for (const [k, v] of moderationSeen) if (v.at < cutoff) moderationSeen.delete(k);
           }
-          void moderation.review({ bot, groupId: group, sender, senderName: senderDisplayName(payload), content });
+        }
+        const blocked = await reviewPromise;
+        if (blocked) {
+          logger.info(`[dsh-qqbot] 群消息命中 AI 审核，已处置并阻断回复: ${content.slice(0, 40)}`);
+          return null;
         }
       }
 

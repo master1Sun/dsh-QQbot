@@ -210,7 +210,9 @@ export function createAdminService(ctx: AdminServiceContext) {
 
   const botsEnable = async (payload: { appId?: unknown; enabled?: unknown }) => {
     const appId = typeof payload.appId === "string" ? payload.appId.trim() : "";
-    const enabled = Boolean(payload.enabled);
+    // 严格解析布尔值：Boolean("false") 会得到 true，导致「停用」被误当成「启用」。
+    if (typeof payload.enabled !== "boolean") return { ok: false, error: "enabled 必须为布尔值" };
+    const enabled = payload.enabled;
     if (!appId) return { ok: false, error: "缺少 appId" };
     if (!bots.get(appId)) return { ok: false, error: `未找到机器人 ${appId || "(空)"}` };
     await setBotEnabled(appId, enabled);
@@ -1187,7 +1189,7 @@ export function createAdminService(ctx: AdminServiceContext) {
   const guildMuteMembers = (p: { appId?: unknown; guildId?: unknown; userIds?: unknown; minutes?: unknown }) =>
     guildReq(p.appId, [["guildId", p.guildId]], async (bot) => {
       const ids = Array.isArray(p.userIds) ? p.userIds.filter((id): id is string => typeof id === "string") : [];
-      return { data: await bot.client.muteGuildMembers(String(p.guildId).trim(), ids, typeof p.minutes === "number" ? p.minutes : 0) };
+      return await bot.client.muteGuildMembers(String(p.guildId).trim(), ids, typeof p.minutes === "number" ? p.minutes : 0);
     });
   const guildSettingGet = (p: { appId?: unknown; guildId?: unknown }) =>
     guildReq(p.appId, [["guildId", p.guildId]], (bot) =>
@@ -1666,7 +1668,14 @@ export function createAdminService(ctx: AdminServiceContext) {
         case "bots.setPrimary": result = await botsSetPrimary(payload); break;
         case "bots.enable": result = await botsEnable(payload); break;
         case "bots.remove": result = await botsRemove(payload); break;
-        case "bots.reconnect": result = await bots.reconnect(typeof payload.appId === "string" ? payload.appId : undefined); result = { ok: true, data: { reconnected: true, ws: bots.statusOf(typeof payload.appId === "string" ? payload.appId : primaryAppId()) } }; break;
+        case "bots.reconnect": {
+          const targetId = typeof payload.appId === "string" ? payload.appId : undefined;
+          const reconnected = await bots.reconnect(targetId);
+          result = reconnected
+            ? { ok: true, data: { reconnected: true, appId: reconnected.appId, ws: bots.statusOf(reconnected.appId) } }
+            : { ok: false, error: `未找到机器人 ${targetId ?? "(主机器人)"}，无法重连` };
+          break;
+        }
         case "catalogs": result = await catalogs(); break;
         case "workspace.list": result = await workspaceList(); break;
         case "workspace.browse": result = await workspaceBrowse(payload); break;

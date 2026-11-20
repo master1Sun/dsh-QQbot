@@ -70,6 +70,12 @@ export interface ModerationLog {
   error?: string;
   /** 群内 @ 通知发送失败原因（不影响禁言执行）。 */
   noticeError?: string;
+  /** 违规原消息是否已被撤回。 */
+  recalled?: boolean;
+  /** 撤回失败原因（不影响其它处置）。 */
+  recallError?: string;
+  /** 判定来源：模型判定 / 本地行为检测（刷屏）/ 本地精确词预筛。 */
+  source?: "llm" | "behavior" | "local";
   /** 该成员在本群的第几次违规（累进处罚）。 */
   strikeCount?: number;
   /** 累进前的等级基础时长（分钟），方便看出加重了多少。 */

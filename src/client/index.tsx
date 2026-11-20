@@ -32,7 +32,7 @@ import {
   type RpcCall,
   type Tone,
 } from "./types.js";
-import { COOLDOWN_OPTIONS, FIELD_HELP, FIELD_LABELS, SWITCH_DEFS, cooldownLabel } from "./meta.js";
+import { COOLDOWN_OPTIONS, cooldownLabel, fieldHelp, fieldLabels, switchDefs } from "./meta.js";
 import { QqBotGlyph, QqLogoGlyph } from "./glyphs.js";
 import { QBOT_SETTINGS_NAV_CSS, registerQbotSettingsNavIcon } from "./settings-nav-icon.js";
 import {
@@ -392,18 +392,22 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   };
 
   /** 数值下拉：变更即保存热生效（config.save 会同步替换内存配置并落盘）。 */
-  const numSelect = (key: string, candidates: number[], labelFn?: (n: number) => string) =>
-    SettingRow({
-      label: FIELD_LABELS[key] ?? key,
-      desc: FIELD_HELP[key] ?? "",
+  const numSelect = (key: string, candidates: number[], labelFn?: (n: number) => string) => {
+    // 每次渲染现取文案，避免模块顶层 t() 冻结成默认语言。
+    const labels = fieldLabels();
+    const helps = fieldHelp();
+    return SettingRow({
+      label: labels[key] ?? key,
+      desc: helps[key] ?? "",
       control: h("select", {
         className: "qbot-settingSelect",
         value: String(form[key] ?? ""),
         onChange: (event: any) => void saveField(key, Number(event?.target?.value)),
-        "aria-label": FIELD_LABELS[key] ?? key,
+        "aria-label": labels[key] ?? key,
       }, withCurrent(candidates, form[key], labelFn).map((o) =>
         h("option", { key: o.value, value: o.value }, o.label))),
     });
+  };
 
   // ── 机器人状态 ──────────────────────────────────────────────────────────────
   const detailBot = React.useMemo(
@@ -639,8 +643,9 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     ? t("detail.customWorkspace")
     : t("session.defaultWorkspace");
   const sessionSummary = fmt("detail.summarySession", modelLabel, workspaceLabel);
-  const enabledSwitches = SWITCH_DEFS.filter((it) => Boolean(form[it.key] ?? it.def)).length;
-  const policySummary = fmt("detail.summaryPolicy", String(enabledSwitches), String(SWITCH_DEFS.length));
+  const switches = switchDefs();
+  const enabledSwitches = switches.filter((it) => Boolean(form[it.key] ?? it.def)).length;
+  const policySummary = fmt("detail.summaryPolicy", String(enabledSwitches), String(switches.length));
   const groupSummary = fmt("detail.summaryGroup", String(Object.keys(groupOverrides).length));
   /** 连接卡摘要：启用状态 + WebSocket 状态，保证与其它卡一样有「不展开可读」的一行。 */
   const connSummary = fmt(
@@ -732,7 +737,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
 
     policy: sectionCard(t("policy.title"), t("policy.hint"),
       h("div", { className: "qbot-settingList" },
-        SWITCH_DEFS.map((it) => SettingRow({
+        switches.map((it) => SettingRow({
           rowKey: it.key, label: it.label, desc: it.desc,
           control: h("input", {
             type: "checkbox", className: "qbot-switch",
