@@ -32,6 +32,16 @@ export const CSS_TEXT = `
 .qbot-pageFootBody { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 10px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; line-height: 1.5; }
 .qbot-pageFootDot { color: var(--dsw-alias-border-l2, #dfe1e5); user-select: none; }
 .qbot-pageFootCopy { margin-top: 5px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; line-height: 1.6; }
+.qbot-uiSwitch { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; vertical-align: middle; color: var(--dsw-alias-label-tertiary, #8f959e); cursor: pointer; user-select: none; }
+.qbot-uiSwitchInput { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.qbot-uiSwitchTrack { position: relative; flex: none; width: 22px; height: 12px; border-radius: 999px; background: var(--dsw-alias-border-l2, #dfe1e5); transition: background .15s ease; }
+.qbot-uiSwitchTrack::after { content: ""; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(31 35 41 / 16%); transition: transform .15s ease, background .15s ease; }
+.qbot-uiSwitch:hover .qbot-uiSwitchTrack { background: var(--dsw-alias-border-l3, #c9cdd4); }
+.qbot-uiSwitchInput:checked + .qbot-uiSwitchTrack { background: rgb(22 119 255 / 26%); }
+.qbot-uiSwitchInput:hover:checked + .qbot-uiSwitchTrack { background: rgb(22 119 255 / 38%); }
+.qbot-uiSwitchInput:checked + .qbot-uiSwitchTrack::after { background: var(--qbot-blue, #1677ff); transform: translateX(10px); }
+.qbot-uiSwitchInput:focus-visible + .qbot-uiSwitchTrack { outline: 2px solid var(--qbot-blue, #1677ff); outline-offset: 2px; }
+.qbot-uiSwitchLabel { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10px; }
 
 /* ── 标题栏（dim-title）────────────────────────────────────────────────── */
 /* sticky 吸顶：长页面滚动时标题栏（含连接状态）常驻视口顶部；负顶 margin 抵消
@@ -302,7 +312,7 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-convGroupHead { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; padding: 7px 6px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .qbot-convGroupHead:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
 .qbot-convGroupName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
-.qbot-convGroupCount { flex: none; min-width: 18px; padding: 0 6px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--dsw-alias-label-tertiary, #8f959e); color: #fff; font-size: 10px; font-weight: 700; }
+.qbot-convGroupCount { flex: none; min-width: 20px; padding: 0 6px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--dsw-alias-bg-layer-1, #fff); border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); color: var(--dsw-alias-label-secondary, #646a73); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .qbot-convGroupMembers { flex: none; padding: 0 6px; height: 16px; display: inline-flex; align-items: center; border-radius: 999px; background: color-mix(in srgb, var(--qbot-blue, #2466e8) 12%, transparent); color: var(--qbot-blue, #2466e8); font-size: 10px; font-weight: 600; white-space: nowrap; }
 .qbot-chevron { flex: none; color: var(--dsw-alias-label-tertiary, #8f959e); transition: transform .15s ease; }
 .qbot-convGroup.is-open .qbot-chevron { transform: rotate(90deg); }
@@ -444,12 +454,12 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-archFootSep { flex: none; color: var(--dsw-alias-border-l1, #eef0f3); }
 /* Markdown：代码块换行，避免横向滚动条 */
 .qbot-md pre { white-space: pre-wrap; word-break: break-word; max-width: 100%; }
-/* 头像（无真实头像图，用图标占位） */
-.qbot-avatar { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; color: #fff; }
+/* 头像（无真实头像图，用图标占位）：浅色底 + 品牌色图标，与控制台浅色风格一致 */
+.qbot-avatar { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; color: var(--qbot-blue, #1677ff); }
 .qbot-avatar svg { width: 22px; height: 22px; }
-.qbot-avatar-bot { background: linear-gradient(135deg, var(--qbot-blue, #1677ff), var(--qbot-business, #7c4dff)); }
-.qbot-avatar-person { background: #6b7785; }
-.qbot-avatar-group { background: #4a8a5b; }
+.qbot-avatar-bot { background: color-mix(in srgb, var(--qbot-blue, #1677ff) 13%, var(--dsw-alias-bg-layer-1, #fff)); color: var(--qbot-blue, #1677ff); }
+.qbot-avatar-person { background: color-mix(in srgb, #8f959e 16%, var(--dsw-alias-bg-layer-1, #fff)); color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-avatar-group { background: color-mix(in srgb, var(--qbot-business, #7c4dff) 12%, var(--dsw-alias-bg-layer-1, #fff)); color: var(--qbot-business, #7c4dff); }
 .qbot-avatarSm { width: 22px; height: 22px; }
 .qbot-avatarSm svg { width: 13px; height: 13px; }
 .qbot-modalStateInline { min-height: 60px; padding: 0; }
@@ -1008,6 +1018,9 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 /* ── AI 群规审核：违规类型 + 配置/记录双 tab ───────────────────────────── */
 .qbot-ptModCats { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .qbot-ptModCat { min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; }
+/* 判定尺度（宽松/标准/严格）：分类下方的一组单选按钮。 */
+.qbot-ptModStrict { min-width: 0; display: flex; flex-direction: column; gap: 7px; margin-top: 11px; padding-top: 11px; border-top: 1px dashed var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ptModStrictLabel { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-ptModPane { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 /* 配置 Hero：状态总览卡，开启时用品牌色渐变强调。 */
 .qbot-ptModHero { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 15px 17px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 2px 10px rgb(31 35 41 / 4%); }
@@ -1028,13 +1041,30 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-ptModGroupText strong { font-size: 13px; font-weight: 700; color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-ptModGroupText span { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
 .qbot-ptModGroup { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-/* 步骤卡：浅底内嵌卡 + 方形序号徽标，弱化重复的大卡边框。 */
-.qbot-ptModStep { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 11px; background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #f7f8fa) 50%, transparent); }
-.qbot-ptModStepHead { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
+/* 表单项：左 label（序号 + 标题 + 说明）+ 右控件区，Element UI 风格两栏布局。
+   flex-wrap：宽面板两栏（label 固定 150px），窄面板自动堆叠，无需容器查询名。 */
+.qbot-ptModStep { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; padding: 13px 14px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 11px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptModStepHead { flex: 0 0 150px; min-width: 0; display: flex; align-items: flex-start; gap: 9px; padding-top: 5px; }
 .qbot-ptModStepNo { flex: none; width: 20px; height: 20px; display: inline-grid; place-items: center; border-radius: 6px; background: var(--qbot-business); color: #fff; font-size: 11px; font-weight: 700; }
-.qbot-ptModStepText { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.qbot-ptModStepText { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .qbot-ptModStepText strong { font-size: 12.5px; font-weight: 650; color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-ptModStepText span { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptModStepBody { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+/* 开关勾选行：整行可点，勾选后高亮。 */
+.qbot-ptModCheck { min-width: 0; align-self: flex-start; display: inline-flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.qbot-ptModCheck:hover { border-color: color-mix(in srgb, var(--qbot-business) 45%, var(--dsw-alias-border-l2, #e5e6eb)); }
+.qbot-ptModCheck:has(.qbot-checkbox:checked) { border-color: color-mix(in srgb, var(--qbot-business) 45%, transparent); background: color-mix(in srgb, var(--qbot-business) 6%, var(--dsw-alias-bg-layer-1, #fff)); }
+.qbot-ptModCheck > span { font-size: 12.5px; color: var(--dsw-alias-label-secondary, #646a73); }
+.qbot-ptModCheck:has(.qbot-checkbox:checked) > span { color: var(--qbot-business); font-weight: 600; }
+/* 单选框组：Element UI 风格圆点单选，横排可换行。 */
+.qbot-ptModRadioGroup { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.qbot-ptModRadio { min-width: 0; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-radio { appearance: none; flex: none; width: 16px; height: 16px; margin: 0; border: 1.5px solid var(--dsw-alias-border-l2, #c9cdd4); border-radius: 50%; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; position: relative; transition: border-color .15s ease; }
+.qbot-radio:hover { border-color: var(--qbot-business); }
+.qbot-radio:checked { border-color: var(--qbot-business); }
+.qbot-radio:checked::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--qbot-business); }
+.qbot-radio:focus-visible { outline: 2px solid color-mix(in srgb, var(--qbot-business) 45%, transparent); outline-offset: 2px; }
+.qbot-radio:disabled { cursor: not-allowed; opacity: .55; }
 .qbot-ptModStatus { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
 .qbot-ptModStatusDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .qbot-ptModStatus.is-on { color: var(--dsw-alias-state-success-primary, #20a162); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 12%, transparent); }
@@ -1048,6 +1078,14 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-ptModTestResult.is-none { opacity: 0.86; }
 .qbot-ptModTestReason { min-width: 0; font-size: 11.5px; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; }
 .qbot-ptModTestChip { flex: none; font-size: 10.5px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+/* 叠加惩罚：开启时展开参数卡，关闭时一行说明；预览按前 3 次违规展示效果。 */
+.qbot-ptModEsc { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 9px 10px; border: 1px dashed var(--dsw-alias-border-l2, #dee0e3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ptModEsc .qbot-ptField > .qbot-settingInput,
+.qbot-ptModEsc .qbot-ptField > .qbot-settingSelect { width: 100%; box-sizing: border-box; }
+.qbot-ptModEscOff { min-width: 0; padding: 8px 10px; border-radius: 8px; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); background: var(--dsw-alias-bg-layer-2, #f7f8fa); overflow-wrap: anywhere; }
+.qbot-ptModEscPreview { min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 7px 9px; border-radius: 8px; background: color-mix(in srgb, var(--qbot-business) 8%, transparent); }
+.qbot-ptModEscPreview > span { min-width: 0; font-size: 11px; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+.qbot-ptModEscPreview > strong { min-width: 0; font-size: 11.5px; font-weight: 650; color: var(--qbot-business); overflow-wrap: anywhere; }
 .qbot-ptModSaveBar { display: flex; justify-content: flex-end; margin-top: 2px; padding: 11px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 11px; background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
 /* 概览统计：固定一行四列，紧凑卡片；数字带语义色。 */
 .qbot-ptModStats { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
@@ -1218,12 +1256,18 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 
 /* ── 详情页：运行统计指标卡 ───────────────────────────────────────────── */
 .qbot-metricGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.qbot-metric { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 12px 13px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-left: 3px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-metric { min-width: 0; min-height: 96px; display: flex; flex-direction: column; gap: 6px; padding: 11px 13px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-left: 3px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 11px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
 .qbot-metric[data-tone="success"] { border-left-color: var(--dsw-alias-state-success-primary, #20a162); }
 .qbot-metric[data-tone="warning"] { border-left-color: var(--dsw-alias-state-warn-primary, #d97706); }
 .qbot-metric[data-tone="error"] { border-left-color: var(--dsw-alias-state-error-primary, #d54941); }
-.qbot-metricLabel { color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.qbot-metricValue { color: var(--dsw-alias-label-primary, #1f2329); font-size: 19px; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qbot-metricTop { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.qbot-metricIcon { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 5px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1; }
+.qbot-metric[data-tone="success"] .qbot-metricIcon { color: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-metric[data-tone="warning"] .qbot-metricIcon { color: var(--dsw-alias-state-warn-primary, #d97706); }
+.qbot-metric[data-tone="error"] .qbot-metricIcon { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-metricLabel { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qbot-metricValue { color: var(--dsw-alias-label-primary, #1f2329); font-size: 21px; line-height: 1.15; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qbot-metricSub { min-height: 13px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; line-height: 1.2; }
 .qbot-metric[data-tone="error"] .qbot-metricValue { color: var(--dsw-alias-state-error-primary, #d54941); }
 .qbot-metric[data-tone="warning"] .qbot-metricValue { color: var(--dsw-alias-state-warn-primary, #d97706); }
 
@@ -1626,5 +1670,225 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
   .qbot-aiLogHead { gap: 6px; }
   .qbot-aiTlRow { grid-template-columns: minmax(56px, 72px) 14px minmax(0, 1fr); }
   .qbot-aiTlTime { font-size: 10px; }
+}
+
+/* ═══ 机器人管理控制台弹窗（左菜单 + 右内容 + 运营大屏） ═══════════════════ */
+.qbot-consoleOverlay { z-index: 9000; backdrop-filter: none; }
+/* 弹窗宽高联动缩放：以 1120:860（≈1.3:1）为基准比例，窗口任一维变小时宽高一起等比收小，大屏则封顶不再放大。 */
+.qbot-consoleModal { position: relative; width: min(1120px, calc(100vw - 48px), calc((100vh - 48px) * 1.3)); height: min(860px, calc(100vh - 48px), calc((100vw - 48px) / 1.3)); }
+/* 顶部悬浮提示：绝对定位、脱离文档流，出现/消失不挤压内容，避免抖动；层级高于内容区与内部弹窗。 */
+.qbot-consoleToast { position: absolute; top: 66px; left: 50%; transform: translateX(-50%); z-index: 10020; max-width: min(620px, calc(100% - 48px)); margin: 0; box-shadow: 0 10px 30px rgb(31 35 41 / 20%); animation: none; }
+.qbot-consoleBody { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; overflow: hidden; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-consoleMenu { flex: none; width: 210px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 9px 16px; border-right: 1px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-consoleMenuGroup { margin-bottom: 4px; }
+.qbot-consoleMenuGroup + .qbot-consoleMenuGroup { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+/* 一级：分区标题——小号灰字、字距拉开、左侧色条 */
+.qbot-consoleMenuGroupTitle { display: flex; align-items: center; gap: 8px; padding: 5px 10px 6px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; font-weight: 700; letter-spacing: .1em; }
+.qbot-consoleMenuGroupTitle .qbot-consoleMenuIcon { width: 15px; font-size: 11px; opacity: .75; }
+/* 二级：能力项——正常字号、带图标、缩进一级 */
+.qbot-consoleMenuItem { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px 10px 8px 20px; margin: 1px 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12.5px; text-align: left; cursor: pointer; }
+.qbot-consoleMenuItem:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); color: var(--dsw-alias-label-primary, #1f2329); }
+.qbot-consoleMenuItem.is-active { background: var(--dsw-alias-bg-layer-1, #fff); color: var(--qbot-blue, #1677ff); font-weight: 650; box-shadow: 0 1px 3px rgb(31 35 41 / 8%); }
+.qbot-consoleMenuIcon { flex: none; width: 18px; text-align: center; opacity: .85; }
+.qbot-consoleMenuLabel { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.qbot-consoleMenuCaret { flex: none; width: 12px; text-align: center; color: var(--dsw-alias-label-tertiary, #8f959e); transition: transform .15s ease; }
+/* 三级：子 Tab——再缩进、无图标、圆点连接线、更轻的字号 */
+.qbot-consoleSubMenu { margin: 2px 0 5px 36px; padding-left: 11px; border-left: 1px solid var(--dsw-alias-border-l2, #dfe1e5); }
+.qbot-consoleSubItem { padding: 5px 9px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+.qbot-consoleSubItem::before { content: ""; display: inline-block; width: 4px; height: 4px; margin-right: 9px; vertical-align: middle; border-radius: 50%; background: var(--dsw-alias-label-placeholder, #bbbfc4); }
+.qbot-consoleSubItem:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-consoleSubItem.is-active { background: transparent; color: var(--qbot-blue, #1677ff); font-weight: 600; box-shadow: none; }
+.qbot-consoleSubItem.is-active::before { background: var(--qbot-blue, #1677ff); }
+.qbot-consoleContent { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 30px 28px; }
+/* 运营总览：单屏自适应，压缩留白让所有区块一屏放得下，不出现外层滚动条。 */
+.qbot-consoleContent.is-overview { display: flex; flex-direction: column; overflow: hidden; padding: 18px 26px 20px; }
+.qbot-consoleContent.is-overview .qbot-consolePaneHead { flex: none; margin-bottom: 12px; }
+.qbot-consoleContent.is-overview .qbot-consoleOverview { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* 归档/配置清单：内容区切换为定高 flex 列，让内嵌弹窗跟随外框高度、内部自行滚动。 */
+.qbot-consoleContent.is-fill { display: flex; flex-direction: column; overflow: hidden; }
+.qbot-consoleContent.is-fill .qbot-consolePaneBody { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.qbot-consolePaneHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.qbot-consoleCrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11.5px; }
+.qbot-consoleCrumb i { color: var(--dsw-alias-label-placeholder, #bbbfc4); font-style: normal; }
+.qbot-consoleHeadActions { display: flex; align-items: center; gap: 8px; flex: none; }
+.qbot-consolePaneHead h3 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 16px; font-weight: 650; }
+.qbot-consolePaneHead p { margin: 3px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
+.qbot-consoleMetricGrid { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.qbot-consoleMetric { min-width: 0; min-height: 92px; display: flex; flex-direction: column; gap: 5px; padding: 10px 13px 9px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-left: 3px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 11px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-consoleMetric[data-tone="success"] { border-left-color: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-consoleMetric[data-tone="warning"] { border-left-color: var(--dsw-alias-state-warn-primary, #d97706); }
+.qbot-consoleMetric[data-tone="error"] { border-left-color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-consoleMetricTop { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.qbot-consoleMetricIcon { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 5px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1; }
+.qbot-consoleMetric[data-tone="success"] .qbot-consoleMetricIcon { color: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-consoleMetric[data-tone="warning"] .qbot-consoleMetricIcon { color: var(--dsw-alias-state-warn-primary, #d97706); }
+.qbot-consoleMetric[data-tone="error"] .qbot-consoleMetricIcon { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-consoleMetricLabel { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qbot-consoleMetricValue { color: var(--dsw-alias-label-primary, #1f2329); font-size: 21px; line-height: 1.15; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qbot-consoleMetricSub { min-height: 13px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; line-height: 1.2; }
+.qbot-consoleMetric[data-tone="success"] .qbot-consoleMetricValue { color: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-consoleMetric[data-tone="warning"] .qbot-consoleMetricValue { color: var(--dsw-alias-state-warn-primary, #d97706); }
+.qbot-consoleMetric[data-tone="error"] .qbot-consoleMetricValue { color: var(--dsw-alias-state-error-primary, #d54941); }
+.qbot-consoleCharts { display: grid; grid-template-columns: 1.3fr 1fr 1.15fr; gap: 12px; }
+.qbot-consoleOverview > .qbot-consoleCharts:not(.qbot-ovArchive) { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
+.qbot-consoleOverview > .qbot-consoleCharts:not(.qbot-ovArchive) > .qbot-consoleChart { display: flex; flex-direction: column; }
+.qbot-consoleChart { min-width: 0; padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-consoleChartTitle { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 650; margin-bottom: 14px; }
+.qbot-consoleBars { display: flex; align-items: flex-end; gap: 10px; height: 150px; }
+.qbot-consoleBarCol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%; }
+.qbot-consoleBar { width: 100%; max-width: 42px; min-height: 3px; border-radius: 5px 5px 0 0; background: var(--qbot-blue, #1677ff); transition: height .25s ease; }
+.qbot-consoleBarCol span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.qbot-consoleCompose { display: flex; flex-direction: column; gap: 14px; }
+.qbot-consoleComposeBar { display: flex; width: 100%; height: 16px; border-radius: 8px; overflow: hidden; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-consoleComposeBar .is-passive { background: var(--qbot-blue, #1677ff); }
+.qbot-consoleComposeBar .is-proactive { background: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-consoleComposeLegend { display: flex; flex-direction: column; gap: 9px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
+.qbot-consoleComposeLegend span { display: inline-flex; align-items: center; gap: 7px; }
+.qbot-consoleComposeLegend i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.qbot-consoleComposeLegend i.is-passive { background: var(--qbot-blue, #1677ff); }
+.qbot-consoleComposeLegend i.is-proactive { background: var(--dsw-alias-state-success-primary, #20a162); }
+/* 运营总览：状态横幅 + 带刻度的趋势 + 构成环 + 运行信息，纯查看无操作按钮。 */
+.qbot-ovHero { flex: none; display: flex; align-items: center; gap: 18px; min-width: 0; margin-bottom: 12px; padding: 10px 16px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 12px; background: linear-gradient(100deg, rgb(22 119 255 / 8%), transparent 62%), var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ovHeroId { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 11px; }
+.qbot-ovAvatar { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; background: var(--qbot-blue, #1677ff); color: #fff; font-size: 18px; box-shadow: 0 3px 10px rgb(22 119 255 / 24%); }
+.qbot-ovHeroMeta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qbot-ovHeroMeta strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.qbot-ovHeroMeta span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
+.qbot-ovConn { flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.qbot-ovConn i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.qbot-ovConn.is-success { color: var(--dsw-alias-state-success-primary, #20a162); background: rgb(32 161 98 / 10%); }
+.qbot-ovConn.is-warning { color: var(--dsw-alias-state-warn-primary, #d97706); background: rgb(217 119 6 / 10%); }
+.qbot-ovConn.is-error { color: var(--dsw-alias-state-error-primary, #d54941); background: rgb(213 73 65 / 10%); }
+.qbot-ovConn.is-muted { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-ovHeroFacts { flex: none; display: flex; align-items: center; }
+.qbot-ovHeroFacts > div { min-width: 78px; display: flex; flex-direction: column; gap: 3px; padding: 0 14px; border-left: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.qbot-ovHeroFacts span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; white-space: nowrap; }
+.qbot-ovHeroFacts strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.qbot-ovChartHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.qbot-ovChartHead > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qbot-ovChartHead strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; font-weight: 650; }
+.qbot-ovChartHead > div span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; }
+.qbot-ovChartTag { flex: none; padding: 4px 9px; border-radius: 6px; background: rgb(22 119 255 / 9%); color: var(--qbot-blue, #1677ff); font-size: 10.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.qbot-ovBars { position: relative; flex: 1 1 auto; min-height: 118px; }
+.qbot-ovBars::before { content: ""; position: absolute; inset: 0 0 17px; pointer-events: none; background: repeating-linear-gradient(to top, var(--dsw-alias-border-l1, #eef0f3) 0 1px, transparent 1px 25%); }
+.qbot-ovBarArea { flex: 1 1 auto; width: 100%; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; }
+.qbot-ovBarValue { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10px; font-variant-numeric: tabular-nums; }
+.qbot-ovBarArea .qbot-consoleBar { max-width: 34px; }
+.qbot-consoleBar.is-today { background: linear-gradient(180deg, #6aa8ff, var(--qbot-blue, #1677ff)); }
+.qbot-ovDonutChart, .qbot-ovStatus { display: flex; flex-direction: column; }
+.qbot-ovDonutBody { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 16px; }
+.qbot-ovDonut { flex: none; width: 104px; height: 104px; display: grid; place-items: center; border-radius: 50%; }
+.qbot-ovDonutInner { width: 72px; height: 72px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 50%; background: var(--dsw-alias-bg-layer-1, #fff); }
+.qbot-ovDonutInner strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qbot-ovDonutInner span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10px; }
+.qbot-ovDonutBody .qbot-consoleComposeLegend { flex: 1 1 auto; min-width: 0; }
+.qbot-ovStatusList { flex: 1 1 auto; align-content: center; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+.qbot-ovStatusRow { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 7px 10px; border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-ovStatusLabel { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; white-space: nowrap; }
+.qbot-ovStatusValue { min-width: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.qbot-ovStatusValue[data-tone="success"] { color: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-ovStatusValue[data-tone="warning"] { color: var(--dsw-alias-state-warn-primary, #d97706); }
+.qbot-ovStatusValue[data-tone="error"] { color: var(--dsw-alias-state-error-primary, #d54941); }
+/* 运营总览：消息归档分类 / 来源 / 月份分布 */
+.qbot-ovArchive { grid-column: 1 / -1; min-height: 0; margin-top: 12px; grid-template-columns: 1.2fr 1fr 1fr; }
+.qbot-ovArcBar { display: flex; width: 100%; height: 14px; margin-bottom: 13px; border-radius: 7px; overflow: hidden; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-ovArcBar span { display: block; height: 100%; transition: width .25s ease; }
+.qbot-ovArcBar .is-inbound, .qbot-ovArcBar .is-group { background: var(--qbot-blue, #1677ff); }
+.qbot-ovArcBar .is-reply { background: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-ovArcBar .is-proactive, .qbot-ovArcBar .is-c2c { background: var(--qbot-business, #9254de); }
+.qbot-ovArcLegend { display: flex; flex-direction: column; gap: 8px; }
+.qbot-ovArcLegend span { min-width: 0; display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11.5px; }
+.qbot-ovArcLegend i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.qbot-ovArcLegend i.is-inbound, .qbot-ovArcLegend i.is-group { background: var(--qbot-blue, #1677ff); }
+.qbot-ovArcLegend i.is-reply { background: var(--dsw-alias-state-success-primary, #20a162); }
+.qbot-ovArcLegend i.is-proactive, .qbot-ovArcLegend i.is-c2c { background: var(--qbot-business, #9254de); }
+.qbot-ovArcLegend b { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 650; font-variant-numeric: tabular-nums; }
+.qbot-ovArcLegend em { margin-left: auto; color: var(--dsw-alias-label-tertiary, #8f959e); font-style: normal; font-variant-numeric: tabular-nums; }
+.qbot-ovArcMonthList { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.qbot-ovArcMonth { display: flex; align-items: center; gap: 8px; }
+.qbot-ovArcMonth > span { flex: none; width: 34px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.qbot-ovArcMonthTrack { flex: 1 1 auto; min-width: 0; height: 7px; border-radius: 4px; overflow: hidden; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-ovArcMonthTrack i { display: block; height: 100%; border-radius: 4px; background: var(--qbot-blue, #1677ff); }
+.qbot-ovArcMonth strong { flex: none; width: 30px; text-align: right; color: var(--dsw-alias-label-secondary, #646a73); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.qbot-ovArcEmpty { flex: 1 1 auto; display: grid; place-items: center; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11.5px; }
+.qbot-consoleEmbed { min-width: 0; }
+.qbot-consoleConfig { max-width: 920px; }
+.qbot-consoleConfig > .qbot-section { margin-bottom: 12px; }
+/* 配置分区平铺：去掉卡片外壳，表单直接清单显示。 */
+.qbot-consoleConfig > .qbot-sectionBody { padding: 2px 0 0; border: 0; background: transparent; }
+/* 控制台内嵌的独立弹窗类组件：剥掉自己的遮罩与定高外壳，作为内容区面板留在弹窗内。 */
+.qbot-consoleSub { min-width: 0; }
+.qbot-consoleSub > .qbot-modalOverlay { position: static; inset: auto; z-index: auto; display: block; padding: 0; background: transparent; backdrop-filter: none; animation: none; }
+/* 内容区由左侧菜单切换，内嵌面板自带的关闭按钮一律不显示 */
+.qbot-consoleContent .qbot-consoleSub .qbot-modalClose,
+.qbot-consoleContent > .qbot-consoleEmbed .qbot-modalClose { display: none !important; }
+/* 控制台内弹出的二级弹窗：脱离内容区滚动裁切，层级高于控制台本体 */
+.qbot-consoleOverlay .qbot-modalOverlay,
+.qbot-consoleOverlay .qbot-gvSubOverlay,
+.qbot-consoleOverlay .qbot-confirmOverlay { z-index: 10010; }
+.qbot-consoleSub > .qbot-modalOverlay > .qbot-modal,
+.qbot-consoleSub > .qbot-modalOverlay > .qbot-modal.qbot-modalWide,
+.qbot-consoleSub > .qbot-modalOverlay > .qbot-modal.qbot-cmModal,
+.qbot-consoleSub > .qbot-modalOverlay > .qbot-modal.qbot-gvModal { width: 100%; height: auto; max-height: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; overflow: visible; animation: none; }
+.qbot-consoleSub > .qbot-modalOverlay > .qbot-modal > .qbot-modalHead { padding: 0 0 12px; }
+.qbot-consoleSub > .qbot-modalOverlay > .qbot-modal > .qbot-modalFoot { padding: 12px 0 0; }
+.qbot-consoleSub .qbot-modalAlert { margin: 0 0 12px; }
+/* fill 模式：外框定高，内嵌弹窗铺满；隐藏自带头部(顶部描述重复)与归档底部按钮，
+   让内部列表/编辑器各自滚动，样式与外框一致(去掉卡片边框与圆角)。 */
+.qbot-consoleContent.is-fill .qbot-consoleSub,
+.qbot-consoleContent.is-fill .qbot-consoleSub > .qbot-modalOverlay { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.qbot-consoleContent.is-fill .qbot-consoleSub > .qbot-modalOverlay { position: relative; inset: auto; z-index: auto; padding: 0; background: transparent; backdrop-filter: none; animation: none; }
+.qbot-consoleContent.is-fill .qbot-consoleSub > .qbot-modalOverlay > .qbot-modal { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; overflow: hidden; }
+.qbot-consoleContent.is-fill .qbot-consoleSub > .qbot-modalOverlay > .qbot-modal > .qbot-modalHead { display: none; }
+.qbot-consoleSubArchive > .qbot-modalOverlay > .qbot-modal > .qbot-modalFoot { display: none; }
+.qbot-consoleSubArchive > .qbot-modalOverlay > .qbot-modal > .qbot-modalAlert { margin: 0 0 8px; }
+.qbot-consoleContent.is-fill .qbot-consoleSub.qbot-consoleSubArchive .qbot-archSplit { flex: 1 1 auto; min-height: 0; margin: 0; border: 0; border-radius: 0; }
+.qbot-consoleContent.is-fill .qbot-consoleSub.qbot-consoleSubManifest .qbot-cmBody { flex: 1 1 auto; min-height: 0; padding: 0 0 4px; }
+/* 单一滚动：内容区是唯一滚动容器，内层不再各建滚动区吞掉滚轮。 */
+.qbot-consoleContent .qbot-modalListScroll,
+.qbot-consoleContent .qbot-modalBody,
+.qbot-consoleContent .qbot-modalBody .qbot-editForm,
+.qbot-consoleContent .qbot-gvNav,
+.qbot-consoleContent .qbot-gvContent,
+.qbot-consoleContent .qbot-ptNav,
+.qbot-consoleContent .qbot-ptContent,
+.qbot-consoleContent .qbot-archSide,
+.qbot-consoleContent .qbot-msgList,
+.qbot-consoleContent .qbot-cmHelpScroll { overflow: visible !important; overscroll-behavior: auto !important; }
+.qbot-consoleContent .qbot-modalList { overflow: visible !important; min-height: 0 !important; }
+/* 非 fill 视图：内层任何滚动区都允许滚动链，滚轮滚到边界后交给内容区，避免被 contain 吞掉。 */
+.qbot-consoleContent:not(.is-fill) * { overscroll-behavior: auto !important; }
+/* 带 max-height 的内部小滚动区（成员/禁言名单、结果区、日志）改为可滚动链，滚轮滚到边界后交给内容区。 */
+.qbot-consoleContent .qbot-ptMutedList,
+.qbot-consoleContent .qbot-ptMembers,
+.qbot-consoleContent .qbot-gvAiLogs,
+.qbot-consoleContent .qbot-gvResult,
+.qbot-consoleContent .qbot-gvSubModal { overscroll-behavior: auto !important; }
+/* fill 模式例外：归档/配置清单在定高容器内自行滚动，恢复其内层的 overflow 与滚动链隔离。 */
+.qbot-consoleContent.is-fill .qbot-archSide,
+.qbot-consoleContent.is-fill .qbot-msgList { overflow-y: auto !important; overscroll-behavior: contain !important; }
+.qbot-consoleContent.is-fill .qbot-cmCode { overflow: auto !important; }
+.qbot-consoleContent.is-fill .qbot-cmHelpScroll { overflow-y: auto !important; overscroll-behavior: contain !important; }
+.qbot-consoleContent.is-fill .qbot-cmIssues { overflow-y: auto !important; }
+/* 内嵌模式下，频道/群聊组件只出内容——导航由控制台左侧唯一的三级树接管。 */
+.qbot-consoleContent .qbot-gvLayout.is-embedded .qbot-gvNav,
+.qbot-consoleContent .qbot-gvLayout.is-embedded .qbot-gvSubTabs,
+.qbot-consoleContent .qbot-ptLayout.is-embedded .qbot-ptNav,
+.qbot-consoleContent .qbot-ptLayout.is-embedded .qbot-ptSubNav { display: none !important; }
+.qbot-consoleContent .qbot-gvLayout.is-embedded .qbot-gvContent,
+.qbot-consoleContent .qbot-ptLayout.is-embedded .qbot-ptContent { padding: 0; }
+.qbot-consoleEntry { max-width: 460px; margin: 48px auto; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.qbot-consoleEntryIcon { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); color: var(--qbot-blue, #1677ff); font-size: 22px; }
+.qbot-consoleEntry h3 { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 16px; font-weight: 650; }
+.qbot-consoleEntry p { margin: 0 0 4px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12.5px; line-height: 1.6; }
+@media (max-width: 720px) {
+  .qbot-consoleBody { flex-direction: column; }
+  .qbot-consoleMenu { width: 100%; max-height: 30vh; border-right: 0; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+  .qbot-consoleMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qbot-consoleCharts { grid-template-columns: 1fr; }
+  .qbot-ovHero { flex-wrap: wrap; gap: 10px; }
+  .qbot-ovHeroFacts { width: 100%; justify-content: space-between; padding-top: 10px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+  .qbot-ovHeroFacts > div { flex: 1 1 0; padding: 0 10px; }
+  .qbot-ovHeroFacts > div:first-child { padding-left: 0; border-left: 0; }
 }
 `;

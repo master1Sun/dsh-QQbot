@@ -15,6 +15,10 @@
 import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { readStoreJson, writeStoreJson, pluginDataDir } from "../infra/store-file.js";
+import {
+  DEFAULT_ESCALATION, MUTE_MAX_MINUTES, normalizeEscalateSteps,
+  type EscalateMode, type EscalationSettings,
+} from "../../shared/moderation-escalation.js";
 
 const MODERATION_PATH = () => join(pluginDataDir(), "moderation.json");
 const LOG_DIR = () => join(pluginDataDir(), "moderation-logs");
@@ -33,7 +37,7 @@ export type ModerationCategory = (typeof MODERATION_CATEGORIES)[number];
 export type MuteLevel = "none" | "light" | "medium" | "severe";
 
 /** 单群审核配置。缺省字段在 normalize 时补齐。 */
-export interface ModerationConfig {
+export interface ModerationConfig extends EscalationSettings {
   enabled: boolean;
   /** 启用的内置分类 id（空 = 不启用内置分类，只看自定义群规）。 */
   categories: string[];
@@ -43,6 +47,10 @@ export interface ModerationConfig {
   durations: { light: number; medium: number; severe: number };
   /** 免审成员 openid（命中直接跳过，不调模型）。 */
   whitelist: string[];
+  /** 判定尺度：lenient 宽松（默认，只判明确违规）/ normal 标准 / strict 严格。 */
+  strictness: "lenient" | "normal" | "strict";
+  /** 累进窗口天数：连续 N 天无新违规即从第 1 次重算（默认 30）。 */
+  strikeWindowDays: number;
 }
 
 /** 处罚/审核日志。 */
@@ -66,6 +74,8 @@ export interface ModerationLog {
   strikeCount?: number;
   /** 累进前的等级基础时长（分钟），方便看出加重了多少。 */
   baseMinutes?: number;
+  /** 本次是否真的因叠加惩罚而加重（关掉叠加或首犯时为 false）。 */
+  escalated?: boolean;
 }
 
 /** 单个成员的累进违规记录（按 机器人 + 群 + 成员 独立计数）。 */
@@ -77,9 +87,11 @@ export interface ModerationStrike {
 }
 
 /** 单次禁言封顶：30 天（QQ 平台上限），分钟。 */
-export const MUTE_CAP_MINUTES = 30 * 24 * 60;
-/** 累进违规记录的滑动窗口：连续 30 天无新违规即清零重计。 */
-const STRIKE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+export const MUTE_CAP_MINUTES = MUTE_MAX_MINUTES;
+/** 默认累进窗口：连续 30 天无新违规即清零重计（单群配置可覆盖）。 */
+const DEFAULT_STRIKE_WINDOW_DAYS = 30;
+/** 天数 → 毫秒。 */
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface ModerationFile {
   configs: Record<string, ModerationConfig>;
@@ -126,18 +138,18 @@ function normalizeStrike(raw: unknown): ModerationStrike {
 }
 
 /**
- * 判断一条累进记录是否已过 30 天窗口（连续 30 天无新违规 → 清零重计）。
- * 用 lastAt（最后一次违规时间）作为窗口锚点：窗口内持续违规则 count 继续涨（但时长封顶 30 天），
- * 一旦超过 30 天没违规，下次违规从第 1 次算起，避免次数无限叠加。
+ * 判断一条累进记录是否已过清零窗口（连续 N 天无新违规 → 清零重计）。
+ * 用 lastAt（最后一次违规时间）作为窗口锚点：窗口内持续违规则 count 继续涨（时长受叠加封顶约束），
+ * 一旦超过 N 天没违规，下次违规从第 1 次算起，避免次数无限叠加。
  */
-function isStrikeExpired(strike: ModerationStrike, now: number): boolean {
+function isStrikeExpired(strike: ModerationStrike, now: number, windowDays = DEFAULT_STRIKE_WINDOW_DAYS): boolean {
   if (!strike.lastAt) return true;
   const t = Date.parse(strike.lastAt);
   if (!Number.isFinite(t)) return true;
-  return now - t >= STRIKE_WINDOW_MS;
+  return now - t >= Math.max(1, windowDays) * DAY_MS;
 }
 
-/** 默认配置：全部关闭、启用全部内置分类、三级时长 10 分钟 / 1 天 / 30 天。 */
+/** 默认配置：审核关闭、启用全部内置分类、三级时长 10 分钟 / 1 天 / 30 天，叠加惩罚沿用旧行为。 */
 export function defaultConfig(): ModerationConfig {
   return {
     enabled: false,
@@ -145,6 +157,10 @@ export function defaultConfig(): ModerationConfig {
     rules: [],
     durations: { light: 10, medium: 1440, severe: 43200 },
     whitelist: [],
+    strictness: "lenient",
+    ...DEFAULT_ESCALATION,
+    escalateSteps: [],
+    strikeWindowDays: DEFAULT_STRIKE_WINDOW_DAYS,
   };
 }
 
@@ -152,6 +168,20 @@ const clampMin = (v: unknown, fallback: number): number => {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(43200, Math.max(1, Math.round(n)));
+};
+
+/** 叠加系数：0.1–10，保留一位小数。 */
+const clampFactor = (v: unknown, fallback: number): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(10, Math.max(0.1, Math.round(n * 10) / 10));
+};
+
+/** 清零窗口天数：1–3650 天。 */
+const clampWindowDays = (v: unknown, fallback: number): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(3650, Math.max(1, Math.round(n)));
 };
 
 /** 归一化单群配置（容错：非法字段回退默认）。导出供「规则自测」复用草稿配置。 */
@@ -175,6 +205,17 @@ export function normalizeConfig(raw: unknown): ModerationConfig {
     whitelist: Array.isArray(src.whitelist)
       ? src.whitelist.filter((o): o is string => typeof o === "string" && o.trim().length > 0).map((o) => o.trim())
       : d.whitelist,
+    // 判定尺度：老配置没有该字段，默认宽松（减少误判），用户可在设置页调整。
+    strictness: src.strictness === "normal" || src.strictness === "strict" ? src.strictness : d.strictness,
+    // 叠加惩罚：老配置没有这些字段，回退默认（开启 + 线性系数 1 = 原来的 × 次数），行为不变。
+    escalateEnabled: typeof src.escalateEnabled === "boolean" ? src.escalateEnabled : d.escalateEnabled,
+    escalateMode: (["linear", "geometric", "custom"] as const).includes(src.escalateMode as EscalateMode)
+      ? src.escalateMode as EscalateMode
+      : d.escalateMode,
+    escalateFactor: clampFactor(src.escalateFactor, d.escalateFactor),
+    escalateSteps: normalizeEscalateSteps(src.escalateSteps),
+    escalateCap: Math.round(clampMin(src.escalateCap, d.escalateCap)),
+    strikeWindowDays: Math.round(clampWindowDays(src.strikeWindowDays, d.strikeWindowDays)),
   };
 }
 
@@ -321,27 +362,30 @@ export class ModerationStore {
       .slice(0, limit);
   }
 
-  /** 读取某成员在本群的累进违规记录（无记录 / 超过 30 天窗口返回全零）。 */
-  async getStrike(appId: string, groupId: string, sender: string): Promise<ModerationStrike> {
+  /** 读取某成员在本群的累进违规记录（无记录 / 超过清零窗口返回全零）。 */
+  async getStrike(appId: string, groupId: string, sender: string, windowDays = DEFAULT_STRIKE_WINDOW_DAYS): Promise<ModerationStrike> {
     const file = await this.#load();
     const strike = normalizeStrike(file.strikes[strikeKey(appId, groupId, sender)]);
-    return isStrikeExpired(strike, Date.now())
+    return isStrikeExpired(strike, Date.now(), windowDays)
       ? { count: 0, totalMinutes: 0, lastAt: "", lastLevel: "" }
       : strike;
   }
 
   /**
    * 记录一次违规：窗口内次数 +1、累计禁言分钟相加（封顶 30 天）；
-   * 超过 30 天窗口则视为新周期，从 count=1 重新计，不再无限叠加。
+   * 超过清零窗口则视为新周期，从 count=1 重新计，不再无限叠加。
    * 保留最近 STRIKE_CAP 个成员。
    */
-  async recordStrike(appId: string, groupId: string, sender: string, minutes: number, level: string): Promise<ModerationStrike> {
+  async recordStrike(
+    appId: string, groupId: string, sender: string, minutes: number, level: string,
+    windowDays = DEFAULT_STRIKE_WINDOW_DAYS,
+  ): Promise<ModerationStrike> {
     const file = await this.#load();
     const key = strikeKey(appId, groupId, sender);
     const now = Date.now();
     const existing = normalizeStrike(file.strikes[key]);
     // 窗口已过 → 清零重计；窗口内 → 沿用次数与累计。
-    const prev = isStrikeExpired(existing, now)
+    const prev = isStrikeExpired(existing, now, windowDays)
       ? { count: 0, totalMinutes: 0, lastAt: "", lastLevel: "" }
       : existing;
     const next: ModerationStrike = {

@@ -14,7 +14,16 @@ import type { RpcCall } from "../types.js";
 import { confirmDlg, errText, formatTime, val } from "../ui.js";
 import { AiChatPanel } from "./ai-chat-panel.js";
 
-type GuildTab = "guilds" | "info" | "channels" | "members" | "roles" | "message" | "speak" | "content" | "ai" | "apiPerm" | "events" | "assistant";
+export type GuildTab = "guilds" | "info" | "channels" | "members" | "roles" | "message" | "speak" | "content" | "ai" | "apiPerm" | "events" | "assistant";
+
+/** 由外层控制台单棵导航树驱动的焦点：指定要显示的二级 Tab 及其三级子 Tab。 */
+export interface GuildFocus {
+  tab: GuildTab;
+  speakTab?: "all" | "member" | "frequency" | "keyword";
+  kwTab?: "config" | "logs";
+  contentTab?: "recall" | "announce" | "pin" | "schedule" | "audio" | "forum";
+  aiTab?: "config" | "logs" | "reply" | "replyLogs";
+}
 
 interface GuildItem {
   id: string; name: string; icon?: string; owner_id?: string; owner?: boolean;
@@ -212,14 +221,20 @@ function field(label: string, control: React.ReactNode, hint?: string) {
     hint ? h("small", { className: "qbot-gvFieldHint" }, hint) : null);
 }
 
-function GuildManager(props: {
+export function GuildManager(props: {
   rpcCall: RpcCall;
   appId: string;
   onNotify: (text: string, tone: "error" | "success") => void;
+  /** 首次进入时定位的二级 Tab（独立弹窗默认「频道列表」）。 */
+  initialTab?: GuildTab;
+  /** 由外层控制台单棵导航树驱动的焦点；传入后隐藏本组件自带导航。 */
+  focus?: GuildFocus;
+  /** 嵌入控制台内容区：隐藏一级 Tab 导航，仅渲染焦点对应内容。 */
+  embedded?: boolean;
 }) {
-  const { rpcCall, appId, onNotify } = props;
+  const { rpcCall, appId, onNotify, initialTab, focus, embedded } = props;
   useLocale();
-  const [active, setActive] = React.useState<GuildTab>("guilds");
+  const [active, setActive] = React.useState<GuildTab>(focus?.tab ?? initialTab ?? "guilds");
   const [busy, setBusy] = React.useState("");
   const [guilds, setGuilds] = React.useState<GuildItem[]>([]);
   const [guild, setGuild] = React.useState<GuildItem | null>(null);
@@ -256,8 +271,8 @@ function GuildManager(props: {
   const [messageResult, setMessageResult] = React.useState<unknown>(null);
 
   // 发言管理：全员禁言 / 指定成员禁言 / 消息频率设置 / 违规字样处置
-  type SpeakTab = "all" | "member" | "frequency" | "keyword";
-  const [speakTab, setSpeakTab] = React.useState<SpeakTab>("all");
+  type SpeakTab = NonNullable<GuildFocus["speakTab"]>;
+  const [speakTab, setSpeakTab] = React.useState<SpeakTab>(focus?.speakTab ?? "all");
   const [muteUserId, setMuteUserId] = React.useState("");
   const [muteMinutes, setMuteMinutes] = React.useState("10");
   const [msgSettingText, setMsgSettingText] = React.useState("");
@@ -270,7 +285,7 @@ function GuildManager(props: {
   const [kwWhitelist, setKwWhitelist] = React.useState("");
   const [kwChannels, setKwChannels] = React.useState("");
   const [kwLogs, setKwLogs] = React.useState<Array<Record<string, unknown>>>([]);
-  const [kwTab, setKwTab] = React.useState<"config" | "logs">("config");
+  const [kwTab, setKwTab] = React.useState<NonNullable<GuildFocus["kwTab"]>>(focus?.kwTab ?? "config");
 
   // 内容管理：撤回消息
   const [recallChannel, setRecallChannel] = React.useState("");
@@ -282,8 +297,8 @@ function GuildManager(props: {
   const [roleDialog, setRoleDialog] = React.useState(false);
   const [assignDialog, setAssignDialog] = React.useState(false);
   // 内容管理子功能（公告 / 精华 / 日程 / 音频 / 帖子）
-  type ContentTab = "recall" | "announce" | "pin" | "schedule" | "audio" | "forum";
-  const [contentTab, setContentTab] = React.useState<ContentTab>("recall");
+  type ContentTab = NonNullable<GuildFocus["contentTab"]>;
+  const [contentTab, setContentTab] = React.useState<ContentTab>(focus?.contentTab ?? "recall");
   const [contentResult, setContentResult] = React.useState<unknown>(null);
   // 各内容子功能的表单字段
   const [announceMsgId, setAnnounceMsgId] = React.useState("");
@@ -302,7 +317,7 @@ function GuildManager(props: {
   const [apiPermResult, setApiPermResult] = React.useState<ApiPermResult | null>(null);
   const [apiPermOnlyUnauth, setApiPermOnlyUnauth] = React.useState(false);
   // AI 接管子 Tab（审核配置 / 处罚记录 / 自动回帖）
-  const [aiTab, setAiTab] = React.useState<"config" | "logs" | "reply" | "replyLogs">("config");
+  const [aiTab, setAiTab] = React.useState<NonNullable<GuildFocus["aiTab"]>>(focus?.aiTab ?? "config");
   // 颜色选择器：与十进制 ARGB 输入联动
   const [roleColorHex, setRoleColorHex] = React.useState("#7b00cc");
   // AI 接管配置与日志
@@ -463,6 +478,16 @@ function GuildManager(props: {
     // run/call 是稳定引用（依赖 appId），这里只按 tab + 频道变化触发。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, guild?.id]);
+
+  // 控制台单棵导航树切换焦点时，把二级 Tab 与三级子 Tab 同步到本组件状态。
+  React.useEffect(() => {
+    if (!focus) return;
+    setActive(focus.tab);
+    if (focus.speakTab) setSpeakTab(focus.speakTab);
+    if (focus.kwTab) setKwTab(focus.kwTab);
+    if (focus.contentTab) setContentTab(focus.contentTab);
+    if (focus.aiTab) setAiTab(focus.aiTab);
+  }, [focus?.tab, focus?.speakTab, focus?.kwTab, focus?.contentTab, focus?.aiTab]);
 
   const needGuild = h("div", { className: "qbot-gvEmpty", role: "status" }, t("gv.needGuild"));
 
@@ -1680,7 +1705,7 @@ function GuildManager(props: {
 
   /** 二级弹窗外壳：点列表「编辑」后弹出，独立于主内容层。 */
   const subDialog = (title: string, body: React.ReactNode, onClose: () => void) =>
-    h("div", { className: "qbot-gvSubOverlay", onMouseDown: (e: any) => { if (e.target === e.currentTarget) onClose(); } },
+    h("div", { className: "qbot-gvSubOverlay" },
       h("div", { className: "qbot-gvSubModal", role: "dialog", "aria-modal": "true", "aria-label": title },
         h("div", { className: "qbot-modalHead" },
           h("strong", null, title),
@@ -1695,8 +1720,8 @@ function GuildManager(props: {
         body));
 
   return h(React.Fragment, null,
-    h("div", { className: "qbot-gvLayout" },
-      h("nav", { className: "qbot-gvNav", role: "tablist", "aria-label": t("gv.title") },
+    h("div", { className: `qbot-gvLayout${embedded ? " is-embedded" : ""}` },
+      embedded ? null : h("nav", { className: "qbot-gvNav", role: "tablist", "aria-label": t("gv.title") },
         TEXT_KEYS.map((tab) => h("button", {
           key: tab.key, type: "button", role: "tab",
           "aria-selected": active === tab.key,
@@ -1723,8 +1748,10 @@ export function GuildManagerDialog(props: {
   rpcCall: RpcCall;
   appId: string;
   onClose: () => void;
+  /** 嵌入控制台时指定初始二级 Tab；独立弹窗默认「频道列表」。 */
+  initialTab?: GuildTab;
 }) {
-  const { rpcCall, appId, onClose } = props;
+  const { rpcCall, appId, onClose, initialTab } = props;
   useLocale();
   const [notice, setNotice] = React.useState<{ text: string; tone: "error" | "success" } | null>(null);
 
@@ -1736,7 +1763,6 @@ export function GuildManagerDialog(props: {
 
   return h("div", {
     className: "qbot-modalOverlay",
-    onMouseDown: (e: any) => { if (e.target === e.currentTarget) onClose(); },
   },
     h("div", {
       className: "qbot-modal qbot-modalWide qbot-gvModal",
@@ -1759,9 +1785,10 @@ export function GuildManagerDialog(props: {
         : null,
       h("div", { className: "qbot-gvBody" },
         h(GuildManager, {
-          key: appId || "default",
+          key: `${appId || "default"}-${initialTab ?? "guilds"}`,
           rpcCall,
           appId,
+          initialTab,
           onNotify: (text: string, tone: "error" | "success") => setNotice({ text, tone }),
         })),
       h("div", { className: "qbot-modalFoot qbot-ptDialogFoot" },

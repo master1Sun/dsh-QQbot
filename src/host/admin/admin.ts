@@ -15,7 +15,7 @@ import type { ModelOption } from "./catalogs.js";
 import type { QrLoginManager } from "../qq/qr-login.js";
 import type { ScheduleStore, ScheduleEntry, Scheduler } from "../schedule/schedule.js";
 import type { ScriptGenerator } from "../schedule/script-gen.js";
-import { listArchiveChats, listArchiveDays, readArchiveChat, readArchiveDay, readArchiveRecords, removeArchiveChat, removeArchiveDay } from "../infra/archive.js";
+import { archiveStats, listArchiveChats, listArchiveDays, readArchiveChat, readArchiveDay, readArchiveRecords, removeArchiveChat, removeArchiveDay } from "../infra/archive.js";
 import { readArchivedMedia, type ArchiveMediaKind } from "../infra/archive-media.js";
 import { applyUpdate, checkUpdate } from "./updater.js";
 import { toShanghaiISO } from "../../shared/time.js";
@@ -97,6 +97,7 @@ export function createAdminService(ctx: AdminServiceContext) {
       primary: bot.appId === primaryAppId(),
       ws: { state: ws.state, lastConnectedAt: ws.lastConnectedAt, lastError: ws.lastError },
       counters: { ...bot.state.counters },
+      daily: { ...bot.state.dailyReceived },
       pendingReplies: bot.state.pending.size,
       boundSessions: bot.state.chatSession.size,
       groupBuffers: [...bot.state.groupBuffer.entries()].map(([openid, list]) => ({ openid, buffered: list.length })),
@@ -431,6 +432,10 @@ export function createAdminService(ctx: AdminServiceContext) {
       goal: typeof payload.goal === "string" ? payload.goal : undefined,
       notifyWhen: typeof payload.notifyWhen === "string" ? payload.notifyWhen : undefined,
       verify: typeof payload.verify === "boolean" ? payload.verify : undefined,
+      // @全体成员：与 text / group 任务的勾选框对应，漏传会导致保存后不生效。
+      atEveryone: typeof payload.atEveryone === "boolean" ? payload.atEveryone
+        : payload.atEveryone === "true" ? true
+          : payload.atEveryone === "false" ? false : undefined,
       genPrompt: typeof payload.genPrompt === "string" ? payload.genPrompt : undefined,
       tool: typeof payload.tool === "string" ? payload.tool : undefined,
       args: payload.args && typeof payload.args === "object" && !Array.isArray(payload.args) ? payload.args as Record<string, unknown> : undefined,
@@ -514,6 +519,12 @@ export function createAdminService(ctx: AdminServiceContext) {
     const limit = typeof payload.limit === "number" && Number.isSafeInteger(payload.limit) ? payload.limit : undefined;
     const result = await listArchiveChats({ bot: appId, limit });
     return { ok: true, data: { appId, ...result } };
+  };
+
+  /** 运营总览的归档统计：分类占比、会话来源、月份分布与活跃会话。 */
+  const archiveStatsRpc = async (payload: { appId?: unknown }) => {
+    const appId = archiveAppId(payload);
+    return { ok: true, data: { appId, ...(await archiveStats(appId)) } };
   };
 
   /** 读取单个会话的归档记录（归档弹窗右栏；支持月份过滤、分页、倒序）。 */
@@ -1668,6 +1679,7 @@ export function createAdminService(ctx: AdminServiceContext) {
         case "archive.list": result = await archiveList(payload); break;
         case "archive.days": result = await archiveDays(payload); break;
         case "archive.chats": result = await archiveChats(payload); break;
+        case "archive.stats": result = await archiveStatsRpc(payload); break;
         case "archive.chat": result = await archiveChat(payload); break;
         case "archive.removeChat": result = await archiveRemoveChat(payload); break;
         case "archive.removeDay": result = await archiveRemoveDay(payload); break;

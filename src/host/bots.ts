@@ -107,6 +107,8 @@ export class BotRuntimeManager {
   readonly #stats: StatsStore;
   /** appId → 最近一次落盘的计数快照（序列化串比较，变化才写盘）。 */
   readonly #statsSaved = new Map<string, string>();
+  /** appId → 最近一次落盘的按天计数快照。 */
+  readonly #statsDailySaved = new Map<string, string>();
   #statsTimer: ReturnType<typeof setInterval> | null = null;
   #syncing: Promise<void> | null = null;
   #primaryAppId = "";
@@ -382,20 +384,34 @@ export class BotRuntimeManager {
 
   /** 读回持久计数并与内存取 max 合并（启动时调用，异步不阻塞建连）。 */
   async #restoreCounters(bot: BotRuntime): Promise<void> {
-    const saved = await this.#stats.load(bot.appId);
+    const [saved, savedDaily] = await Promise.all([
+      this.#stats.load(bot.appId),
+      this.#stats.loadDaily(bot.appId),
+    ]);
     const counters = bot.state.counters;
     for (const key of Object.keys(ZERO_COUNTERS) as (keyof typeof ZERO_COUNTERS)[]) {
       if (saved[key] > counters[key]) counters[key] = saved[key];
+    }
+    // 按天计数按天取 max 合并（同一天重启后继续累加，跨天各算各的）。
+    for (const [day, n] of Object.entries(savedDaily)) {
+      if (n > (bot.state.dailyReceived[day] ?? 0)) bot.state.dailyReceived[day] = n;
     }
   }
 
   /** 把所有机器人的当前计数落盘（值无变化跳过）。 */
   async #flushStats(): Promise<void> {
     for (const bot of this.#bots.values()) {
-      const json = JSON.stringify(bot.state.counters);
-      if (this.#statsSaved.get(bot.appId) === json) continue;
-      this.#statsSaved.set(bot.appId, json);
-      await this.#stats.save(bot.appId, bot.state.counters);
+      // 累计计数与按天计数各自独立变化，分开比较快照，避免一方变化漏写另一方。
+      const countersJson = JSON.stringify(bot.state.counters);
+      if (this.#statsSaved.get(bot.appId) !== countersJson) {
+        this.#statsSaved.set(bot.appId, countersJson);
+        await this.#stats.save(bot.appId, bot.state.counters);
+      }
+      const dailyJson = JSON.stringify(bot.state.dailyReceived);
+      if (this.#statsDailySaved.get(bot.appId) !== dailyJson) {
+        this.#statsDailySaved.set(bot.appId, dailyJson);
+        await this.#stats.saveDaily(bot.appId, bot.state.dailyReceived);
+      }
     }
   }
 
@@ -407,8 +423,13 @@ export class BotRuntimeManager {
     const bot = appId ? this.get(appId) : this.primary();
     if (!bot) return undefined;
     bot.state.counters = { received: 0, sessions: 0, replies: 0, proactive: 0, errors: 0 };
+    bot.state.dailyReceived = {};
     this.#statsSaved.set(bot.appId, JSON.stringify(bot.state.counters));
-    await this.#stats.save(bot.appId, bot.state.counters);
+    this.#statsDailySaved.set(bot.appId, JSON.stringify(bot.state.dailyReceived));
+    await Promise.all([
+      this.#stats.save(bot.appId, bot.state.counters),
+      this.#stats.saveDaily(bot.appId, bot.state.dailyReceived),
+    ]);
     this.#options.logger.info(`[dsh-qqbot] 机器人 ${bot.appId} 的运行统计已复位`);
     return bot;
   }

@@ -88,7 +88,8 @@ export function AddBotView(props: {
   // ═══ 添加视图（panel 内容，分段 Tab：扫码 | 手动） ══════════════════════════
   // 文案原则：只写界面/服务端真实具备的能力（生成二维码 → 扫码 → 自动落盘 → 跳转详情），
   // 不写未接入的入口（如终端 CLI 命令，本包未注册 bin）。
-  const QR_DURATION_MS = 5 * 60_000;
+  // 与服务端 bind task 的实际有效期一致（3 分钟），倒计时才不会误导用户去扫已过期的码。
+  const QR_DURATION_MS = 3 * 60_000;
   const qrRemaining = qr?.status === "pending" && qr?.expiresAt ? Math.max(0, qr.expiresAt - now) : 0;
   const qrProgress = Math.round(Math.min(1, qrRemaining / QR_DURATION_MS) * 100);
   const qrPending = qr?.status === "pending";

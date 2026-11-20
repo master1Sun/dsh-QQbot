@@ -28,7 +28,6 @@ export function PlatformToolsDialog(props: {
 
   return h("div", {
     className: "qbot-modalOverlay",
-    onMouseDown: (e: any) => { if (e.target === e.currentTarget) onClose(); },
   },
     h("div", {
       className: "qbot-modal qbot-modalWide qbot-ptModal",

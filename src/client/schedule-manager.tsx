@@ -1019,9 +1019,8 @@ export function ScheduleManager(props: {
         "aria-label": t("sched.content"),
       }),
     );
-    // text 模式：群聊任务追加「@全体成员」勾选（平台限制：管理员 + 每群每天 1 次）；
-    // ai 模式追加任务契约。
-    if (e.mode !== "ai") {
+    // 只有群聊 text 任务真正支持 @全体成员（ai/tool 发不出该标记），所以只在这里显示勾选框。
+    if (e.mode === "text") {
       if (e.scope !== "group") return contentRow;
       const atEveryoneRow = editRow(
         t("sched.form.atEveryone"),

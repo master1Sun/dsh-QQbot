@@ -14,6 +14,7 @@
  */
 import * as React from "react";
 import { createPortal } from "react-dom";
+import { DEFAULT_ESCALATION, escalateDuration, type EscalateMode } from "../../shared/moderation-escalation.js";
 import { useGroupInfos } from "../group-info.js";
 import { fmt, h, t, useLocale } from "../i18n/index.js";
 import type { RpcCall } from "../types.js";
@@ -137,12 +138,26 @@ interface JoinAutoLog {
   at: string; username: string; action: "pass" | "keep" | "decline" | "error"; reason: string; intro: string; error?: string;
 }
 
-export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
+/** 由外层控制台单棵导航树驱动的焦点：指定二级导航项及其三级子 Tab。 */
+export interface PlatformFocus {
+  nav: string;
+  joinTab?: "auto" | "manual" | "records";
+  modTab?: "config" | "logs" | "muted";
+}
+
+export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedded, group: groupProp, onGroupChange }: {
   rpcCall: RpcCall;
   appId: string;
   groups: string[];
   /** 只有报错与「操作成功」这类需要用户知道的结果才上报，由详情页在顶部吸顶展示。 */
   onNotify?: (text: string, tone: "error" | "success") => void;
+  /** 由外层控制台单棵导航树驱动的焦点；传入后隐藏本组件自带导航。 */
+  focus?: PlatformFocus;
+  /** 嵌入控制台内容区：隐藏左侧导航与面板内二级 Tab 条。 */
+  embedded?: boolean;
+  /** 控制台持有的选中群：切换菜单后仍保留，避免每次重新选群。 */
+  group?: string;
+  onGroupChange?: (g: string) => void;
 }) {
   useLocale(); // 跟随宿主语言
   const [busy, setBusy] = React.useState("");
@@ -217,7 +232,13 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
   }), [groupOptions, groupInfoMap]);
 
   // ── 当前群 + 权限状态 ────────────────────────────────────────────────────
-  const [group, setGroup] = React.useState("");
+  // 控制台持有选中群（props.group），切到别的菜单再回来仍在；独立弹窗沿用内部 state。
+  const [groupLocal, setGroupLocal] = React.useState("");
+  const group = groupProp !== undefined ? groupProp : groupLocal;
+  const setGroup = React.useCallback((g: string) => {
+    setGroupLocal(g);
+    onGroupChange?.(g);
+  }, [onGroupChange]);
   const [perm, setPerm] = React.useState<Perm>("idle");
   const [permMsg, setPermMsg] = React.useState("");
   const canAdmin = perm === "admin";
@@ -246,11 +267,18 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
     rules: string[];
     durations: { light: number; medium: number; severe: number };
     whitelist: string[];
+    escalateEnabled: boolean;
+    escalateMode: EscalateMode;
+    escalateFactor: number;
+    escalateSteps: number[];
+    escalateCap: number;
+    strikeWindowDays: number;
+    strictness: "lenient" | "normal" | "strict";
   }
   interface ModLog {
     at: string; appId: string; groupId: string; sender: string; senderName: string;
     content: string; level: string; reason: string; category: string; minutes: number; error?: string; noticeError?: string;
-    strikeCount?: number; baseMinutes?: number;
+    strikeCount?: number; baseMinutes?: number; escalated?: boolean;
   }
   /** 群内当前被禁言的成员（platform.mute.get）。 */
   interface MutedMember {
@@ -262,11 +290,15 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
   const emptyModConfig = (): ModConfig => ({
     enabled: false, categories: [...MOD_CATS], rules: [],
     durations: { light: 10, medium: 1440, severe: 43200 }, whitelist: [],
+    ...DEFAULT_ESCALATION, escalateSteps: [], strikeWindowDays: 30, strictness: "lenient",
   });
+  /** 自定义阶梯输入（每行/逗号一个数），保存前归一为数字数组。 */
+  const stepsText = (steps: number[]) => (steps ?? []).join(", ");
   const [modCfg, setModCfg] = React.useState<ModConfig>(emptyModConfig());
   const [modCfgLoaded, setModCfgLoaded] = React.useState(false);
   const [modRulesText, setModRulesText] = React.useState("");
   const [modWhiteText, setModWhiteText] = React.useState("");
+  const [modStepsText, setModStepsText] = React.useState("");
   /** 自定义规则自测：输入一段文本，用当前草稿规则跑一次纯判定（不处罚、不记日志）。 */
   const [modTestText, setModTestText] = React.useState("");
   const [modTestResult, setModTestResult] = React.useState<{
@@ -275,15 +307,16 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
   const [modLogs, setModLogs] = React.useState<ModLog[]>([]);
   const [modLogsLoaded, setModLogsLoaded] = React.useState(false);
   /** AI 审核面板内层 tab：审核配置 / 处罚记录 / 禁言成员。 */
-  const [modInnerTab, setModInnerTab] = React.useState<"config" | "logs" | "muted">("config");
+  const [modInnerTab, setModInnerTab] = React.useState<NonNullable<PlatformFocus["modTab"]>>(focus?.modTab ?? "config");
   const loadModeration = () => void run("mod.get", async () => {
     if (!group) throw new Error(t("pt.groupNoSelect"));
     const res = await rpcCall("moderation.config.get", { appId, groupOpenid: group });
     if (!res.ok) throw new Error(errText(res));
-    const cfg = (val(res)?.config ?? emptyModConfig()) as ModConfig;
+    const cfg = { ...emptyModConfig(), ...(val(res)?.config ?? {}) } as ModConfig;
     setModCfg(cfg);
     setModRulesText((cfg.rules ?? []).join("\n"));
     setModWhiteText((cfg.whitelist ?? []).join("\n"));
+    setModStepsText(stepsText(cfg.escalateSteps));
     setModCfgLoaded(true);
   });
   /** 当前草稿配置（保存 / 自测共用，改完规则无需先保存即可测）。 */
@@ -297,13 +330,25 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
       medium: Math.max(1, Math.min(43200, Number(modCfg.durations.medium) || 1440)),
       severe: Math.max(1, Math.min(43200, Number(modCfg.durations.severe) || 43200)),
     },
+    escalateEnabled: modCfg.escalateEnabled,
+    escalateMode: modCfg.escalateMode,
+    escalateFactor: Math.max(0.1, Math.min(10, Number(modCfg.escalateFactor) || 1)),
+    escalateSteps: modStepsText.split(/[\n，,、\s]+/)
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n >= 1)
+      .map((n) => Math.min(43200, Math.round(n))).slice(0, 20),
+    escalateCap: Math.max(1, Math.min(43200, Math.round(Number(modCfg.escalateCap) || 43200))),
+    strikeWindowDays: Math.max(1, Math.min(3650, Math.round(Number(modCfg.strikeWindowDays) || 30))),
+    strictness: modCfg.strictness === "strict" || modCfg.strictness === "normal" ? modCfg.strictness : "lenient",
   });
   const saveModeration = () => void run("mod.save", async () => {
     if (!group) throw new Error(t("pt.groupNoSelect"));
     const draft = modDraft();
     const res = await rpcCall("moderation.config.save", { appId, groupOpenid: group, config: draft });
     if (!res.ok) throw new Error(errText(res));
-    setModCfg((val(res)?.config ?? draft) as ModConfig);
+    const saved = (val(res)?.config ?? draft) as ModConfig;
+    setModCfg(saved);
+    setModStepsText(stepsText(saved.escalateSteps));
     return t("pt.modSaved");
   });
   /** 规则自测：用草稿配置判定一段文本，结果就地渲染（查询类不弹提示）。 */
@@ -326,6 +371,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
     setModCfg(emptyModConfig());
     setModRulesText("");
     setModWhiteText("");
+    setModStepsText("");
     setModTestText("");
     setModTestResult(null);
     setModCfgLoaded(false);
@@ -385,7 +431,6 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
 
   const pickGroup = (g: string) => {
     setGroup(g);
-    checkPerm(g);
     // 切换群时清空群相关数据，避免看到上一个群的数据。
     setProfile(null);
     setMembers([]);
@@ -530,7 +575,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
   const [jaLogs, setJaLogs] = React.useState<JoinAutoLog[]>([]);
   const [jaLogsLoaded, setJaLogsLoaded] = React.useState(false);
   /** 入群审批面板内层 tab：AI 自动审批 / 手动审批 / 审批记录。 */
-  const [jaInnerTab, setJaInnerTab] = React.useState<"auto" | "manual" | "records">("auto");
+  const [jaInnerTab, setJaInnerTab] = React.useState<NonNullable<PlatformFocus["joinTab"]>>(focus?.joinTab ?? "auto");
   const loadJoinAuto = () => void run("ja.get", async () => {
     if (!group) throw new Error(t("pt.groupNoSelect"));
     const res = await rpcCall("join.auto.config.get", { appId, groupOpenid: group });
@@ -774,7 +819,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
 
   // ── 左侧分组导航：与频道管理一致，分「群聊 / 通用」两大组，组内再列细项 ────
   // 统一 navKey："g:<群聊细项>" / "g:assistant"（执行记录）/ "u:<通用细项>"。
-  const [navKey, setNavKey] = React.useState("g:info");
+  const [navKey, setNavKey] = React.useState(focus?.nav ?? "g:info");
 
   /** pane 内二级标签导航条（审核配置 / 入群审批各自内部切换用）。 */
   const subNav = (
@@ -798,15 +843,99 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
         h("strong", null, title),
         h("span", null, desc)));
 
-  /** 审核配置：单个步骤卡（序号徽标 + 标题 + 说明 + 内容）。 */
+  /** 审核配置：单个表单项（左 label = 序号 + 标题 + 说明，右控件区）。 */
   const modStep = (no: string, title: string, desc: string, ...content: React.ReactNode[]) =>
     h("div", { className: "qbot-ptModStep" },
       h("div", { className: "qbot-ptModStepHead" },
         h("span", { className: "qbot-ptModStepNo" }, no),
         h("div", { className: "qbot-ptModStepText" },
           h("strong", null, title),
-          h("span", null, desc))),
-      ...content);
+          desc ? h("span", null, desc) : null)),
+      h("div", { className: "qbot-ptModStepBody" }, ...content));
+
+  /** 叠加效果预览：按当前草稿、以「轻微」基础时长演示前 3 次违规各禁言多久。 */
+  const modEscPreview = () => {
+    const draft = modDraft();
+    const base = Number(draft.durations.light) || 10;
+    return [1, 2, 3]
+      .map((n) => fmt("pt.modEscPrevItem", String(n), fmtDuration(escalateDuration(base, draft, n))))
+      .join(" / ");
+  };
+
+  /** 第 5 步：违规叠加惩罚开关 + 算法参数（仅开启时展开）。 */
+  const modEscalateStep = modStep("5", t("pt.modSecEscalate"), "",
+    h("label", { className: "qbot-ptModCheck" },
+      h("input", { type: "checkbox", className: "qbot-checkbox",
+        checked: modCfg.escalateEnabled, disabled: !canAdmin,
+        onChange: (e: any) => setModCfg((c) => ({ ...c, escalateEnabled: e.target.checked })) }),
+      h("span", null, t("pt.modEscEnableCheck"))),
+    modCfg.escalateEnabled
+      ? h("div", { className: "qbot-ptModEsc" },
+          h("div", { className: "qbot-ptGrid" },
+            h("label", { key: "mode", className: "qbot-ptField" },
+              h("span", null, t("pt.modEscMode")),
+              h("select", { className: "qbot-settingSelect", value: modCfg.escalateMode,
+                onChange: (e: any) => setModCfg((c) => ({ ...c, escalateMode: e.target.value as EscalateMode })),
+                "aria-label": t("pt.modEscMode") },
+                (["linear", "geometric", "custom"] as const).map((m) =>
+                  h("option", { key: m, value: m }, t(`pt.modEscMode.${m}`))))),
+            modCfg.escalateMode === "custom" ? null : h("label", { key: "factor", className: "qbot-ptField" },
+              h("span", null, t("pt.modEscFactor")),
+              h("input", { className: "qbot-settingInput", type: "number", min: 0.1, max: 10, step: 0.1,
+                value: modCfg.escalateFactor,
+                onChange: (e: any) => setModCfg((c) => ({ ...c, escalateFactor: e.target.value })),
+                "aria-label": t("pt.modEscFactor") })),
+            h("label", { key: "cap", className: "qbot-ptField" },
+              h("span", null, t("pt.modEscCap")),
+              h("input", { className: "qbot-settingInput", type: "number", min: 1, max: 43200,
+                value: modCfg.escalateCap,
+                onChange: (e: any) => setModCfg((c) => ({ ...c, escalateCap: e.target.value })),
+                "aria-label": t("pt.modEscCap") })),
+            h("label", { key: "window", className: "qbot-ptField" },
+              h("span", null, t("pt.modEscWindow")),
+              h("input", { className: "qbot-settingInput", type: "number", min: 1, max: 3650,
+                value: modCfg.strikeWindowDays,
+                onChange: (e: any) => setModCfg((c) => ({ ...c, strikeWindowDays: e.target.value })),
+                "aria-label": t("pt.modEscWindow") }))),
+          modCfg.escalateMode === "custom"
+            ? h("label", { className: "qbot-ptField qbot-ptFieldWide" },
+                h("span", null, t("pt.modEscSteps")),
+                h("textarea", { className: "qbot-ptTextarea", rows: 2, value: modStepsText,
+                  placeholder: t("pt.modEscStepsPlaceholder"),
+                  onChange: (e: any) => setModStepsText(e.target.value) }),
+                h("span", { className: "qbot-ptFieldHint" }, t("pt.modEscStepsHint")))
+            : null,
+          h("div", { className: "qbot-ptModEscPreview" },
+            h("span", null, fmt("pt.modEscPreview", fmtDuration(modCfg.durations.light))),
+            h("strong", null, modEscPreview())))
+      : h("div", { className: "qbot-ptModEscOff" }, t("pt.modEscOffHint")));
+
+  /** 步骤 2：违规类型勾选 + 判定尺度（宽松/标准/严格）。 */
+  const modCatsStep = modStep("2", t("pt.modSecCats"), "",
+    h("div", { className: "qbot-ptModCats" },
+      MOD_CATS.map((cat) => h("label", { key: cat, className: "qbot-ptModCat" },
+        h("input", { type: "checkbox", className: "qbot-checkbox",
+          checked: modCfg.categories.includes(cat),
+          onChange: () => {
+            const on = modCfg.categories.includes(cat);
+            setModCfg((c) => ({
+              ...c,
+              categories: on
+                ? c.categories.filter((x) => x !== cat)
+                : [...c.categories, cat],
+            }));
+          } }),
+        h("span", null, t(`pt.modCat.${cat}`))))),
+    h("div", { className: "qbot-ptModStrict" },
+      h("div", { className: "qbot-ptModStrictLabel" }, t("pt.modStrictness")),
+      h("div", { className: "qbot-ptModRadioGroup" },
+        (["lenient", "normal", "strict"] as const).map((s) =>
+          h("label", { key: s, className: "qbot-ptModRadio" },
+            h("input", { type: "radio", name: "modStrictness", className: "qbot-radio",
+              checked: modCfg.strictness === s, disabled: !canAdmin,
+              onChange: () => setModCfg((c) => ({ ...c, strictness: s })) }),
+            h("span", null, t(`pt.modStrict.${s}`))))),
+      h("div", { className: "qbot-ptFieldHint" }, t("pt.modStrictHint"))));
 
   /** 审核配置 pane：Hero 概览 + 两个逻辑分组 + 沉底保存。 */
   const modConfigPane = h(React.Fragment, null,
@@ -835,29 +964,17 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
           // ── 分组一：开关与检测范围 ──────────────────────────────────────
           modGroupHead(t("pt.modGroupDetect"), t("pt.modGroupDetectDesc")),
           h("div", { className: "qbot-ptModGroup" },
-            modStep("1", t("pt.modSecEnable"), t("pt.modSecEnableDesc"),
-              h("div", { className: "qbot-ptRow" },
-                adminBtn("mod.on", t("pt.modEnable"), () => setModCfg((c) => ({ ...c, enabled: true })), modCfg.enabled),
-                adminBtn("mod.off", t("pt.modDisable"), () => setModCfg((c) => ({ ...c, enabled: false })), !modCfg.enabled))),
-            modStep("2", t("pt.modSecCats"), t("pt.modSecCatsDesc"),
-              h("div", { className: "qbot-ptModCats" },
-                MOD_CATS.map((cat) => h("label", { key: cat, className: "qbot-ptModCat" },
-                  h("input", { type: "checkbox", className: "qbot-checkbox",
-                    checked: modCfg.categories.includes(cat),
-                    onChange: () => {
-                      const on = modCfg.categories.includes(cat);
-                      setModCfg((c) => ({
-                        ...c,
-                        categories: on
-                          ? c.categories.filter((x) => x !== cat)
-                          : [...c.categories, cat],
-                      }));
-                    } }),
-                  h("span", null, t(`pt.modCat.${cat}`))))))),
+            modStep("1", t("pt.modSecEnable"), "",
+              h("label", { className: "qbot-ptModCheck" },
+                h("input", { type: "checkbox", className: "qbot-checkbox",
+                  checked: modCfg.enabled, disabled: !canAdmin,
+                  onChange: (e: any) => setModCfg((c) => ({ ...c, enabled: e.target.checked })) }),
+                h("span", null, t("pt.modEnableCheck")))),
+            modCatsStep,
           // ── 分组二：处罚规则与例外 ──────────────────────────────────────
           modGroupHead(t("pt.modGroupPunish"), t("pt.modGroupPunishDesc")),
           h("div", { className: "qbot-ptModGroup" },
-            modStep("3", t("pt.modSecRules"), t("pt.modSecRulesDesc"),
+            modStep("3", t("pt.modSecRules"), "",
               h("textarea", { className: "qbot-ptTextarea", rows: 3,
                 value: modRulesText, placeholder: t("pt.modRulesPlaceholder"),
                 onChange: (e: any) => setModRulesText(e.target.value) }),
@@ -876,10 +993,14 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
                         t(`pt.modLevel.${modTestResult.level}`)),
                       h("span", { className: "qbot-ptModTestReason" },
                         modTestResult.reason || t("pt.modTestNoReason")),
+                      modTestResult.category && modTestResult.category !== "none"
+                        ? h("span", { className: "qbot-ptModTestChip" },
+                            fmt("pt.modTestCat", t(`pt.modCat.${modTestResult.category}`)))
+                        : null,
                       h("span", { className: "qbot-ptModTestChip" },
                         fmt("pt.modTestDuration", fmtDuration(modTestResult.minutes))))
                   : null)),
-            modStep("4", t("pt.modSecDuration"), t("pt.modSecDurationDesc"),
+            modStep("4", t("pt.modSecDuration"), "",
               h("div", { className: "qbot-ptGrid" },
                 (["light", "medium", "severe"] as const).map((lv) =>
                   h("label", { key: lv, className: "qbot-ptField" },
@@ -890,12 +1011,13 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
                         const v = e.target.value;
                         setModCfg((c) => ({ ...c, durations: { ...c.durations, [lv]: v } }));
                       } }))))),
-            modStep("5", t("pt.modSecWhite"), t("pt.modSecWhiteDesc"),
+            modEscalateStep,
+            modStep("6", t("pt.modSecWhite"), "",
               h("textarea", { className: "qbot-ptTextarea", rows: 2,
                 value: modWhiteText, placeholder: t("pt.modWhitePlaceholder"),
                 onChange: (e: any) => setModWhiteText(e.target.value) }))),
           h("div", { className: "qbot-ptModSaveBar" },
-            adminBtn("mod.save", t("common.save"), saveModeration, true)))
+            adminBtn("mod.save", t("common.save"), saveModeration, true))))
       : null);
 
   /** 处罚记录 pane：概览统计 + 时间线卡片（仅最近 30 条）。 */
@@ -929,7 +1051,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
           typeof log.strikeCount === "number"
             ? h("span", { className: "qbot-ptModChip is-strike" }, fmt("pt.modStrikeShort", String(log.strikeCount)))
             : null,
-          typeof log.strikeCount === "number"
+          log.escalated && typeof log.strikeCount === "number"
             ? h("span", { className: "qbot-ptModChip is-meta" },
                 fmt("pt.modStrike", String(log.strikeCount), String(log.baseMinutes ?? 0), String(log.minutes)))
             : null,
@@ -1056,7 +1178,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
           // ── 分组一：规则设置 ──────────────────────────────────────────────
           modGroupHead(t("pt.jaGroupRules"), t("pt.jaGroupRulesDesc")),
           h("div", { className: "qbot-ptModGroup" },
-            modStep("1", t("pt.jaSecEnable"), t("pt.jaSecEnableTip"),
+            modStep("1", t("pt.jaSecEnable"), "",
               h("label", { className: `qbot-ptJaEnableCheck${jaCfg.enabled ? " is-on" : ""}` },
                 h("input", { type: "checkbox", className: "qbot-checkbox",
                   checked: jaCfg.enabled, disabled: !canAdmin,
@@ -1064,11 +1186,11 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
                 h("span", { className: "qbot-ptJaEnableText" },
                   h("strong", null, t("pt.jaEnableCheck")),
                   h("span", null, t("pt.jaEnableCheckDesc"))))),
-            modStep("2", t("pt.jaSecReq"), t("pt.jaSecReqDesc"),
+            modStep("2", t("pt.jaSecReq"), "",
               h("textarea", { className: "qbot-ptTextarea", rows: 3,
                 value: jaReqText, placeholder: t("pt.jaReqPlaceholder"),
                 onChange: (e: any) => setJaReqText(e.target.value) })),
-            modStep("3", t("pt.jaSecEmpty"), t("pt.jaSecEmptyDesc"),
+            modStep("3", t("pt.jaSecEmpty"), "",
               h("div", { className: "qbot-ptJaEmptyOpts" },
                 h("button", { type: "button", className: `qbot-ptJaEmptyOpt${!jaCfg.allowEmpty ? " is-on" : ""}`,
                   disabled: !canAdmin, onClick: () => setJaCfg((c) => ({ ...c, allowEmpty: false })) },
@@ -1084,7 +1206,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
                     h("strong", null, t("pt.jaEmptyAi")),
                     h("span", null, t("pt.jaEmptyAiDesc"))),
                   h("span", { className: "qbot-ptJaEmptyCheck", "aria-hidden": "true" }, jaCfg.allowEmpty ? "✓" : "")))),
-            modStep("4", t("pt.jaSecWhite"), t("pt.jaSecWhiteDesc"),
+            modStep("4", t("pt.jaSecWhite"), "",
               h("textarea", { className: "qbot-ptTextarea", rows: 3,
                 value: jaWhiteText, placeholder: t("pt.jaWhitePlaceholder"),
                 disabled: !canAdmin,
@@ -1092,7 +1214,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
           // ── 分组二：自动运行（无需手动点击） ──────────────────────────────
           modGroupHead(t("pt.jaGroupAuto"), t("pt.jaGroupAutoDesc")),
           h("div", { className: "qbot-ptModGroup" },
-            modStep("5", t("pt.jaSecAuto"), t("pt.jaSecAutoDesc"),
+            modStep("5", t("pt.jaSecAuto"), "",
               h("div", { className: `qbot-ptJaAutoState ${jaCfg.enabled ? "is-on" : "is-off"}` },
                 h("span", { className: "qbot-ptJaAutoDot", "aria-hidden": "true" }),
                 h("span", null, jaCfg.enabled ? t("pt.jaAutoOn") : t("pt.jaAutoOff"))))),
@@ -1488,6 +1610,25 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
   const activeGroupPane = groupPanes.find((p) => p.key === activeKey) ?? groupPanes[0];
   const activeGeneralPane = generalPanes.find((p) => p.key === activeKey) ?? generalPanes[0];
 
+  // 控制台单棵导航树切换焦点时，同步二级导航项与三级子 Tab。
+  React.useEffect(() => {
+    if (!focus) return;
+    setNavKey(focus.nav);
+    if (focus.joinTab) setJaInnerTab(focus.joinTab);
+    if (focus.modTab) setModInnerTab(focus.modTab);
+  }, [focus?.nav, focus?.joinTab, focus?.modTab]);
+
+  // 从控制台其它菜单切回来时 group 由外层带(!group)恢复，重新校验权限以加载数据；
+  // group 未变（如仅切子 Tab）时不重复请求。
+  const lastPermGroup = React.useRef("");
+  React.useEffect(() => {
+    if (group && group !== lastPermGroup.current) {
+      lastPermGroup.current = group;
+      checkPerm(group);
+    }
+    if (!group) lastPermGroup.current = "";
+  }, [group, checkPerm]);
+
   // 选群 / 切换左侧导航 / 切换子标签后自动加载当前面板数据，不再需要手点「加载」按钮。
   // 切面板、切群、切子标签、权限从 checking 变为 admin 都会触发；assistant（执行记录）由组件自转。
   React.useEffect(() => {
@@ -1519,9 +1660,9 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify }: {
     }
   }, [activeKey, group, isGroupScope, canAdmin, jaInnerTab, modInnerTab]);
 
-  return h("div", { className: "qbot-ptLayout" },
+  return h("div", { className: `qbot-ptLayout${embedded ? " is-embedded" : ""}` },
     // ══ 左侧分组导航（群聊 / 通用 两大组，与频道管理同款） ════════════════════
-    h("nav", { className: "qbot-ptNav", role: "tablist", "aria-label": t("pt.tabTitle") },
+    embedded ? null : h("nav", { className: "qbot-ptNav", role: "tablist", "aria-label": t("pt.tabTitle") },
       NAV_GROUPS.map((group) => h("div", { className: "qbot-ptNavGroup", key: group.title },
         h("div", { className: "qbot-ptNavGroupTitle" }, group.title),
         ...group.items.map((item) => h("button", {

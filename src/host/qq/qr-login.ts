@@ -29,8 +29,12 @@ export interface QrLoginSnapshot {
   startedAt?: number;
 }
 
-/** QQ 扫码二维码标准有效期（毫秒），到期后 SDK 触发 onQrExpired 自动换码。 */
-const QR_TTL_MS = 5 * 60_000;
+/**
+ * 二维码有效期（毫秒），仅用于界面倒计时。
+ * 实测 @tencent-connect/qqbot-connector 1.2.0 的服务端 bind task 3 分钟即返回 EXPIRED
+ * 并自动换码，倒计时按 5 分钟显示会让用户对一张已过期的码误判为「还有效」。
+ */
+const QR_TTL_MS = 3 * 60_000;
 
 export interface QrLoginManagerOptions {
   source: string;
@@ -43,6 +47,10 @@ export class QrLoginManager {
   readonly #options: QrLoginManagerOptions;
   #snapshot: QrLoginSnapshot = { status: "idle" };
   #stop: (() => void) | null = null;
+  /** 会话序号：取消/重启后旧会话的延迟回调（含 onFailure("已取消")）一律丢弃。 */
+  #session = 0;
+  /** 放行上一次 start() 的 await，避免重复生成时旧请求永久挂起。 */
+  #resolveShown: (() => void) | null = null;
 
   constructor(options: QrLoginManagerOptions) {
     this.#options = options;
@@ -53,14 +61,29 @@ export class QrLoginManager {
     return { ...this.#snapshot };
   }
 
-  /** 启动一次扫码会话；进行中重复调用返回当前状态。 */
+  /**
+   * 启动一次扫码会话。进行中重复调用会先中止旧会话再重新生成（界面「重新生成」按钮依赖此行为）。
+   * 旧会话被 stop 时 SDK 会异步触发 onFailure("已取消")，用 #session 隔离，避免覆盖新会话状态。
+   */
   async start(): Promise<QrLoginSnapshot> {
-    if (this.#stop) return this.snapshot();
+    if (this.#stop) {
+      // 放行上一次 start() 的 await，避免旧 RPC 请求永久挂起。
+      this.#resolveShown?.();
+      this.#resolveShown = null;
+      this.#stop();
+      this.#stop = null;
+    }
+    const session = ++this.#session;
+    const isCurrent = () => session === this.#session;
     this.#snapshot = { status: "pending", startedAt: Date.now(), expiresAt: Date.now() + QR_TTL_MS };
     const qrcodeShown = new Promise<void>((resolve) => {
-      this.#stop = startQrConnect(
+      this.#resolveShown = () => {
+        if (isCurrent()) resolve();
+      };
+      const stop = startQrConnect(
         {
           onQrDisplayed: (url) => {
+            if (!isCurrent()) return;
             this.#snapshot.qrUrl = url;
             // SDK 过期会自动换码并再次回调，这里同步续期，界面倒计时才准。
             this.#snapshot.expiresAt = Date.now() + QR_TTL_MS;
@@ -68,24 +91,29 @@ export class QrLoginManager {
             // 界面直接 <img src> 展示；SVG 仅作 CLI / 旧端点兼容保留。
             QRCode.toDataURL(url, { type: "image/png", errorCorrectionLevel: "M", margin: 2, width: 320 })
               .then((dataUrl) => {
+                if (!isCurrent()) return undefined;
                 this.#snapshot.qrCodeDataUrl = dataUrl;
                 return QRCode.toString(url, { type: "svg", margin: 1, width: 220 });
               })
               .then((svg) => {
-                this.#snapshot.qrSvg = svg;
+                if (!isCurrent()) return;
+                if (svg) this.#snapshot.qrSvg = svg;
                 resolve();
               })
               .catch(() => resolve());
           },
           onQrExpired: () => {
+            if (!isCurrent()) return;
             this.#snapshot.qrSvg = undefined;
             this.#snapshot.qrCodeDataUrl = undefined;
             this.#snapshot.qrUrl = undefined;
           },
           onSuccess: (credentials) => {
+            if (!isCurrent()) return;
             void this.#finish(credentials);
           },
           onFailure: (error) => {
+            if (!isCurrent()) return;
             this.#snapshot = {
               status: "failure",
               error: error?.message ?? "扫码登录失败",
@@ -97,6 +125,7 @@ export class QrLoginManager {
         },
         { displayQrCodeToConsole: false, source: this.#options.source },
       );
+      this.#stop = stop;
     });
     await qrcodeShown;
     return this.snapshot();
@@ -134,9 +163,13 @@ export class QrLoginManager {
 
   /** 取消进行中的扫码。 */
   cancel(): QrLoginSnapshot {
+    // 先失效旧会话回调（stop 会异步触发 onFailure("已取消")，否则会覆盖下面的 idle）。
+    this.#session++;
+    this.#resolveShown?.();
+    this.#resolveShown = null;
     this.#stop?.();
     this.#stop = null;
-    if (this.#snapshot.status === "pending") this.#snapshot = { status: "idle" };
+    this.#snapshot = { status: "idle" };
     return this.snapshot();
   }
 

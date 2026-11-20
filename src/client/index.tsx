@@ -57,6 +57,7 @@ import { OverrideDialog } from "./dialogs/override-dialog.js";
 import { PlatformToolsDialog } from "./dialogs/platform-tools-dialog.js";
 import { GuildManagerDialog } from "./dialogs/guild-manager-dialog.js";
 import { ScheduleDialog } from "./dialogs/schedule-dialog.js";
+import { ConsoleDialog } from "./dialogs/console-dialog.js";
 import { WorkspacePickerDialog } from "./dialogs/workspace-picker.js";
 import { setRpcCall } from "./right-panel/api.js";
 import { installScheduleWorkbenchView } from "./workbench/schedule-view.js";
@@ -143,8 +144,19 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const [platformOpen, setPlatformOpen] = React.useState(false);
   /** 频道管理弹窗（竖向 Tab：频道 / 子频道 / 成员 / 身份组 / 消息）。 */
   const [guildOpen, setGuildOpen] = React.useState(false);
+  /** 机器人管理控制台弹窗（点卡片弹出：左菜单 + 右内容 + 运营大屏主页）。 */
+  const [consoleOpen, setConsoleOpen] = React.useState(false);
+  /** 界面版本：新版=卡片进控制台、扫码成功直接进控制台；旧版=详情页。默认新版，记忆到浏览器。 */
+  const [modernUi, setModernUi] = React.useState(() => {
+    try { return window.localStorage.getItem("dsh-qqbot.ui.modern") !== "0"; } catch { return true; }
+  });
+  const switchUiMode = (modern: boolean) => {
+    try { window.localStorage.setItem("dsh-qqbot.ui.modern", modern ? "1" : "0"); } catch { /* 隐私模式下忽略 */ }
+    setModernUi(modern);
+    setConsoleOpen(false);
+    setPage("list");
+  };
   const [loadError, setLoadError] = React.useState("");
-  const [refreshing, setRefreshing] = React.useState(false);
   const [reconnecting, setReconnecting] = React.useState(false);
   // 更新状态托管到模块级（见文件顶部 updateStore）：切走设置页再回来，
   // 未执行完的更新仍显示「请勿关闭本面板」，而不是让人以为更新没发生。
@@ -178,7 +190,9 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
 
   // 进入某个机器人详情时，载入「该机器人」的生效配置到表单，避免沿用上一个/主机器人。
   React.useEffect(() => {
-    if (page !== "detail") return undefined;
+    // 控制台从列表卡片直接打开，配置表单也在控制台里编辑，所以打开控制台时
+    // 同样要载入「该机器人」的生效配置，不能沿用上一个机器人的 form。
+    if (page !== "detail" && !consoleOpen) return undefined;
     if (!detailAppId) return undefined;
     let alive = true;
     rpcCall("config.get", { appId: detailAppId }).then((res) => {
@@ -186,7 +200,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       if (res.ok) setForm({ ...(val(res)?.config ?? {}) });
     });
     return () => { alive = false; };
-  }, [page, detailAppId, rpcCall]);
+  }, [page, consoleOpen, detailAppId, rpcCall]);
 
   // ── 行为配置（对齐 dsh-im：下拉/开关变更即保存热生效；作用于当前详情机器人） ──
   const saveField = async (key: string, value: unknown): Promise<{ ok: boolean; error?: string; data?: any }> => {
@@ -217,26 +231,6 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   // 提示条自动消失：8 秒倒计时后清空；倒计时秒数实时显示在提示条右侧（见 countdownBadge）。
   const noticeLeft = useCountdown(notice, NOTICE_TTL_SECONDS, () => setNotice(""));
 
-  // ── 运行统计刷新 ─────────────────────────────────────────────────────────────
-  const refreshStats = async () => {
-    setRefreshing(true);
-    try { await refresh(); } finally { setRefreshing(false); }
-  };
-
-  // ── 运行统计复位：清零该机器人的持久计数（stats.reset 后刷新展示） ───────────
-  const [resetting, setResetting] = React.useState(false);
-  const resetStats = async () => {
-    // 复位是不可逆的清零操作，先走全局确认框（与「移除接入」一致）。
-    if (!(await confirmDlg({ message: t("stats.resetConfirm"), danger: true }))) return;
-    setResetting(true);
-    try {
-      const res = await rpcCall("stats.reset", detailAppId ? { appId: detailAppId } : {});
-      if (res.ok) await refresh();
-    } finally {
-      setResetting(false);
-    }
-  };
-
   // ── 机器人卡片操作 ──────────────────────────────────────────────────────────
   const setPrimaryBot = async (appId: string) => {
     setNotice("");
@@ -259,6 +253,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     const res = await rpcCall("bots.remove", { appId: bot.appId });
     if (res.ok) {
       await refresh();
+      setConsoleOpen(false);
       setPage("list");
       setNotice(t("notice.botRemoved"));
     } else {
@@ -467,7 +462,12 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           key: bot.appId,
           type: "button",
           className: "qbot-botCard",
-          onClick: () => { setDetailAppId(bot.appId); setDetailTab("runtime"); setNotice(""); setPage("detail"); },
+          onClick: () => {
+            setDetailAppId(bot.appId);
+            setNotice("");
+            if (modernUi) setConsoleOpen(true);
+            else { setDetailTab("runtime"); setPage("detail"); }
+          },
         },
           h("div", { className: "qbot-botCardHead" },
             h("span", { className: "qbot-botAvatar", "aria-hidden": "true" }, h(QqLogoGlyph)),
@@ -586,13 +586,16 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         h("span", { className: "qbot-sectionSummary" }, opts.summary)),
       h("span", { className: "qbot-sectionChevron", "aria-hidden": "true" }, "›"));
 
-  /** 指标卡：用于运行统计，比裸表格更易扫读。 */
-  const metricCard = (label: string, value: string, tone: Tone) =>
-    h("div", { className: "qbot-metric", "data-tone": tone, key: label },
-      h("span", { className: "qbot-metricLabel" }, label),
-      h("strong", { className: "qbot-metricValue" }, value));
+  /** 指标卡：用于运行统计，图标 + 标签 + 数值 + 说明，跟新版运营总览一致。 */
+  const metricCard = (m: { label: string; value: string; tone: Tone; glyph?: string; sub?: string }) =>
+    h("div", { className: "qbot-metric", "data-tone": m.tone, key: m.label },
+      h("div", { className: "qbot-metricTop" },
+        h("span", { className: "qbot-metricIcon", "aria-hidden": "true" }, m.glyph ?? "·"),
+        h("span", { className: "qbot-metricLabel" }, m.label)),
+      h("strong", { className: "qbot-metricValue" }, m.value),
+      m.sub ? h("span", { className: "qbot-metricSub" }, m.sub) : null);
 
-  const metrics: Array<{ label: string; value: string; tone: Tone }> = detailBot
+  const metrics: Array<{ label: string; value: string; tone: Tone; glyph?: string; sub?: string }> = detailBot
     ? (() => {
         const c = detailBot.counters ?? { received: 0, sessions: 0, replies: 0, proactive: 0, errors: 0 };
         const buffered = Array.isArray(detailBot.groupBuffers)
@@ -600,15 +603,21 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           : 0;
         const errors = Number(c.errors ?? 0);
         const pending = Number(detailBot.pendingReplies ?? 0);
+        const passive = Number(c.replies ?? 0);
+        const proact = Number(c.proactive ?? 0);
+        const replyTotal = passive + proact;
+        const share = (n: number) => (replyTotal > 0 ? Math.round((n / replyTotal) * 100) : 0);
+        const todayKey = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const todayCount = Number(detailBot.daily?.[todayKey] ?? 0);
         return [
-          { label: t("stats.received"), value: String(c.received ?? 0), tone: "neutral" as Tone },
-          { label: t("stats.sessions"), value: String(c.sessions ?? 0), tone: "neutral" as Tone },
-          { label: t("stats.passive"), value: String(c.replies ?? 0), tone: "success" as Tone },
-          { label: t("stats.proactive"), value: String(c.proactive ?? 0), tone: "neutral" as Tone },
-          { label: t("stats.bound"), value: String(detailBot.boundSessions ?? 0), tone: "neutral" as Tone },
-          { label: t("stats.pendingQueue"), value: String(pending), tone: (pending > 0 ? "warning" : "neutral") as Tone },
-          { label: t("stats.groupBuffer"), value: String(buffered), tone: "neutral" as Tone },
-          { label: t("stats.errors"), value: String(errors), tone: (errors > 0 ? "error" : "neutral") as Tone },
+          { label: t("stats.received"), value: String(c.received ?? 0), tone: "neutral" as Tone, glyph: "◉", sub: fmt("console.ovToday", String(todayCount)) },
+          { label: t("stats.sessions"), value: String(c.sessions ?? 0), tone: "neutral" as Tone, glyph: "◇" },
+          { label: t("stats.passive"), value: String(passive), tone: "success" as Tone, glyph: "↩", sub: fmt("console.ovShare", `${share(passive)}%`) },
+          { label: t("stats.proactive"), value: String(proact), tone: "neutral" as Tone, glyph: "↗", sub: fmt("console.ovShare", `${share(proact)}%`) },
+          { label: t("stats.bound"), value: String(detailBot.boundSessions ?? 0), tone: "neutral" as Tone, glyph: "⧉" },
+          { label: t("stats.pendingQueue"), value: String(pending), tone: (pending > 0 ? "warning" : "neutral") as Tone, glyph: "◷", sub: pending > 0 ? t("console.ovWaiting") : t("console.ovClear") },
+          { label: t("stats.groupBuffer"), value: String(buffered), tone: "neutral" as Tone, glyph: "▤" },
+          { label: t("stats.errors"), value: String(errors), tone: (errors > 0 ? "error" : "neutral") as Tone, glyph: "!", sub: errors > 0 ? t("console.ovAttention") : t("console.ovNormal") },
         ];
       })()
     : [];
@@ -639,6 +648,186 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     detailBot ? (detailBot.enabled ? t("status.enabled") : t("status.disabled")) : "—",
     wsLabel,
   );
+
+  /** 连接与移除：详情页管理 Tab 与管理控制台共用同一份面板。 */
+  const connectionPane = sectionCard(t("conn.title"), t("conn.hint"),
+    h("div", { className: "qbot-settingList" },
+      detailBot
+        ? SettingRow({
+            label: detailBot.enabled ? t("conn.disableBot") : t("conn.enableBot"),
+            desc: t("conn.disableHint"),
+            control: h("button", {
+              className: "qbot-btn", type: "button",
+              disabled: detailBot.primary,
+              onClick: () => void toggleEnabled(detailBot, !detailBot.enabled),
+            }, detailBot.enabled ? t("conn.disable") : t("conn.enable")),
+          })
+        : null,
+      detailBot && !detailBot.primary
+        ? SettingRow({
+            label: t("conn.setPrimary"),
+            desc: t("conn.primaryHint"),
+            control: h("button", {
+              className: "qbot-btn", type: "button",
+              onClick: () => void setPrimaryBot(detailBot.appId),
+            }, t("conn.setPrimary")),
+          })
+        : null,
+      SettingRow({
+        label: detailBot?.ws?.state === "connected" ? t("conn.check") : t("conn.retry"),
+        desc: t("conn.retryHint"),
+        control: h("button", {
+          className: "qbot-btn", type: "button",
+          disabled: reconnecting || !detailBot,
+          onClick: () => void retryConnection(),
+        }, reconnecting ? t("conn.checking") : detailBot?.ws?.state === "connected" ? t("conn.check") : t("conn.retry")),
+      }),
+      detailBot
+        ? SettingRow({
+            label: t("conn.remove"),
+            desc: t("conn.removeHint"),
+            control: h("button", {
+              className: "qbot-btn qbot-btnDanger", type: "button",
+              onClick: () => void removeBot(detailBot),
+            }, t("conn.remove")),
+          })
+        : null), undefined, { danger: true, icon: "!", tone: "danger", summary: connSummary });
+
+  /**
+   * 配置分区节点：详情页配置 Tab 与管理控制台共用同一份表单，
+   * 控制台只把它们放进右侧内容区，不再跳回详情页。
+   */
+  const configPanes: Record<"session" | "policy" | "tune" | "override" | "manifest", React.ReactNode> = {
+    session: sectionCard(t("session.title"), t("session.hint"),
+      h("div", { className: "qbot-settingList" },
+        h("div", { className: "qbot-workspaceCard" },
+          h("div", { className: "qbot-workspaceCardHead" },
+            h("div", { className: "qbot-settingCopy" },
+              h("span", { className: "qbot-settingTitle" }, t("session.workspace")),
+              h("span", { className: "qbot-settingDesc" }, t("session.workspaceHint"))),
+            h("button", { className: "qbot-btn", type: "button", onClick: () => setPickerOpen(true) }, t("session.chooseDir"))),
+          h("code", { className: "qbot-workspacePath", title: String(form.workspacePath ?? "") },
+            String(form.workspacePath ?? "").trim() || t("session.defaultWorkspace"))),
+        SettingRow({
+          label: t("session.model"), desc: t("session.modelHint"),
+          control: h("select", {
+            key: `model-${String(form.model ?? "")}-${catalogs.models.length}`,
+            className: "qbot-settingSelect", value: String(form.model ?? ""),
+            onChange: (e: any) => void saveField("model", e.target.value),
+            "aria-label": t("session.model"),
+          },
+            h("option", { value: "" }, t("session.followDefaultModel")),
+            modelGroups().map((g) => h("optgroup", { key: g.label, label: g.label },
+              g.options.map((o) => h("option", { key: o.value, value: o.value }, o.label))))),
+        }),
+        SettingRow({
+          label: t("session.preset"), desc: t("session.presetHint"),
+          control: h("select", {
+            className: "qbot-settingSelect", value: String(form.agentPreset ?? ""),
+            onChange: (e: any) => void saveField("agentPreset", e.target.value),
+            "aria-label": t("session.preset"),
+          }, presetOptions(catalogs.agentPresets).map((o) =>
+            h("option", { key: o.value, value: o.value }, o.label))),
+        })), undefined, { icon: "◇", tone: "info", summary: sessionSummary }),
+
+    policy: sectionCard(t("policy.title"), t("policy.hint"),
+      h("div", { className: "qbot-settingList" },
+        SWITCH_DEFS.map((it) => SettingRow({
+          rowKey: it.key, label: it.label, desc: it.desc,
+          control: h("input", {
+            type: "checkbox", className: "qbot-switch",
+            checked: Boolean(form[it.key] ?? it.def),
+            onChange: (e: any) => void saveField(it.key, e.target.checked),
+            "aria-label": it.label,
+          }),
+        })),
+        SettingRow({
+          rowKey: "quoteReply", label: t("policy.quote"), desc: t("policy.quoteHint"),
+          control: h("select", {
+            className: "qbot-settingSelect", value: String(form.quoteReply ?? "at"),
+            onChange: (e: any) => void saveField("quoteReply", e.target.value),
+            "aria-label": t("policy.quoteScope"),
+          },
+            h("option", { value: "off" }, t("policy.quoteScopeOff")),
+            h("option", { value: "at" }, t("policy.quoteScopeAt")),
+            h("option", { value: "all" }, t("policy.quoteScopeAll"))),
+        }),
+        SettingRow({
+          rowKey: "replyLocale", label: t("replyLocale.label"), desc: t("replyLocale.hint"),
+          control: h("select", {
+            className: "qbot-settingSelect", value: String(form.replyLocale ?? "zh"),
+            onChange: (e: any) => void saveField("replyLocale", e.target.value),
+            "aria-label": t("replyLocale.labelShort"),
+          },
+            h("option", { value: "zh" }, t("replyLocale.zh")),
+            h("option", { value: "en" }, "English")),
+        }),
+        SettingRow({
+          rowKey: "archiveMedia", label: t("feature.archiveMedia"), desc: t("feature.archiveMediaHint"),
+          control: h("select", {
+            className: "qbot-settingSelect", value: String(form.archiveMedia ?? "off"),
+            onChange: (e: any) => void saveField("archiveMedia", e.target.value),
+            "aria-label": t("feature.archiveMedia"),
+          },
+            h("option", { value: "off" }, t("feature.archiveMediaOff")),
+            h("option", { value: "image" }, t("feature.archiveMediaImage")),
+            h("option", { value: "imageVideo" }, t("feature.archiveMediaImageVideo")),
+            h("option", { value: "all" }, t("feature.archiveMediaAll"))),
+        }),
+        SettingRow({
+          rowKey: "bannedWords", wide: true,
+          label: t("feature.bannedWords"), desc: t("feature.bannedWordsHint"),
+          control: TextArea({
+            rows: 3,
+            defaultValue: Array.isArray(form.bannedWords) ? (form.bannedWords as string[]).join(", ") : "",
+            placeholder: t("feature.bannedWordsPlaceholder"),
+            onBlur: (e: any) => {
+              const words = String(e?.target?.value ?? "").split(/[,，]/).map((w) => w.trim()).filter(Boolean);
+              void saveField("bannedWords", words);
+            },
+            "aria-label": t("feature.bannedWords"),
+          }),
+        })), undefined, { icon: "⇄", tone: "success", summary: policySummary }),
+
+    tune: sectionCard(t("tune.title"), t("tune.hint"),
+      h("div", { className: "qbot-settingList" },
+        numSelect("valueThreshold", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], (n) => (n === 0 ? t("tune.allZero") : fmt("override.scoreOption", n))),
+        numSelect("atContextMessages", [0, 2, 4, 6, 8, 10, 15, 20, 30, 50], (n) => (n === 0 ? t("tune.offZero") : fmt("override.countOption", n))),
+        numSelect("groupCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
+        numSelect("senderCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
+        numSelect("replyChunkChars", [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000]),
+        numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5]),
+        numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => fmt("override.charsOption", n)),
+        numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? t("quota.unlimitedZero") : fmt("override.perDayOption", n)))),
+      undefined, { icon: "≋", tone: "warning", summary: t("detail.summaryTune") }),
+
+    override: sectionCard(t("group.title"), t("group.hint"),
+      h("div", { className: "qbot-settingList" },
+        Object.keys(groupOverrides).length === 0
+          ? h("div", { className: "qbot-modalState" }, t("group.empty"))
+          : Object.entries(groupOverrides).map(([openid, ov]) =>
+              h("div", { key: openid, className: "qbot-schedRow" },
+                h("div", { className: "qbot-schedMain" },
+                  h("div", { className: "qbot-schedTop" },
+                    h("span", { className: "qbot-chip is-active" }, t("group.group")),
+                    h("code", { className: "qbot-mono", title: openid },
+                      `${openid.slice(0, 12)}${openid.length > 12 ? "…" : ""}`)),
+                  h("div", { className: "qbot-schedContent" }, overrideSummary(ov))),
+                h("div", { className: "qbot-schedOps" },
+                  h("button", { className: "qbot-btn qbot-schedEdit", type: "button", onClick: () => setOverrideEdit(openid) }, t("common.edit")),
+                  h("button", { className: "qbot-btn qbot-btnDanger", type: "button", onClick: () => void removeOverride(openid) }, t("common.delete"))))),
+        h("div", { className: "qbot-editActions" },
+          h("span", { className: "qbot-hint" }, t("group.overrideHint")),
+          h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setOverrideEdit("") }, t("group.add")))),
+      undefined, { icon: "▦", tone: "info", summary: groupSummary }),
+
+    manifest: actionCard({
+      icon: "{ }", tone: "business",
+      title: t("manifest.entryTitle"), desc: t("manifest.entryDesc"),
+      summary: t("manifest.entrySummary"),
+      disabled: !detailBot, onClick: () => setManifestOpen(true),
+    }),
+  };
 
   const detailView = h("div", { className: "qbot-channelPage" },
     // ── 面包屑：只标位置。身份与状态统一由下方 hero 承载，避免三层重复 ──
@@ -691,19 +880,8 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     status
       ? sectionCard(t("stats.title"), t("stats.hint"),
           h("div", { className: "qbot-metricGrid" },
-            metrics.map((m) => metricCard(m.label, m.value, m.tone))),
-          h("div", { className: "qbot-sectionActions" },
-            h("button", {
-              className: "qbot-btn", type: "button",
-              disabled: refreshing,
-              onClick: () => void refreshStats(),
-            }, refreshing ? t("common.refreshing") : t("common.refresh")),
-            h("button", {
-              className: "qbot-btn qbot-btnDanger", type: "button",
-              disabled: resetting || refreshing,
-              title: t("stats.resetHint"),
-              onClick: () => void resetStats(),
-            }, resetting ? t("common.resetting") : t("common.reset"))),
+            metrics.map((m) => metricCard(m))),
+          undefined,
           { icon: "▤", tone: "info", summary: statSummary })
       : null,
       // 定时消息 / 消息归档从 hero 收进「运行」组，整卡可点，入口唯一。
@@ -721,168 +899,11 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       }),
       ] : detailTab === "config" ? [
 
-    // ── 会话与模型 ──
-    sectionCard(t("session.title"), t("session.hint"),
-      h("div", { className: "qbot-settingList" },
-        // 工作区：路径较长，独占一行展示
-        h("div", { className: "qbot-workspaceCard" },
-          h("div", { className: "qbot-workspaceCardHead" },
-            h("div", { className: "qbot-settingCopy" },
-              h("span", { className: "qbot-settingTitle" }, t("session.workspace")),
-              h("span", { className: "qbot-settingDesc" },
-                t("session.workspaceHint"))),
-            h("button", { className: "qbot-btn", type: "button", onClick: () => setPickerOpen(true) }, t("session.chooseDir"))),
-          h("code", { className: "qbot-workspacePath", title: String(form.workspacePath ?? "") },
-            String(form.workspacePath ?? "").trim() || t("session.defaultWorkspace"))),
-        SettingRow({
-          label: t("session.model"),
-          desc: t("session.modelHint"),
-          control: h("select", {
-            // key 随「当前值 + 目录规模」变化：目录异步到达时强制重挂载，
-            // 避免「value 先于 option 设置」导致 select 卡在第一项「跟随默认模型」。
-            key: `model-${String(form.model ?? "")}-${catalogs.models.length}`,
-            className: "qbot-settingSelect",
-            value: String(form.model ?? ""),
-            onChange: (e: any) => void saveField("model", e.target.value),
-            "aria-label": t("session.model"),
-          },
-            h("option", { value: "" }, t("session.followDefaultModel")),
-            modelGroups().map((g) => h("optgroup", { key: g.label, label: g.label },
-              g.options.map((o) => h("option", { key: o.value, value: o.value }, o.label))))),
-        }),
-        SettingRow({
-          label: t("session.preset"),
-          desc: t("session.presetHint"),
-          control: h("select", {
-            className: "qbot-settingSelect",
-            value: String(form.agentPreset ?? ""),
-            onChange: (e: any) => void saveField("agentPreset", e.target.value),
-            "aria-label": t("session.preset"),
-          }, presetOptions(catalogs.agentPresets).map((o) =>
-            h("option", { key: o.value, value: o.value }, o.label))),
-        }),
-      ), undefined, { icon: "◇", tone: "info", summary: sessionSummary }),
-
-    // ── 消息与回复策略（开关） ──
-    sectionCard(t("policy.title"), t("policy.hint"),
-      h("div", { className: "qbot-settingList" },
-        SWITCH_DEFS.map((it) => SettingRow({
-          rowKey: it.key,
-          label: it.label,
-          desc: it.desc,
-          control: h("input", {
-            type: "checkbox",
-            className: "qbot-switch",
-            checked: Boolean(form[it.key] ?? it.def),
-            onChange: (e: any) => void saveField(it.key, e.target.checked),
-            "aria-label": it.label,
-          }),
-        })),
-        SettingRow({
-          rowKey: "quoteReply",
-          label: t("policy.quote"),
-          desc: t("policy.quoteHint"),
-          control: h("select", {
-            className: "qbot-settingSelect",
-            value: String(form.quoteReply ?? "at"),
-            onChange: (e: any) => void saveField("quoteReply", e.target.value),
-            "aria-label": t("policy.quoteScope"),
-          },
-            h("option", { value: "off" }, t("policy.quoteScopeOff")),
-            h("option", { value: "at" }, t("policy.quoteScopeAt")),
-            h("option", { value: "all" }, t("policy.quoteScopeAll"))),
-        }),
-        // 语音相关配置（语音消息处理 / ASR / STT / TTS）已从界面移除，仅通过 bots.json 配置——
-        // 详见 meta.ts SWITCH_DEFS 顶部注释。
-        SettingRow({
-          rowKey: "replyLocale",
-          label: t("replyLocale.label"),
-          desc: t("replyLocale.hint"),
-          control: h("select", {
-            className: "qbot-settingSelect",
-            value: String(form.replyLocale ?? "zh"),
-            onChange: (e: any) => void saveField("replyLocale", e.target.value),
-            "aria-label": t("replyLocale.labelShort"),
-          },
-            h("option", { value: "zh" }, t("replyLocale.zh")),
-            h("option", { value: "en" }, "English")),
-        }),
-        // 归档媒体保存：默认「不保存」，开启后聊天里的图片/视频/文件会落地到
-        // ~/.dsh/qqbot/archive/images|videos|files/，归档弹窗里可直接看到。
-        SettingRow({
-          rowKey: "archiveMedia",
-          label: t("feature.archiveMedia"),
-          desc: t("feature.archiveMediaHint"),
-          control: h("select", {
-            className: "qbot-settingSelect",
-            value: String(form.archiveMedia ?? "off"),
-            onChange: (e: any) => void saveField("archiveMedia", e.target.value),
-            "aria-label": t("feature.archiveMedia"),
-          },
-            h("option", { value: "off" }, t("feature.archiveMediaOff")),
-            h("option", { value: "image" }, t("feature.archiveMediaImage")),
-            h("option", { value: "imageVideo" }, t("feature.archiveMediaImageVideo")),
-            h("option", { value: "all" }, t("feature.archiveMediaAll"))),
-        }),
-        // 欢迎语开关与文案已从界面移除（默认开启），仅通过 bots.json 配置 welcomeEnabled / welcomeMessage。
-        SettingRow({
-          rowKey: "bannedWords",
-          wide: true,
-          label: t("feature.bannedWords"),
-          desc: t("feature.bannedWordsHint"),
-          control: TextArea({
-            rows: 3,
-            defaultValue: Array.isArray(form.bannedWords) ? (form.bannedWords as string[]).join(", ") : "",
-            placeholder: t("feature.bannedWordsPlaceholder"),
-            onBlur: (e: any) => {
-              const words = String(e?.target?.value ?? "").split(/[,，]/).map((w) => w.trim()).filter(Boolean);
-              void saveField("bannedWords", words);
-            },
-            "aria-label": t("feature.bannedWords"),
-          }),
-        })), undefined, { icon: "⇄", tone: "success", summary: policySummary }),
-
-    // ── 回复调优（数值） ──
-    sectionCard(t("tune.title"), t("tune.hint"),
-      h("div", { className: "qbot-settingList" },
-        numSelect("valueThreshold", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], (n) => (n === 0 ? t("tune.allZero") : fmt("override.scoreOption", n))),
-        numSelect("atContextMessages", [0, 2, 4, 6, 8, 10, 15, 20, 30, 50], (n) => (n === 0 ? t("tune.offZero") : fmt("override.countOption", n))),
-        numSelect("groupCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
-        numSelect("senderCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
-        numSelect("replyChunkChars", [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000]),
-        numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5]),
-        numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => fmt("override.charsOption", n)),
-        numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? t("quota.unlimitedZero") : fmt("override.perDayOption", n)))),
-      undefined, { icon: "≋", tone: "warning", summary: t("detail.summaryTune") }),
-
-    // ── 按群配置（群级覆盖） ──
-    sectionCard(t("group.title"), t("group.hint"),
-      h("div", { className: "qbot-settingList" },
-        Object.keys(groupOverrides).length === 0
-          ? h("div", { className: "qbot-modalState" }, t("group.empty"))
-          : Object.entries(groupOverrides).map(([openid, ov]) =>
-              h("div", { key: openid, className: "qbot-schedRow" },
-                h("div", { className: "qbot-schedMain" },
-                  h("div", { className: "qbot-schedTop" },
-                    h("span", { className: "qbot-chip is-active" }, t("group.group")),
-                    h("code", { className: "qbot-mono", title: openid },
-                      `${openid.slice(0, 12)}${openid.length > 12 ? "…" : ""}`)),
-                  h("div", { className: "qbot-schedContent" }, overrideSummary(ov))),
-                h("div", { className: "qbot-schedOps" },
-                  h("button", { className: "qbot-btn qbot-schedEdit", type: "button", onClick: () => setOverrideEdit(openid) }, t("common.edit")),
-                  h("button", { className: "qbot-btn qbot-btnDanger", type: "button", onClick: () => void removeOverride(openid) }, t("common.delete"))))),
-        h("div", { className: "qbot-editActions" },
-          h("span", { className: "qbot-hint" }, t("group.overrideHint")),
-          h("button", { className: "qbot-btn qbot-btnPrimary", type: "button", onClick: () => setOverrideEdit("") }, t("group.add")))),
-      undefined, { icon: "▦", tone: "info", summary: groupSummary }),
-
-    // ── 配置清单入口：整份配置以 JSON 查看/编辑/校验/写回（高级用户，放在最后）──
-    actionCard({
-      icon: "{ }", tone: "business",
-      title: t("manifest.entryTitle"), desc: t("manifest.entryDesc"),
-      summary: t("manifest.entrySummary"),
-      disabled: !detailBot, onClick: () => setManifestOpen(true),
-    }),
+      configPanes.session,
+      configPanes.policy,
+      configPanes.tune,
+      configPanes.override,
+      configPanes.manifest,
       ] : [
 
     // ── 平台能力入口：整卡可点，群管理 / 通用能力在独立弹窗里操作 ──
@@ -902,48 +923,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     }),
 
     // ── 连接与移除（放在管理 Tab 最下面；关于已移到页面底部页脚） ──
-    sectionCard(t("conn.title"), t("conn.hint"),
-      h("div", { className: "qbot-settingList" },
-          detailBot
-            ? SettingRow({
-                label: detailBot.enabled ? t("conn.disableBot") : t("conn.enableBot"),
-                desc: t("conn.disableHint"),
-                control: h("button", {
-                  className: "qbot-btn", type: "button",
-                  disabled: detailBot.primary,
-                  onClick: () => void toggleEnabled(detailBot, !detailBot.enabled),
-                }, detailBot.enabled ? t("conn.disable") : t("conn.enable")),
-              })
-            : null,
-          detailBot && !detailBot.primary
-            ? SettingRow({
-                label: t("conn.setPrimary"),
-                desc: t("conn.primaryHint"),
-                control: h("button", {
-                  className: "qbot-btn", type: "button",
-                  onClick: () => void setPrimaryBot(detailBot.appId),
-                }, t("conn.setPrimary")),
-              })
-            : null,
-          SettingRow({
-            label: detailBot?.ws?.state === "connected" ? t("conn.check") : t("conn.retry"),
-            desc: t("conn.retryHint"),
-            control: h("button", {
-              className: "qbot-btn", type: "button",
-              disabled: reconnecting || !detailBot,
-              onClick: () => void retryConnection(),
-            }, reconnecting ? t("conn.checking") : detailBot?.ws?.state === "connected" ? t("conn.check") : t("conn.retry")),
-          }),
-          detailBot
-            ? SettingRow({
-                label: t("conn.remove"),
-                desc: t("conn.removeHint"),
-                control: h("button", {
-                  className: "qbot-btn qbot-btnDanger", type: "button",
-                  onClick: () => void removeBot(detailBot),
-                }, t("conn.remove")),
-              })
-            : null), undefined, { danger: true, icon: "!", tone: "danger", summary: connSummary })])));
+    connectionPane])));
 
   const addBotView = h(AddBotView, {
     rpcCall,
@@ -953,7 +933,9 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       await refresh();
       setDetailAppId(appId);
       setDetailTab("runtime");
-      setPage("detail");
+      // 新版：扫码/手动接入成功后直接进控制台主页；旧版：沿用详情页。
+      if (modernUi) { setPage("list"); setConsoleOpen(true); }
+      else { setConsoleOpen(false); setPage("detail"); }
     },
     onBack: () => setPage("list"),
   });
@@ -973,7 +955,19 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         target: "_blank", rel: "noreferrer noopener",
         "aria-label": t("detail.aboutRepo"),
       }, "GitHub")),
-    h("div", { className: "qbot-pageFootCopy" }, t("detail.aboutCopyright")));
+    h("div", { className: "qbot-pageFootCopy" },
+      t("detail.aboutCopyright"),
+      h("label", { className: "qbot-uiSwitch" },
+        h("input", {
+          type: "checkbox",
+          className: "qbot-uiSwitchInput",
+          checked: modernUi,
+          onChange: (ev: any) => switchUiMode(ev.target.checked),
+          "aria-label": modernUi ? t("ui.modernMode") : t("ui.legacyMode"),
+        }),
+        h("span", { className: "qbot-uiSwitchTrack", "aria-hidden": "true" }),
+        h("span", { className: "qbot-uiSwitchLabel" },
+          modernUi ? t("ui.modernMode") : t("ui.legacyMode")))));
 
   // ═══ 页面骨架：标题栏 + 面板（无左侧导航栏，导航由面板内按钮承担） ═══════════
 
@@ -1090,6 +1084,22 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
           rpcCall,
           appId: detailAppId || detailBot?.appId || "",
           onClose: () => setGuildOpen(false),
+        })
+      : null,
+    // ── 机器人管理控制台弹窗（设置页卡片入口；左菜单 + 运营大屏） ──
+    consoleOpen
+      ? h(ConsoleDialog, {
+          rpcCall,
+          bot: detailBot,
+          groups: Array.isArray(form.allowGroups) ? (form.allowGroups as string[]) : [],
+          onClose: () => setConsoleOpen(false),
+          onNotify: (text: string, _tone: "error" | "success") => setNotice(text),
+          configPanes,
+          connectionPane,
+          onConfigSaved: async () => {
+            await refresh(detailAppId || undefined);
+            setNotice(t("manifest.savedNotice"));
+          },
         })
       : null,
     // ── 全局自定义确认框（window.confirm 的替代，置顶于所有弹窗） ──

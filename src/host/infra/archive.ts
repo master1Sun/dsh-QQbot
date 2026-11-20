@@ -508,6 +508,71 @@ export async function listArchiveChats(opts: { bot?: string; limit?: number } = 
   return { chats, moreAvailable: map.size > chats.length };
 }
 
+export interface ArchiveStats {
+  total: number;
+  chats: number;
+  groups: number;
+  dmChats: number;
+  kinds: { inbound: number; reply: number; proactive: number };
+  scopes: { group: number; c2c: number };
+  months: Array<{ month: string; count: number }>;
+  topChats: Array<{ chat: string; scope: "group" | "c2c"; name: string; count: number }>;
+}
+
+/** 运营总览用：一次扫描聚合归档的消息分类、会话来源、月份与活跃会话。 */
+export async function archiveStats(bot = ""): Promise<ArchiveStats> {
+  await ensureMigration();
+  const kinds = { inbound: 0, reply: 0, proactive: 0 };
+  const scopes = { group: 0, c2c: 0 };
+  const chats = new Map<string, { scope: "group" | "c2c"; name: string; count: number }>();
+  const months = new Map<string, number>();
+  let total = 0;
+  for (const file of await listMonthFiles()) {
+    for (const line of await readLines(file.path)) {
+      const rec = safeParseRecord(line);
+      if (!rec || rec.kind === "session") continue;
+      if (bot && rec.bot && rec.bot !== bot) continue;
+      if (rec.kind !== "inbound" && rec.kind !== "reply" && rec.kind !== "proactive") continue;
+      const chat = typeof rec.chat === "string" ? rec.chat : "";
+      let scope: "group" | "c2c" | null = null;
+      let openid = "";
+      if (chat.startsWith("group:")) {
+        scope = "group";
+        openid = chat.slice("group:".length);
+      } else if (chat.startsWith("c2c:")) {
+        scope = "c2c";
+        openid = chat.slice("c2c:".length);
+      }
+      if (!scope || !openid) continue;
+      total += 1;
+      kinds[rec.kind] += 1;
+      scopes[scope] += 1;
+      const key = `${scope}:${openid}`;
+      const prev = chats.get(key);
+      if (prev) {
+        prev.count += 1;
+        if (scope === "c2c" && !prev.name && rec.senderName) prev.name = rec.senderName;
+      } else {
+        chats.set(key, { scope, name: scope === "c2c" && rec.senderName ? rec.senderName : "", count: 1 });
+      }
+      const month = monthOf(typeof rec.ts === "string" ? rec.ts : "", file.month);
+      if (month) months.set(month, (months.get(month) ?? 0) + 1);
+    }
+  }
+  const list = [...chats.entries()].map(([chat, v]) => ({ chat, ...v }));
+  return {
+    total,
+    chats: list.length,
+    groups: list.filter((c) => c.scope === "group").length,
+    dmChats: list.filter((c) => c.scope === "c2c").length,
+    kinds,
+    scopes,
+    months: [...months.entries()].map(([month, count]) => ({ month, count }))
+      .sort((a, b) => (a.month < b.month ? 1 : a.month > b.month ? -1 : 0)).slice(0, 6),
+    topChats: list.slice().sort((a, b) => b.count - a.count).slice(0, 5),
+  };
+}
+
 /**
  * 列举每个归档天的记录条数（按机器人过滤），供设置页日期列表展示。
  * 新结构按会话+月份存文件，这里从记录 ts 重新按天聚合，UI 的日期列表语义保持不变。

@@ -25,6 +25,7 @@ import type { ScheduleStore } from "../schedule/schedule.js";
 import type { ChatMemoryStore } from "../infra/memory.js";
 import type { QqbotConfig } from "../../shared/config.js";
 import { configForGroup } from "../../shared/config.js";
+import { shanghaiDay } from "../../shared/time.js";
 import type { ModerationService } from "../moderation/service.js";
 import {
   addGroupMessage,
@@ -565,6 +566,9 @@ export function createQqRule({
       }
 
       state.counters.received += 1;
+      // 按天收到消息数（上海日期）：供运营总览的近 7 天曲线使用。
+      const today = shanghaiDay();
+      state.dailyReceived[today] = (state.dailyReceived[today] ?? 0) + 1;
       // 图片附件：平台的附件地址有实效，落地成本地副本再归档（异步，不阻塞处理）。
       void bot.archiver.appendWithMedia({
         kind: "inbound",

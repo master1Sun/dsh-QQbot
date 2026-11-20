@@ -17,6 +17,13 @@ function statsPath(appId: string): string {
   return join(pluginDataDir(), "stats", `${appId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
 }
 
+function dailyStatsPath(appId: string): string {
+  return join(pluginDataDir(), "stats", `${appId.replace(/[^A-Za-z0-9_-]/g, "_")}.daily.json`);
+}
+
+/** 按天计数最多保留的天数，避免长期运行文件无限膨胀。 */
+const DAILY_KEEP_DAYS = 60;
+
 export class StatsStore {
   readonly #logger: Pick<Console, "warn" | "error">;
 
@@ -50,6 +57,37 @@ export class StatsStore {
       );
     } catch (error) {
       this.#logger.warn(`[dsh-qqbot] 运行统计落盘失败（机器人 ${appId}）:`, error);
+    }
+  }
+
+  /** 读某机器人的按天收到消息数；文件缺失/损坏返回空表。 */
+  async loadDaily(appId: string): Promise<Record<string, number>> {
+    try {
+      const raw = JSON.parse(await readFile(dailyStatsPath(appId), "utf8")) as Record<string, unknown> | null;
+      const out: Record<string, number> = {};
+      if (raw && typeof raw === "object") {
+        for (const [day, v] of Object.entries(raw)) {
+          const n = Number(v);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isSafeInteger(n) && n > 0) out[day] = n;
+        }
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  /** 落盘某机器人的按天收到消息数（只保留最近 DAILY_KEEP_DAYS 天）。 */
+  async saveDaily(appId: string, daily: Record<string, number>): Promise<void> {
+    try {
+      await mkdir(join(pluginDataDir(), "stats"), { recursive: true });
+      const trimmed: Record<string, number> = {};
+      for (const day of Object.keys(daily).sort().slice(-DAILY_KEEP_DAYS)) {
+        trimmed[day] = daily[day];
+      }
+      await writeFile(dailyStatsPath(appId), JSON.stringify(trimmed, null, 2), "utf8");
+    } catch (error) {
+      this.#logger.warn(`[dsh-qqbot] 按天统计落盘失败（机器人 ${appId}）:`, error);
     }
   }
 }

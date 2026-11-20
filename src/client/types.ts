@@ -37,6 +37,8 @@ export interface BotInfo {
   primary: boolean;
   ws: { state: string; lastConnectedAt: number | null; lastError: string | null };
   counters: { received: number; sessions: number; replies: number; proactive: number; errors: number };
+  /** 近 N 天每日收到消息数，形如 { "2026-11-20": 12 }（按上海日期）。 */
+  daily: Record<string, number>;
   pendingReplies: number;
   boundSessions: number;
   groupBuffers: Array<{ openid: string; buffered: number }>;

@@ -401,8 +401,13 @@ export class ScheduleStore {
       gate: mode === "tool"
         ? input.gate === "nonempty" ? "nonempty" : input.gate === "changed" ? "changed" : "always"
         : void 0,
-      // @全体：仅群聊任务生效（平台限制：管理员 + 每群每天 1 次）。
-      atEveryone: scope === "group" && mode === "text" && (input.atEveryone === true || input.atEveryone === "true") ? true : void 0,
+      // @全体：仅群聊 text 任务生效（平台限制：管理员 + 每群每天 1 次）。
+      // 未传该字段时保留原值，避免改其它字段把已勾选的配置洗掉。
+      atEveryone: scope === "group" && mode === "text"
+        ? input.atEveryone === void 0
+          ? existing?.atEveryone
+          : input.atEveryone === true || input.atEveryone === "true" ? true : void 0
+        : void 0,
       // 编辑已禁用的任务时保留禁用态，避免「改一下内容就被重新启用」。
       enabled: input.enabled === void 0 ? existing?.enabled ?? true : Boolean(input.enabled),
       ...(input.createdBy ? { createdBy: input.createdBy } : {}),

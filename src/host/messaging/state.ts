@@ -23,6 +23,7 @@ export function createBotState(): BotState {
     errorNoticeAt: new Map(),
     sentByChat: new Map(),
     counters: { received: 0, sessions: 0, replies: 0, proactive: 0, errors: 0 },
+    dailyReceived: {},
   };
 }
 
