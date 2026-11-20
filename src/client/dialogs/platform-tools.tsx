@@ -382,7 +382,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     setModCfgLoaded(false);
     setModLogs([]);
     setModLogsLoaded(false);
-    setModInnerTab("config");
+    // 不重置 modInnerTab：切群只换数据，保留当前子 Tab，与控制台左侧树高亮保持一致。
   };
   /** 把分钟数格式化为易读时长：分钟 / 小时 / 天。 */
   const fmtDuration = (mins: number) => {
@@ -452,7 +452,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     setJaCfgLoaded(false);
     setJaLogs([]);
     setJaLogsLoaded(false);
-    setJaInnerTab("auto");
+    // 同 modInnerTab：切群保留入群审批当前子 Tab，不改菜单激活项。
     setMuted([]);
     setMutedLoaded(false);
     setMutedChecked(new Set());
