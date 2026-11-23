@@ -2,7 +2,8 @@
  * 消息本地归档（审计轨迹）：把收发的消息按「会话 + 月份」落盘到
  *   ~/.dsh/qqbot/archive/<会话目录>/YYYY-MM.jsonl
  * 每行一条 JSON 记录：
- *   { ts, kind, event?, chat, bot?, group?, sender?, senderName?, content, sessionId?, note? }
+ *   { ts, kind, event?, chat, bot?, group?, sender?, senderName?, content, sessionId?, note?, messageId?, recalled? }
+ * messageId 是平台消息 id，撤回事件据此把原记录标记为 recalled（保留原文，只加标记）。
  *
  * 会话目录名由 chat 键派生，保证同一会话稳定归到一处且 Windows 文件名安全：
  *   group:<openid> -> group_<openid>/
@@ -40,6 +41,10 @@ export interface ArchiveRecord {
   sessionId?: string;
   /** 附加说明（过滤判定、错误等）。 */
   note?: string;
+  /** 平台消息 id（入站时写入），撤回事件据此关联回原消息打标记。 */
+  messageId?: string;
+  /** 该消息已被撤回：原文仍保留，仅打标记供 UI 显示提示。 */
+  recalled?: boolean;
   /** 随消息落地的图片（本地副本；平台原始 URL 有时效，故落地保存）。 */
   media?: ArchivedMedia[];
   /** 未保存的附件及原因（诊断用：平台无地址 / 语音 / 超限 / 下载失败等）。 */
@@ -317,6 +322,48 @@ export class Archiver {
         this.#logger.error("[dsh-qqbot] 消息归档写入失败（仅提示一次）:", error);
       }
     }
+  }
+
+  /**
+   * 给已归档的原消息打「已撤回」标记：按 messageId 在该会话的各月份文件里定位，
+   * 命中则重写该行加上 recalled:true（原文与其它字段原样保留）。
+   * 返回是否命中至少一条。多机器人共享会话文件时按本机器人归属过滤。
+   *
+   * 撤回事件可能早于原消息的异步归档落盘（媒体下载慢），故不做重试；调用方在
+   * 未命中时自行补一条带撤回提示的记录，避免归档里丢掉这次撤回轨迹。
+   */
+  async markRecalled(opts: { chat: string; messageId: string }): Promise<boolean> {
+    if (!this.#enabled()) return false;
+    const chat = typeof opts.chat === "string" ? opts.chat : "";
+    const messageId = typeof opts.messageId === "string" ? opts.messageId : "";
+    if (!chat || !messageId) return false;
+    await ensureMigration(this.#logger);
+    const dir = chatDirName(chat);
+    const files = (await listMonthFiles()).filter((f) => f.chatDir === dir);
+    for (const file of files) {
+      const lines = await readLines(file.path);
+      let changed = false;
+      const rewritten = lines.map((line) => {
+        const rec = safeParseRecord(line);
+        if (!rec) return line;
+        if (rec.messageId !== messageId || rec.chat !== chat) return line;
+        if (this.#bot && rec.bot && rec.bot !== this.#bot) return line;
+        if (rec.recalled) { changed = true; return line; }
+        changed = true;
+        return JSON.stringify({ ...rec, recalled: true });
+      });
+      if (changed) {
+        try {
+          await writeFile(file.path, `${rewritten.join("\n")}\n`, "utf8");
+        } catch (error) {
+          this.#logger.error("[dsh-qqbot] 归档撤回标记写入失败:", error);
+          return false;
+        }
+        // 继续扫描其它月份文件：同一消息可能被入站流程重复归档（@ 孪生事件等）。
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

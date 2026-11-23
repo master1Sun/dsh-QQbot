@@ -515,7 +515,8 @@ export function ArchiveDialog(props: {
       if (rangeTo && d > rangeTo) return false;
     }
     if (kw) {
-      const hay = `${sender}\n${faceClean(String(r.content ?? ""), t("archive.sticker"))}\n${String(r.note ?? "")}`.toLowerCase();
+      const recalledTag = r.recalled === true ? `\n${t("archive.recalled")}` : "";
+      const hay = `${sender}\n${faceClean(String(r.content ?? ""), t("archive.sticker"))}\n${String(r.note ?? "")}${recalledTag}`.toLowerCase();
       if (!hay.includes(kw)) return false;
     }
     return true;
@@ -542,12 +543,14 @@ export function ArchiveDialog(props: {
         const name = isBot
           ? t("idpick.bot")
           : (String(r.senderName || r.sender || "") || (chat.scope === "group" ? t("archive.member") : t("archive.them")));
+        const noteParts = [String(r.note ?? "")];
+        if (r.recalled === true) noteParts.unshift(t("archive.recalled"));
         lines.push([
           String(r.ts ?? ""),
           kindLabel,
           name,
           String(r.content ?? ""),
-          String(r.note ?? ""),
+          noteParts.filter(Boolean).join(" · "),
         ].map(esc).join(","));
       }
       const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
@@ -729,6 +732,7 @@ export function ArchiveDialog(props: {
                         h("span", { className: "qbot-monthDividerCount" }, fmt("archive.monthCount", group.items.length))),
                       group.items.map((r: any, i: number) => {
                         const isBot = r.kind === "reply" || r.kind === "proactive";
+                        const isRecalled = r.recalled === true;
                         const profile = !isBot && typeof r.sender === "string" ? profiles[r.sender] : undefined;
                         // 机器人消息用 @me 的真实昵称（失败回退「机器人」）；用户消息沿用原优先级。
                         const name = isBot
@@ -756,13 +760,16 @@ export function ArchiveDialog(props: {
                           h("div", { className: "qbot-msgBody" },
                             h("div", { className: "qbot-msgHead" },
                               h("span", { className: "qbot-msgName" }, name),
+                              isRecalled ? h("span", { className: "qbot-msgRecalled" }, t("archive.recalled")) : null,
                               h("span", { className: "qbot-msgTime" }, formatTime(r.ts))),
                             quote
                               ? h("div", { className: "qbot-msgQuote" },
                                   h("div", { className: "qbot-msgQuoteName" }, quote.name),
                                   h("div", { className: "qbot-msgQuoteText" }, quote.content))
                               : null,
-                            hasFace
+                            isRecalled && !content && media.length === 0
+                              ? h("div", { className: "qbot-msgText qbot-msgRecalledHint" }, t("archive.recalledNoContent"))
+                              : hasFace
                               ? h("div", { className: "qbot-msgText" },
                                   faceSegs.map((s, si) => s.face
                                     ? h("span", { className: "qbot-msgFace", key: `f${si}` }, t("archive.sticker"))

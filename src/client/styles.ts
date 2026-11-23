@@ -421,6 +421,9 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-msgText { font-size: 13.5px; line-height: 1.65; color: var(--dsw-alias-label-primary, #1f2329); overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
 .qbot-msgFace { display: inline-block; font-size: 11px; line-height: 1.5; padding: 1px 8px; margin: 0 2px; border-radius: 999px; background: var(--dsw-alias-fill-secondary, rgba(31,35,41,.06)); color: var(--dsw-alias-label-secondary, #646a73); vertical-align: baseline; }
 .qbot-msgNote { font-size: 11px; color: var(--dsw-alias-label-tertiary, #8f959e); }
+/* 已撤回标记：消息头的小徽章 + 原文未保留时的占位文案 */
+.qbot-msgRecalled { display: inline-block; font-size: 10px; line-height: 1.5; padding: 0 6px; border-radius: 999px; background: var(--dsw-alias-fill-secondary, rgba(31,35,41,.06)); color: var(--dsw-alias-label-tertiary, #8f959e); font-weight: 500; }
+.qbot-msgRecalledHint { color: var(--dsw-alias-label-tertiary, #8f959e); font-style: italic; }
 /* 归档媒体：图片缩略图 / 视频 / 文件条目 */
 .qbot-archMediaList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .qbot-archMedia { display: flex; flex-direction: column; gap: 4px; max-width: 100%; min-width: 0; }
@@ -921,6 +924,10 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-ptPanelRemark { min-width: 0; flex: 1 1 120px; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
 .qbot-ptGrid { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 8px; }
 .qbot-ptField { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); }
+/* 禁言时长范围：最短 ~ 最长，两个输入框等宽且可被容器压缩。 */
+.qbot-ptDurRange { min-width: 0; width: 100%; display: flex; align-items: center; gap: 6px; }
+.qbot-ptDurRange > .qbot-settingInput { min-width: 0; flex: 1 1 0; width: 0; box-sizing: border-box; }
+.qbot-ptDurSep { flex: none; font-size: 12px; color: var(--dsw-alias-label-tertiary, #8f959e); }
 .qbot-ptFieldWide { grid-column: 1 / -1; }
 .qbot-ptFieldHint { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, #8f959e); overflow-wrap: anywhere; }
 /* Combo 放进纵向 Field 时不能被 flex:1 1 240px 当高度撑高整行。 */

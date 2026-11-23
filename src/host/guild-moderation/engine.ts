@@ -41,6 +41,8 @@ export function guildModSystemPrompt(config: GuildModConfig): string {
     "- 只依据下面列出的规则判断，不引入你自己的额外标准。",
     "- 证据必须明确：拿不准、可能是玩笑/调侃/正常讨论的，一律判 none。",
     "- 引用、反驳、举报违规内容（如「别发广告」）不算违规本身。",
+    "- 【自洽铁律·极高优先】禁止一边在 reason 里否定违规、一边又判 light/medium/severe。只要你想写「不是针对具体的人」「没有实际违规内容」「只是提到某个词」「可能是玩笑/调侃」这类话，就必须直接判 none，并把 reason 写成为什么不违规，绝不允许自相矛盾。",
+    "- 【问句与论词不算违规】提问、询问能力或讨论某个词本身时提到脏话/违规词（如「你能说脏话吗」「脏话这个词算人身攻击吗」），没有真实辱骂对象也没实际违规内容，一律判 none。",
     "- 宁可放过，不可错杀——误判会错误处置真实用户。",
     "",
     "【违规分类】",
@@ -68,6 +70,13 @@ export interface GuildVerdict {
 const VALID_LEVELS: GuildMuteLevel[] = ["none", "light", "medium", "severe"];
 const VALID_CATS = new Set<string>([...GUILD_MOD_CATEGORIES, "custom", "none"]);
 
+/**
+ * 理由自相矛盾兜底（与群聊审核一致）：模型在 reason 里承认「没针对具体人 / 没实际内容 /
+ * 只是提到 / 可能是玩笑」却仍判违规时一律放行。只匹配结论性元判断句式，
+ * 不用「有点 / 意味 / 应该是」这类常出现在真实违规原话里的词。
+ */
+const SELF_CONTRADICTION_RE = /(?:不是|并非|未|没有|没)(?:明确|具体|特定|真正|实际)?(?:地)?(?:针对|辱骂|攻击|人身攻击|涉及)(?:具体|特定|任何)?(?:的)?(?:人|成员|对象|某人)|没有(?:实际|实质|真正的)?(?:违规|辱骂|攻击|脏话|不良)?(?:内容|行为|言辞|词)|只是(?:提到|提及|引用|讨论|复述)|仅是(?:提到|提及|引用|讨论)|可能是(?:玩笑|调侃|开玩笑|闹着玩)|算不上(?:违规|辱骂|攻击|人身攻击)|谈不上(?:违规|辱骂|攻击)/;
+
 export function parseGuildVerdict(text: string): GuildVerdict {
   const safe = (): GuildVerdict => ({ level: "none", category: "none", reason: "" });
   if (!text || typeof text !== "string") return safe();
@@ -80,9 +89,19 @@ export function parseGuildVerdict(text: string): GuildVerdict {
   if (!VALID_LEVELS.includes(level as GuildMuteLevel)) return safe();
   const category = typeof obj.category === "string" && VALID_CATS.has(obj.category.trim())
     ? obj.category.trim() : "none";
-  const reason = typeof obj.reason === "string" ? obj.reason.trim().slice(0, 200) : "";
+  const rawReason = typeof obj.reason === "string" ? obj.reason.trim().slice(0, 200) : "";
+  // 理由自相矛盾兜底：模型自己写明「没针对具体人 / 只是提到 / 可能是玩笑」却仍判
+  // 违规时一律放行，优先于等级输出。见群聊审核同名常量的说明。
+  if (level !== "none" && SELF_CONTRADICTION_RE.test(rawReason)) {
+    return { level: "none", category: "none", reason: "判定理由自相矛盾，已放行" };
+  }
+  // 判定理由只写结果，不写审核原则/判定尺度这类判断方式（与群聊一致）。
+  const reason = AUDIT_PRINCIPLE_RE.test(rawReason) ? "这条消息不符合频道公约" : rawReason;
   return { level: level as GuildMuteLevel, category, reason };
 }
+
+/** 审核原则复述特征：命中即说明模型在贴「判断方式」而非描述消息本身。 */
+const AUDIT_PRINCIPLE_RE = /(?:最多|判|视为|属于|至)\s*(?:light|med|medium|severe|none)|拿不准|宁可放过|不可错杀|审核原则|判定尺度|等级定义|证据铁律|自洽铁律|不算人身攻击|不算违规|没有针对具体的人|没有实际违规|只是提到|(?:如\s*[「"](?:艹|靠))/i;
 
 export function minutesForGuildLevel(config: GuildModConfig, level: GuildMuteLevel): number {
   if (level === "light") return config.durations.light;

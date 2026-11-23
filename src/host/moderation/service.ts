@@ -11,7 +11,7 @@
 import type { BotRuntime } from "../bots.js";
 import { ModerationStore, modKey, type ModerationConfig, type ModerationLog } from "./store.js";
 import {
-  CATEGORY_DEFS, moderateMessage, minutesForLevel,
+  CATEGORY_DEFS, CATEGORY_LABELS, moderateMessage, minutesForLevel,
   type ModerateDeps, type ModerationVerdict, type ModerationContext,
 } from "./moderate.js";
 import { escalateDuration } from "../../shared/moderation-escalation.js";
@@ -36,39 +36,110 @@ function durationText(minutes: number): string {
 }
 
 /**
- * 处罚前的群内 @ 通知。QQ v2 群聊「@指定成员」只支持 Markdown 消息，
+ * 处置成功后的群内 @ 通知。QQ v2 群聊「@指定成员」只支持 Markdown 消息，
  * 格式来自官方文本交互文档：<qqbot-at-user id="member_openid" />。
  *
- * 语气取「平静笃定」：明确按群规处置、一视同仁、反复违反会加重，立住管理权威；
- * 但不当众贴「辱骂人身攻击」这类定性标签、不数落「第 N 次 / 下次停更久」——
- * 当众 @ 已经够显眼，再翻旧账只会让人难堪、结梁子。违规类别、次数、叠加时长等
- * 完整信息仍记在后台处罚记录里，管理员可查，权威靠制度而非公开羞辱来立。
- * 也不写「机器可能有偏差、介意找群主」这类自曝弱点的话，免得处罚失去约束力。
+ * 采用带标签的回执格式（违反类别 / 判定理由 / 依据群规 / 违规次数 / 处罚计算），
+ * 每一项都写「判断结果」，不写审核原则、判定尺度、等级定义这类「判断方式」：
+ *  - 违反类别：命中的分类名；
+ *  - 判定理由：这条消息具体哪里不合适（模型输出，已约束就事论事）；
+ *  - 依据群规：命中的那一条约定原文——绝不能是审核原则（parseVerdict 已做白名单校验）；
+ *  - 违规次数：窗口期内第几次；
+ *  - 处罚计算：本次时长与是否加重，不罗列基础/上限等内部系数。
+ * 语气平静笃定、按群规一视同仁，立住管理权威；不自曝弱点、不当众道歉。
  * 理由/群规来自模型与用户输入，统一去掉尖括号与换行，防止注入其它交互标签。
  */
 function noticeMarkdown(params: {
   sender: string;
+  category: string;
   reason: string;
-  /** 命中的那一条约定（模型给出或行为检测给出）；只显示这一条，不罗列整份群规。 */
+  /** 命中的那一条约定（模型给出或行为检测给出，已做白名单校验）；只显示这一条。 */
   rule: string;
   minutes: number;
+  strikeCount: number;
+  windowDays: number;
   escalateOn: boolean;
+  /** 近窗口内的历史违规记录（不含本次）；有多条时公示最近 5 条。 */
+  history?: ModerationLog[];
 }): string {
-  const { sender, reason, rule, minutes, escalateOn } = params;
+  const { sender, category, reason, rule, minutes, strikeCount, windowDays, escalateOn, history = [] } = params;
   const clean = (value: string, max = 160) =>
     String(value ?? "").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) || "—";
-  const ruleText = clean(rule || "群里的公约", 120);
+  const categoryName = CATEGORY_LABELS[category] ?? "本群公约";
+  const ruleText = clean(rule || categoryName, 120);
+  const penalty = minutes > 0
+    ? `本次禁言 ${durationText(minutes)}${escalateOn && strikeCount > 1 ? "，重复违规已加重" : ""}`
+    : "本次仅提醒，暂不禁言";
   const at = `<qqbot-at-user id="${sender.replace(/["<>]/g, "")}" />`;
-  return [
-    `${at} 这条消息不符合群公约，${minutes > 0 ? `按群规先禁言 ${durationText(minutes)}，冷静一下再接着聊` : "这次先提醒一下，请留意"}。`,
+  const lines = [
+    `${at} 这条消息不符合群公约，${minutes > 0 ? `按群规禁言 ${durationText(minutes)}，冷静一下再接着聊` : "这次先提醒一下，请留意"}。`,
     "",
-    `> 刚才那条消息里：${clean(reason)}`,
-    `> 群里约定的是：${ruleText}`,
+    `> 违反类别：${categoryName}`,
+    `> 判定理由：${clean(reason)}`,
+    `> 依据群规：${ruleText}`,
+    `> 违规次数：近 ${windowDays} 天第 ${strikeCount} 次`,
+    `> 处罚计算：${penalty}`,
+  ];
+  // 多次违规：把最近 5 条历史记录一并公示，反复提醒。
+  if (history.length) {
+    lines.push("", `这是近 ${windowDays} 天第 ${strikeCount} 次违规，近期记录一并公示：`, ...historyLines(history));
+  }
+  lines.push(
     "",
     escalateOn
       ? "本群对违反公约的消息一律按群规处理，反复违反会逐次加重。请大家遵守约定，一起维护群聊氛围。"
       : "本群对违反公约的消息一律按群规处理。请大家遵守约定，一起维护群聊氛围。",
-  ].join("\n");
+  );
+  return lines.join("\n");
+}
+
+/** 处罚日志的 at 是 UTC ISO，转成北京时间 MM-DD HH:mm 给群里看。 */
+function logStamp(at: string): string {
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return "—";
+  const d = new Date(t + 8 * 3600_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+/** 违规历史公示行：最近 5 条，最多 5 条（本次日志在通知后才落盘，不含本次）。 */
+function historyLines(history: ModerationLog[]): string[] {
+  const clean = (value: string, max = 40) =>
+    String(value ?? "").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) || "不符合群公约";
+  return history.slice(0, 5).map((item) => {
+    const category = CATEGORY_LABELS[item.category] ?? "本群公约";
+    const duration = item.minutes > 0 ? `禁言 ${durationText(item.minutes)}` : "提醒";
+    return `> ${logStamp(item.at)} · ${category} · ${duration} · ${clean(item.reason)}`;
+  });
+}
+
+/**
+ * 禁言未成功时的群内回执：平台不允许禁言管理员/群主/机器人，
+ * 就把该成员近 30 天的违规记录公示给群里，反复提醒以身作则——
+ * 对管理者的要求应当高于普通成员。具体报错仍只写后台日志。
+ */
+function warningMarkdown(params: {
+  sender: string;
+  strikeCount: number;
+  windowDays: number;
+  history: ModerationLog[];
+}): string {
+  const { sender, strikeCount, windowDays, history } = params;
+  const at = `<qqbot-at-user id="${sender.replace(/["<>]/g, "")}" />`;
+  const lines = [
+    `${at} 群规对所有人一视同仁，管理员更应以身作则，不要知法犯法。`,
+    history.length
+      ? `这是你近 ${windowDays} 天第 ${strikeCount} 次违规，过往记录一并公示：`
+      : `这是你近 ${windowDays} 天第 ${strikeCount} 次违规，请以此为戒：`,
+    "",
+  ];
+  if (history.length) {
+    lines.push(...historyLines(history));
+  } else {
+    lines.push(`> 本次是近 ${windowDays} 天的第 1 次记录。`);
+  }
+  lines.push("", "请以身作则，给群里做个好样子。");
+  return lines.join("\n");
 }
 
 export class ModerationService {
@@ -123,7 +194,8 @@ export class ModerationService {
       const word = norm(raw);
       if (!word || word.length > 12) continue; // 长规则是自然语言，交给模型按语境判断
       if (msg === word) {
-        return { level: "light", category: "custom", reason: `消息内容命中本群禁止词「${raw}」`, rule: raw };
+        // 精确整条命中禁词，情节最轻：取该等级范围的下限。
+        return { level: "light", category: "custom", reason: `消息内容命中本群禁止词「${raw}」`, rule: raw, systemSeverity: 0 };
       }
     }
     return null;
@@ -206,6 +278,8 @@ export class ModerationService {
         level: "light", category: "flood",
         reason: `${FLOOD_FAST_MS / 1000} 秒内连续发送 ${fast} 条消息，构成刷屏`,
         rule: CATEGORY_DEFS.flood || "刷屏骚扰",
+        // 刷得越多越靠近范围上限：6 条=下限，12 条及以上=上限。
+        systemSeverity: Math.min(1, (fast - FLOOD_FAST_COUNT) / 6),
       };
     }
     const repeats = norm ? recent.filter((x) => x.at >= now - FLOOD_REPEAT_MS && x.norm === norm).length : 0;
@@ -214,6 +288,7 @@ export class ModerationService {
         level: "light", category: "flood",
         reason: `${FLOOD_REPEAT_MS / 1000} 秒内重复发送「${norm.slice(0, 20)}」${repeats} 次，构成灌水`,
         rule: CATEGORY_DEFS.flood || "刷屏骚扰",
+        systemSeverity: Math.min(1, (repeats - FLOOD_REPEAT_COUNT) / 6),
       };
     }
     return null;
@@ -269,9 +344,9 @@ export class ModerationService {
   }
 
   /**
-   * 命中后的统一处置：撤回 → @ 通知 → 禁言 → 累计违规与落日志。
-   * 所有违规成员一视同仁：不区分管理员/群主/普通成员，命中即走完整处置
-   * （平台若禁止禁言某角色，由接口返回错误并记入日志，不影响其余处置）。
+   * 命中后的统一处置：撤回 → 禁言 → 按禁言结果发群回执 → 累计违规与落日志。
+   * 所有违规成员一视同仁：不区分管理员/群主/普通成员，命中即走完整处置。
+   * 平台禁止禁言某角色（管理员/群主/机器人）时，群里只发警告，具体报错仅记后台日志。
    */
   async #dispose(params: {
     bot: BotRuntime;
@@ -287,7 +362,7 @@ export class ModerationService {
     const { bot, groupId, sender, senderName, content, messageId, cfg, verdict, source } = params;
     // 叠加惩罚：按「机器人 + 群 + 成员」独立计数，算法/系数/阶梯/封顶全部取自本群配置。
     // 关掉叠加时每次只按等级基础时长；窗口天数也可配（连续 N 天无违规从 0 重计）。
-    const baseMinutes = minutesForLevel(cfg, verdict.level);
+    const baseMinutes = minutesForLevel(cfg, verdict.level, verdict, source);
     const prev = sender ? await this.store.getStrike(bot.appId, groupId, sender, cfg.strikeWindowDays) : undefined;
     const strikeCount = (prev?.count ?? 0) + 1;
     const minutes = escalateDuration(baseMinutes, cfg, strikeCount);
@@ -318,29 +393,51 @@ export class ModerationService {
       }
     }
 
-    // 在群里 @ 本人说明违反了哪条规则与处置依据，同时公开提醒其他成员。
-    // 所有成员一视同仁；通知失败也不阻断禁言（例如机器人没开主动消息权限）。
-    if (sender) {
-      try {
-        await bot.client.sendMarkdown({ scope: "group", openid: groupId }, noticeMarkdown({
-          sender,
-          reason: verdict.reason,
-          rule: verdict.rule || "",
-          minutes,
-          escalateOn: cfg.escalateEnabled,
-        }));
-      } catch (error) {
-        log.noticeError = error instanceof Error ? error.message : String(error);
-        this.#logger.warn("[dsh-qqbot] AI 审核 @ 通知发送失败:", log.noticeError);
-      }
-    }
-
+    // 先执行禁言，再按结果决定群内回执：
+    // 成功才发完整的五标签处置回执；失败只发警告，具体报错仅落后台日志。
+    let muteError: string | undefined;
     if (minutes > 0 && sender) {
       try {
         await bot.client.setMemberMute(groupId, [sender], minutes);
       } catch (error) {
-        log.error = error instanceof Error ? error.message : String(error);
-        this.#logger.warn(`[dsh-qqbot] AI 审核命中但禁言失败（${verdict.level} ${minutes}分钟）:`, log.error);
+        muteError = error instanceof Error ? error.message : String(error);
+        log.error = muteError;
+        this.#logger.warn(`[dsh-qqbot] AI 审核命中但禁言失败（${verdict.level} ${minutes}分钟）:`, muteError);
+      }
+    }
+
+    // 多次违规时翻出该成员近窗口内的违规记录公示：普通成员附在处置回执后，
+    // 平台拒绝禁言（多为管理员/群主）则走警告回执公示。两者都只列最近 5 条。
+    let history: ModerationLog[] = [];
+    if (sender && strikeCount > 1) {
+      try {
+        const cutoff = Date.now() - Math.max(1, cfg.strikeWindowDays) * 86_400_000;
+        history = (await this.store.listLogs({ appId: bot.appId, groupId, limit: 300 }))
+          .filter((l) => l.sender === sender && Date.parse(l.at) >= cutoff);
+      } catch (error) {
+        this.#logger.warn("[dsh-qqbot] AI 审核查询历史违规记录失败:", error instanceof Error ? error.message : error);
+      }
+    }
+
+    if (sender) {
+      const notice = muteError
+        ? warningMarkdown({ sender, strikeCount, windowDays: cfg.strikeWindowDays, history })
+        : noticeMarkdown({
+            sender,
+            category: verdict.category,
+            reason: verdict.reason,
+            rule: verdict.rule || "",
+            minutes,
+            strikeCount,
+            windowDays: cfg.strikeWindowDays,
+            escalateOn: cfg.escalateEnabled,
+            history,
+          });
+      try {
+        await bot.client.sendMarkdown({ scope: "group", openid: groupId }, notice);
+      } catch (error) {
+        log.noticeError = error instanceof Error ? error.message : String(error);
+        this.#logger.warn("[dsh-qqbot] AI 审核 @ 通知发送失败:", log.noticeError);
       }
     }
     if (sender) {
@@ -384,7 +481,7 @@ export class ModerationService {
       category: verdict.category,
       reason: verdict.reason,
       // 自测按「首犯」演示：直接套用当前叠加配置，自定义阶梯模式下显示第 1 档时长。
-      minutes: escalateDuration(minutesForLevel(cfg, verdict.level), cfg, 1),
+      minutes: escalateDuration(minutesForLevel(cfg, verdict.level, verdict, "llm"), cfg, 1),
       rules: cfg.rules,
       // 命中的那一条规则（内置分类名或自定义规则原文），供自测结果精确展示。
       rule: verdict.rule || "",

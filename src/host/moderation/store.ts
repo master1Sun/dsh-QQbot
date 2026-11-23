@@ -36,6 +36,9 @@ export type ModerationCategory = (typeof MODERATION_CATEGORIES)[number];
 
 export type MuteLevel = "none" | "light" | "medium" | "severe";
 
+/** 全局禁言时长范围（分钟，含端点）。具体时长由判定方按严重程度在此范围内决定。 */
+export interface MuteDurationRange { min: number; max: number }
+
 /** 单群审核配置。缺省字段在 normalize 时补齐。 */
 export interface ModerationConfig extends EscalationSettings {
   enabled: boolean;
@@ -43,8 +46,8 @@ export interface ModerationConfig extends EscalationSettings {
   categories: string[];
   /** 用户自定义群规（自然语言，逐条）。 */
   rules: string[];
-  /** 三级禁言时长（分钟）；严重级上限 43200（30 天，平台限制）。 */
-  durations: { light: number; medium: number; severe: number };
+  /** 全局禁言时长范围（分钟，上限 43200＝30 天平台限制）；具体时长按严重程度在范围内取值。 */
+  durations: MuteDurationRange;
   /** 免审成员 openid（命中直接跳过，不调模型）。 */
   whitelist: string[];
   /** 判定尺度：lenient 宽松（默认，只判明确违规）/ normal 标准 / strict 严格。 */
@@ -155,13 +158,13 @@ function isStrikeExpired(strike: ModerationStrike, now: number, windowDays = DEF
   return now - t >= Math.max(1, windowDays) * DAY_MS;
 }
 
-/** 默认配置：审核关闭、启用全部内置分类、三级时长 10 分钟 / 1 天 / 30 天，叠加惩罚沿用旧行为。 */
+/** 默认配置：审核关闭、启用全部内置分类、禁言范围 10 分钟–30 天，叠加惩罚沿用旧行为。 */
 export function defaultConfig(): ModerationConfig {
   return {
     enabled: false,
     categories: [...MODERATION_CATEGORIES],
     rules: [],
-    durations: { light: 10, medium: 1440, severe: 43200 },
+    durations: { min: 10, max: 43200 },
     whitelist: [],
     strictness: "lenient",
     ...DEFAULT_ESCALATION,
@@ -175,6 +178,41 @@ const clampMin = (v: unknown, fallback: number): number => {
   if (!Number.isFinite(n)) return fallback;
   return Math.min(43200, Math.max(1, Math.round(n)));
 };
+
+/** 单个范围归一化：数字视为固定值；min/max 自动纠正顺序。 */
+function oneDurationRange(raw: unknown, fallback: MuteDurationRange): MuteDurationRange {
+  if (typeof raw === "number" || (typeof raw === "string" && raw.trim())) {
+    const n = clampMin(raw, fallback.min);
+    return { min: n, max: n };
+  }
+  const obj = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const min = clampMin(obj.min, fallback.min);
+  const max = clampMin(obj.max, fallback.max);
+  return min <= max ? { min, max } : { min: max, max: min };
+}
+
+/**
+ * 全局范围归一化，兼容两代旧配置：
+ *  - 三档数字 {light:10,medium:30,severe:300} → 10–300 分钟；
+ *  - 三档范围 {light:{min,max},…} → 取所有档的最小下限与最大上限。
+ */
+function normalizeDurationRange(raw: unknown, fallback: MuteDurationRange): MuteDurationRange {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    if (obj.min !== undefined || obj.max !== undefined) return oneDurationRange(raw, fallback);
+    const legacy = (["light", "medium", "severe"] as const)
+      .map((lv) => obj[lv])
+      .filter((v) => v !== undefined);
+    if (legacy.length) {
+      const ranges = legacy.map((v) => oneDurationRange(v, fallback));
+      return {
+        min: Math.min(...ranges.map((r) => r.min)),
+        max: Math.max(...ranges.map((r) => r.max)),
+      };
+    }
+  }
+  return oneDurationRange(raw, fallback);
+}
 
 /** 叠加系数：0.1–10，保留一位小数。 */
 const clampFactor = (v: unknown, fallback: number): number => {
@@ -194,7 +232,6 @@ const clampWindowDays = (v: unknown, fallback: number): number => {
 export function normalizeConfig(raw: unknown): ModerationConfig {
   const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const d = defaultConfig();
-  const durationsRaw = src.durations && typeof src.durations === "object" ? src.durations as Record<string, unknown> : {};
   return {
     enabled: typeof src.enabled === "boolean" ? src.enabled : d.enabled,
     categories: Array.isArray(src.categories)
@@ -203,11 +240,7 @@ export function normalizeConfig(raw: unknown): ModerationConfig {
     rules: Array.isArray(src.rules)
       ? src.rules.filter((r): r is string => typeof r === "string" && r.trim().length > 0).map((r) => r.trim())
       : d.rules,
-    durations: {
-      light: clampMin(durationsRaw.light, d.durations.light),
-      medium: clampMin(durationsRaw.medium, d.durations.medium),
-      severe: clampMin(durationsRaw.severe, d.durations.severe),
-    },
+    durations: normalizeDurationRange(src.durations, d.durations),
     whitelist: Array.isArray(src.whitelist)
       ? src.whitelist.filter((o): o is string => typeof o === "string" && o.trim().length > 0).map((o) => o.trim())
       : d.whitelist,

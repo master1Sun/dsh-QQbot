@@ -119,9 +119,28 @@ export async function handleRawEvent(bot: BotRuntime, eventType: string, data: u
     return { handled: true, note: `join-request ${username}` };
   }
 
-  // 撤回事件只记日志（对方撤回无法还原内容，ref-index 中的原文仍有价值）。
+  // 撤回事件：给已归档的原消息打「已撤回」标记，原文照常保留在归档里。
+  // QQ 撤回事件带 message_id，据此找回原消息那条归档；拿不到 id 或原消息未归档
+  // （历史数据 / 尚未落盘）时，补一条带撤回提示的占位，保留这次撤回轨迹。
   if (eventType === "GROUP_MSG_RECALL" || eventType === "C2C_MSG_RECALL") {
-    void bot.archiver.append({ kind: "inbound", event: eventType, chat: groupChatKey(payload), content: "", note: "recalled" });
+    const recall = payload as { message_id?: string; messageId?: string };
+    const messageId = recall.message_id ?? recall.messageId ?? "";
+    const chat = groupChatKey(payload);
+    let marked = messageId ? await bot.archiver.markRecalled({ chat, messageId }) : false;
+    // 带附件消息的归档要等媒体下载完才落盘，撤回可能先到；短暂重试一次再决定是否补占位。
+    if (!marked && messageId) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      marked = await bot.archiver.markRecalled({ chat, messageId });
+    }
+    if (marked) return { handled: true, note: `${eventType}:marked` };
+    void bot.archiver.append({
+      kind: "inbound",
+      event: eventType,
+      chat,
+      content: "",
+      recalled: true,
+      ...(messageId ? { messageId } : {}),
+    });
     return { handled: true, note: eventType };
   }
 

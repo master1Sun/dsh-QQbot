@@ -443,12 +443,15 @@ export function createQqRule({
           // 组装语境：① 当前消息之前的群聊（审核发生在 addGroupMessage 之前，缓冲里天然
           // 不含本条；再按内容剔除一遍，防孪生事件在 10s 后重审时把自己算进前文）；
           // ② 本条消息引用的原话（refIndex 尽力恢复，拿不到就只有前文）。
-          const recent = recentGroupMessages(state, group, 2, 1200)
+          // 取 6 条前文：判断「玩笑/互怼/接话/复述」需要足够上下文，2 条太少容易把
+          // 正常聊天当成违规（见 formatContext，模型最多用最近 8 条）。
+          const recent = recentGroupMessages(state, group, 6, 2000)
             .filter((m) => !(m.senderId === sender && m.content.trim() === content))
             .map((m) => ({ sender: m.senderName || m.senderId, content: m.content }));
           const refIdx = parseRefIdx(payload).refIdx;
           const quoted = refIdx ? bot.refIndex.resolve(refIdx) : null;
           const modContext: ModerationContext = {
+            currentSender: senderDisplayName(payload),
             recent,
             ...(quoted && quoted.content.trim()
               ? { quoted: { sender: quoted.senderName || quoted.sender, content: quoted.content } }
@@ -527,6 +530,7 @@ export function createQqRule({
           sender,
           senderName: senderDisplayName(payload),
           content,
+          messageId: payload.id,
         }, payload.attachments, config.archiveMedia, config);
         // 纯附件消息（无文字）只归档，不进入回复流程，避免对群里每张图都产生回应。
         if (!content) return null;
@@ -544,14 +548,25 @@ export function createQqRule({
         );
         if (command.handled) return null;
         // @ 机器人 → 跳过价值过滤，直接回复（并允许使用工具）。
-        // 判定次序：① mentions 带 bot 标记（最可靠）；② 已学习本 bot 在该群的自身
-        // openid（AT 事件 content 首个 <@id>，见 learnSelfOpenid）→ content 中 @ 该
-        // id 即精确命中，@ 其他成员/机器人不误触发；③ 该群从未发生过 AT（未学习）
-        // → 退回宽匹配（含任意 <@...> 即算 @），宁可多回不可漏回。
+        // 判定次序：① mentions 带 bot/is_you 标记（最可靠，平台原生字段）；② 已学习
+        // 本 bot 在该群的自身 openid（AT 事件 content 首个 <@id>，见 learnSelfOpenid）
+        // → content 中 @ 该 id 即精确命中；③ 都没有时才退回 content 文本匹配。
         const mentionIds = [...content.matchAll(MENTION_CAPTURE)].map((m) => m[1]!);
         const knownSelf = bot.selfOpenids.get(target.openid) ?? "";
-        const isAt = atBot(payload)
-          || (knownSelf ? mentionIds.includes(knownSelf) : AT_TEXT_PATTERN.test(content));
+        const atBotFlag = atBot(payload) || (knownSelf ? mentionIds.includes(knownSelf) : false);
+        // 明确 @ 了「别人」而不是本机器人：说明在跟群友对话，机器人不插嘴。
+        // 这条优先于「回复全部消息」——即便全量模式，@某人说话也不该被机器人抢答。
+        // mentions 结构体里 bot/is_you 为 false 且 id 非自身的项，或 content 里
+        // 出现非自身的 <@id>，都算 @ 了别人（<@all> 长度不足，不会被 MENTION_CAPTURE 捕获）。
+        const mentionsOther = mentionIds.some((id) => id !== knownSelf)
+          || (Array.isArray(payload.mentions) && payload.mentions.some(
+            (m) => Boolean(m?.id) && m!.id !== knownSelf && m!.bot !== true && m!.is_you !== true,
+          ));
+        if (mentionsOther && !atBotFlag) {
+          logger.info(`[dsh-qqbot] 群消息@了其他成员（非本机器人），跳过回复: ${content.slice(0, 40)}`);
+          return null;
+        }
+        const isAt = atBotFlag || (!knownSelf && !mentionsOther && AT_TEXT_PATTERN.test(content));
         const verdict = isAt
           ? { reply: true, score: 10, blockedBy: null as string | null }
           : evaluateGroupMessage(payload, valueFilter, bot.valueFilterState);
@@ -620,6 +635,7 @@ export function createQqRule({
         sender,
         senderName: senderDisplayName(payload),
         content,
+        messageId: payload.id,
         ...(hasAttachments
           ? {
               note: `attachments:${(payload.attachments ?? [])

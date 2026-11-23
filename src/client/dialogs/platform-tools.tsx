@@ -265,7 +265,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     enabled: boolean;
     categories: string[];
     rules: string[];
-    durations: { light: number; medium: number; severe: number };
+    durations: DurRange;
     whitelist: string[];
     escalateEnabled: boolean;
     escalateMode: EscalateMode;
@@ -291,9 +291,44 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     username?: string;
   }
   const MOD_CATS = ["illegal", "porn_gamble", "abuse", "ad_spam", "flood"];
+  type DurRange = { min: number; max: number };
+  const DEFAULT_DURATION: DurRange = { min: 10, max: 43200 };
+  const clampDur = (v: unknown, fallback: number): number => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 1 ? Math.min(43200, Math.round(n)) : fallback;
+  };
+  const oneDurRange = (raw: any, fallback: DurRange): DurRange => {
+    if (typeof raw === "number" || (typeof raw === "string" && raw.trim())) {
+      const n = clampDur(raw, fallback.min);
+      return { min: n, max: n };
+    }
+    const o = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+    const min = clampDur(o.min, fallback.min);
+    const max = clampDur(o.max, fallback.max);
+    return min <= max ? { min, max } : { min: max, max: min };
+  };
+  /** 单一范围；兼容旧的三档数字/三档范围，合并成总范围。 */
+  const normalizeDuration = (raw: any): DurRange => {
+    if (raw && typeof raw === "object" && (raw.min !== undefined || raw.max !== undefined)) {
+      return oneDurRange(raw, DEFAULT_DURATION);
+    }
+    const legacy = raw && typeof raw === "object"
+      ? (["light", "medium", "severe"] as const).map((lv) => raw[lv]).filter((v) => v !== undefined)
+      : [];
+    if (legacy.length) {
+      const ranges = legacy.map((v) => oneDurRange(v, DEFAULT_DURATION));
+      return {
+        min: Math.min(...ranges.map((r) => r.min)),
+        max: Math.max(...ranges.map((r) => r.max)),
+      };
+    }
+    return oneDurRange(raw, DEFAULT_DURATION);
+  };
+  const rangeMid = (r: DurRange): number => Math.round((r.min + r.max) / 2);
+  const durRangeLabel = (r: DurRange): string => `${r.min}–${r.max}`;
   const emptyModConfig = (): ModConfig => ({
     enabled: false, categories: [...MOD_CATS], rules: [],
-    durations: { light: 10, medium: 1440, severe: 43200 }, whitelist: [],
+    durations: DEFAULT_DURATION, whitelist: [],
     ...DEFAULT_ESCALATION, escalateSteps: [], strikeWindowDays: 30, strictness: "lenient",
   });
   /** 自定义阶梯输入（每行/逗号一个数），保存前归一为数字数组。 */
@@ -317,6 +352,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     const res = await rpcCall("moderation.config.get", { appId, groupOpenid: group });
     if (!res.ok) throw new Error(errText(res));
     const cfg = { ...emptyModConfig(), ...(val(res)?.config ?? {}) } as ModConfig;
+    cfg.durations = normalizeDuration(cfg.durations);
     setModCfg(cfg);
     setModRulesText((cfg.rules ?? []).join("\n"));
     setModWhiteText((cfg.whitelist ?? []).join("\n"));
@@ -330,11 +366,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     // 规则按行拆（占位符写明「每行一条」）；按逗号拆会把「禁止发广告，违者踢出」这类复合规则割裂。
     rules: modRulesText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
     whitelist: modWhiteText.split(/[\n，,\s]+/).map((s) => s.trim()).filter(Boolean),
-    durations: {
-      light: Math.max(1, Math.min(43200, Number(modCfg.durations.light) || 10)),
-      medium: Math.max(1, Math.min(43200, Number(modCfg.durations.medium) || 1440)),
-      severe: Math.max(1, Math.min(43200, Number(modCfg.durations.severe) || 43200)),
-    },
+    durations: normalizeDuration(modCfg.durations),
     escalateEnabled: modCfg.escalateEnabled,
     escalateMode: modCfg.escalateMode,
     escalateFactor: Math.max(0.1, Math.min(10, Number(modCfg.escalateFactor) || 1)),
@@ -861,7 +893,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
   /** 叠加效果预览：按当前草稿、以「轻微」基础时长演示前 3 次违规各禁言多久。 */
   const modEscPreview = () => {
     const draft = modDraft();
-    const base = Number(draft.durations.light) || 10;
+    const base = rangeMid(draft.durations);
     return [1, 2, 3]
       .map((n) => fmt("pt.modEscPrevItem", String(n), fmtDuration(escalateDuration(base, draft, n))))
       .join(" / ");
@@ -911,7 +943,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
                 h("span", { className: "qbot-ptFieldHint" }, t("pt.modEscStepsHint")))
             : null,
           h("div", { className: "qbot-ptModEscPreview" },
-            h("span", null, fmt("pt.modEscPreview", fmtDuration(modCfg.durations.light))),
+            h("span", null, fmt("pt.modEscPreview", fmtDuration(rangeMid(modCfg.durations)))),
             h("strong", null, modEscPreview())))
       : h("div", { className: "qbot-ptModEscOff" }, t("pt.modEscOffHint")));
 
@@ -958,10 +990,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
         modCfgLoaded
           ? h("div", { className: "qbot-ptModHeroSummary" },
               h("span", null, fmt("pt.modSummaryCats", String(modCfg.categories.length))),
-              h("span", null, fmt("pt.modSummaryDur",
-                fmtDuration(modCfg.durations.light),
-                fmtDuration(modCfg.durations.medium),
-                fmtDuration(modCfg.durations.severe))))
+              h("span", null, fmt("pt.modSummaryDur", durRangeLabel(modCfg.durations))))
           : null)),
 
     modCfgLoaded
@@ -1009,15 +1038,19 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
                   : null)),
             modStep("4", t("pt.modSecDuration"), "",
               h("div", { className: "qbot-ptGrid" },
-                (["light", "medium", "severe"] as const).map((lv) =>
-                  h("label", { key: lv, className: "qbot-ptField" },
-                    h("span", null, t(`pt.modLevel.${lv}`)),
+                h("div", { className: "qbot-ptField" },
+                  h("div", { className: "qbot-ptDurRange" },
                     h("input", { className: "qbot-settingInput", type: "number", min: 1, max: 43200,
-                      value: modCfg.durations[lv],
-                      onChange: (e: any) => {
-                        const v = e.target.value;
-                        setModCfg((c) => ({ ...c, durations: { ...c.durations, [lv]: v } }));
-                      } }))))),
+                      value: modCfg.durations.min,
+                      onChange: (e: any) => setModCfg((c) => ({ ...c,
+                        durations: { ...c.durations, min: e.target.value } })),
+                      "aria-label": t("pt.modRangeFrom") }),
+                    h("span", { className: "qbot-ptDurSep", "aria-hidden": "true" }, "~"),
+                    h("input", { className: "qbot-settingInput", type: "number", min: 1, max: 43200,
+                      value: modCfg.durations.max,
+                      onChange: (e: any) => setModCfg((c) => ({ ...c,
+                        durations: { ...c.durations, max: e.target.value } })),
+                      "aria-label": t("pt.modRangeTo") }))))),
             modEscalateStep,
             modStep("6", t("pt.modSecWhite"), "",
               h("textarea", { className: "qbot-ptTextarea", rows: 2,
