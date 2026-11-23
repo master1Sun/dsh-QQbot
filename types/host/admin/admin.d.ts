@@ -76,6 +76,9 @@ export declare function createAdminService(ctx: AdminServiceContext): {
                     proactive: number;
                     errors: number;
                 };
+                daily: {
+                    [x: string]: number;
+                };
                 pendingReplies: number;
                 boundSessions: number;
                 groupBuffers: {

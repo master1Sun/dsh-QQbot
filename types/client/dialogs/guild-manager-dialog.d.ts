@@ -10,9 +10,31 @@
  */
 import * as React from "react";
 import type { RpcCall } from "../types.js";
+export type GuildTab = "guilds" | "info" | "channels" | "members" | "roles" | "message" | "speak" | "content" | "ai" | "apiPerm" | "events" | "assistant";
+/** 由外层控制台单棵导航树驱动的焦点：指定要显示的二级 Tab 及其三级子 Tab。 */
+export interface GuildFocus {
+    tab: GuildTab;
+    speakTab?: "all" | "member" | "frequency" | "keyword";
+    kwTab?: "config" | "logs";
+    contentTab?: "recall" | "announce" | "pin" | "schedule" | "audio" | "forum";
+    aiTab?: "config" | "logs" | "reply" | "replyLogs";
+}
+export declare function GuildManager(props: {
+    rpcCall: RpcCall;
+    appId: string;
+    onNotify: (text: string, tone: "error" | "success") => void;
+    /** 首次进入时定位的二级 Tab（独立弹窗默认「频道列表」）。 */
+    initialTab?: GuildTab;
+    /** 由外层控制台单棵导航树驱动的焦点；传入后隐藏本组件自带导航。 */
+    focus?: GuildFocus;
+    /** 嵌入控制台内容区：隐藏一级 Tab 导航，仅渲染焦点对应内容。 */
+    embedded?: boolean;
+}): React.DetailedReactHTMLElement<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;
 /** 频道管理弹窗外壳：与平台能力弹窗样式统一。 */
 export declare function GuildManagerDialog(props: {
     rpcCall: RpcCall;
     appId: string;
     onClose: () => void;
+    /** 嵌入控制台时指定初始二级 Tab；独立弹窗默认「频道列表」。 */
+    initialTab?: GuildTab;
 }): React.DetailedReactHTMLElement<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;

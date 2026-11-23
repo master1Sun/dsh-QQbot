@@ -2,9 +2,13 @@
  * 设置项元数据（纯数据，无 UI 逻辑）：
  * 字段标签 / 数值项说明 / 开关定义 / 冷却时长候选与文案。
  */
-export declare const FIELD_LABELS: Record<string, string>;
+/**
+ * 以下三项必须在渲染时调用，不能在模块顶层求值成常量：
+ * 模块加载早于宿主 setTranslator()/setLocale()，顶层 t() 会冻结在默认中文。
+ */
+export declare function fieldLabels(): Record<string, string>;
 /** 数值项说明：写清「影响什么 + 什么时候生效」，配置界面直接展示。 */
-export declare const FIELD_HELP: Record<string, string>;
+export declare function fieldHelp(): Record<string, string>;
 /**
  * 开关项说明：逐条写清开启/关闭后的实际行为。
  *
@@ -18,7 +22,7 @@ export declare const FIELD_HELP: Record<string, string>;
  * 另有以下**字段**（非开关）同样不出现在设置页：
  *   secretEnv（默认空，AppSecret 凭据引用）
  */
-export declare const SWITCH_DEFS: Array<{
+export declare function switchDefs(): Array<{
     key: string;
     label: string;
     desc: string;

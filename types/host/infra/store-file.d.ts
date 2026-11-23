@@ -5,7 +5,7 @@ export declare const botsPath: () => string;
 export declare const globalPath: () => string;
 /** 读取插件数据目录下的任意 JSON 文件。 */
 export declare function readStoreJson<T>(path: string): Promise<T | null>;
-/** 原子写入（tmp + rename），凭据文件限制 0600。 */
+/** 原子写入（随机 tmp + rename），凭据文件限制 0600；同路径写串行化。 */
 export declare function writeJson(path: string, value: unknown, { privateFile }?: {
     privateFile?: boolean | undefined;
 }): Promise<void>;

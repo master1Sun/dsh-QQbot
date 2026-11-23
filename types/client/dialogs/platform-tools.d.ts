@@ -14,10 +14,23 @@
  */
 import * as React from "react";
 import type { RpcCall } from "../types.js";
-export declare function PlatformTools({ rpcCall, appId, groups, onNotify }: {
+/** 由外层控制台单棵导航树驱动的焦点：指定二级导航项及其三级子 Tab。 */
+export interface PlatformFocus {
+    nav: string;
+    joinTab?: "auto" | "manual" | "records";
+    modTab?: "config" | "logs" | "muted";
+}
+export declare function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedded, group: groupProp, onGroupChange }: {
     rpcCall: RpcCall;
     appId: string;
     groups: string[];
     /** 只有报错与「操作成功」这类需要用户知道的结果才上报，由详情页在顶部吸顶展示。 */
     onNotify?: (text: string, tone: "error" | "success") => void;
+    /** 由外层控制台单棵导航树驱动的焦点；传入后隐藏本组件自带导航。 */
+    focus?: PlatformFocus;
+    /** 嵌入控制台内容区：隐藏左侧导航与面板内二级 Tab 条。 */
+    embedded?: boolean;
+    /** 控制台持有的选中群：切换菜单后仍保留，避免每次重新选群。 */
+    group?: string;
+    onGroupChange?: (g: string) => void;
 }): React.DetailedReactHTMLElement<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;

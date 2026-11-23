@@ -10,13 +10,26 @@
  */
 import type { BotRuntime } from "../bots.js";
 import { ModerationStore, type ModerationConfig } from "./store.js";
-import { type ModerateDeps } from "./moderate.js";
+import { type ModerateDeps, type ModerationContext } from "./moderate.js";
 export declare class ModerationService {
     #private;
     readonly store: ModerationStore;
     constructor(deps: ModerateDeps, logger: Pick<Console, "info" | "warn" | "error">);
     /** 清缓存（设置页改了权限/切群后可调）。 */
     invalidateAdmin(appId: string, groupId: string): void;
+    /**
+     * 刷屏/骚扰行为检测：模型只看单条消息，识别不出「短时间内连发/重复灌水」，
+     * 这里在消息进审核前按滑动窗口做本地判定，命中直接走统一处置链路。
+     * 返回 true 表示已处置或处于冷却期（调用方应阻断后续回复）。
+     */
+    observe(params: {
+        bot: BotRuntime;
+        groupId: string;
+        sender: string;
+        senderName: string;
+        content: string;
+        messageId?: string;
+    }): Promise<boolean>;
     /**
      * 审核一条群消息。返回是否「已处置」（调用方可据此决定是否继续正常回复链路）。
      * 任何异常都被吞掉并记日志——审核绝不能阻断正常消息处理。
@@ -27,6 +40,10 @@ export declare class ModerationService {
         sender: string;
         senderName: string;
         content: string;
+        /** 违规消息的 msg_id；提供时命中违规会先撤回原消息再处置。 */
+        messageId?: string;
+        /** 对话语境（前文群聊 + 被引用的原话），帮模型分辨玩笑/互怼/引用与真违规。 */
+        context?: ModerationContext;
     }): Promise<{
         actioned: boolean;
         level: string;
@@ -47,5 +64,6 @@ export declare class ModerationService {
         reason: string;
         minutes: number;
         rules: string[];
+        rule: string;
     }>;
 }

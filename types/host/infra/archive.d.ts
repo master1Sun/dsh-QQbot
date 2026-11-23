@@ -115,6 +115,33 @@ export declare function listArchiveChats(opts?: {
     chats: ArchivedChat[];
     moreAvailable: boolean;
 }>;
+export interface ArchiveStats {
+    total: number;
+    chats: number;
+    groups: number;
+    dmChats: number;
+    kinds: {
+        inbound: number;
+        reply: number;
+        proactive: number;
+    };
+    scopes: {
+        group: number;
+        c2c: number;
+    };
+    months: Array<{
+        month: string;
+        count: number;
+    }>;
+    topChats: Array<{
+        chat: string;
+        scope: "group" | "c2c";
+        name: string;
+        count: number;
+    }>;
+}
+/** 运营总览用：一次扫描聚合归档的消息分类、会话来源、月份与活跃会话。 */
+export declare function archiveStats(bot?: string): Promise<ArchiveStats>;
 /**
  * 列举每个归档天的记录条数（按机器人过滤），供设置页日期列表展示。
  * 新结构按会话+月份存文件，这里从记录 ts 重新按天聚合，UI 的日期列表语义保持不变。

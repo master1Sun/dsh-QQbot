@@ -1,9 +1,10 @@
+import { type EscalationSettings } from "../../shared/moderation-escalation.js";
 /** 内置违规分类（id 稳定，文案在客户端 dict）。 */
 export declare const MODERATION_CATEGORIES: readonly ["illegal", "porn_gamble", "abuse", "ad_spam", "flood"];
 export type ModerationCategory = (typeof MODERATION_CATEGORIES)[number];
 export type MuteLevel = "none" | "light" | "medium" | "severe";
 /** 单群审核配置。缺省字段在 normalize 时补齐。 */
-export interface ModerationConfig {
+export interface ModerationConfig extends EscalationSettings {
     enabled: boolean;
     /** 启用的内置分类 id（空 = 不启用内置分类，只看自定义群规）。 */
     categories: string[];
@@ -17,6 +18,10 @@ export interface ModerationConfig {
     };
     /** 免审成员 openid（命中直接跳过，不调模型）。 */
     whitelist: string[];
+    /** 判定尺度：lenient 宽松（默认，只判明确违规）/ normal 标准 / strict 严格。 */
+    strictness: "lenient" | "normal" | "strict";
+    /** 累进窗口天数：连续 N 天无新违规即从第 1 次重算（默认 30）。 */
+    strikeWindowDays: number;
 }
 /** 处罚/审核日志。 */
 export interface ModerationLog {
@@ -35,10 +40,18 @@ export interface ModerationLog {
     error?: string;
     /** 群内 @ 通知发送失败原因（不影响禁言执行）。 */
     noticeError?: string;
+    /** 违规原消息是否已被撤回。 */
+    recalled?: boolean;
+    /** 撤回失败原因（不影响其它处置）。 */
+    recallError?: string;
+    /** 判定来源：模型判定 / 本地行为检测（刷屏）/ 本地精确词预筛。 */
+    source?: "llm" | "behavior" | "local";
     /** 该成员在本群的第几次违规（累进处罚）。 */
     strikeCount?: number;
     /** 累进前的等级基础时长（分钟），方便看出加重了多少。 */
     baseMinutes?: number;
+    /** 本次是否真的因叠加惩罚而加重（关掉叠加或首犯时为 false）。 */
+    escalated?: boolean;
 }
 /** 单个成员的累进违规记录（按 机器人 + 群 + 成员 独立计数）。 */
 export interface ModerationStrike {
@@ -48,12 +61,12 @@ export interface ModerationStrike {
     lastLevel: string;
 }
 /** 单次禁言封顶：30 天（QQ 平台上限），分钟。 */
-export declare const MUTE_CAP_MINUTES: number;
+export declare const MUTE_CAP_MINUTES = 43200;
 /** 配置键：机器人 + 群。 */
 export declare function modKey(appId: string, groupId: string): string;
 /** 累进违规键：机器人 + 群 + 成员，成员之间互不影响。 */
 export declare function strikeKey(appId: string, groupId: string, sender: string): string;
-/** 默认配置：全部关闭、启用全部内置分类、三级时长 10 分钟 / 1 天 / 30 天。 */
+/** 默认配置：审核关闭、启用全部内置分类、三级时长 10 分钟 / 1 天 / 30 天，叠加惩罚沿用旧行为。 */
 export declare function defaultConfig(): ModerationConfig;
 /** 归一化单群配置（容错：非法字段回退默认）。导出供「规则自测」复用草稿配置。 */
 export declare function normalizeConfig(raw: unknown): ModerationConfig;
@@ -80,12 +93,12 @@ export declare class ModerationStore {
         groupId?: string;
         limit?: number;
     }): Promise<ModerationLog[]>;
-    /** 读取某成员在本群的累进违规记录（无记录 / 超过 30 天窗口返回全零）。 */
-    getStrike(appId: string, groupId: string, sender: string): Promise<ModerationStrike>;
+    /** 读取某成员在本群的累进违规记录（无记录 / 超过清零窗口返回全零）。 */
+    getStrike(appId: string, groupId: string, sender: string, windowDays?: number): Promise<ModerationStrike>;
     /**
      * 记录一次违规：窗口内次数 +1、累计禁言分钟相加（封顶 30 天）；
-     * 超过 30 天窗口则视为新周期，从 count=1 重新计，不再无限叠加。
+     * 超过清零窗口则视为新周期，从 count=1 重新计，不再无限叠加。
      * 保留最近 STRIKE_CAP 个成员。
      */
-    recordStrike(appId: string, groupId: string, sender: string, minutes: number, level: string): Promise<ModerationStrike>;
+    recordStrike(appId: string, groupId: string, sender: string, minutes: number, level: string, windowDays?: number): Promise<ModerationStrike>;
 }

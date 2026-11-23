@@ -25,7 +25,10 @@ export declare class QrLoginManager {
     constructor(options: QrLoginManagerOptions);
     /** 当前状态快照（含二维码 SVG，供界面渲染）。 */
     snapshot(): QrLoginSnapshot;
-    /** 启动一次扫码会话；进行中重复调用返回当前状态。 */
+    /**
+     * 启动一次扫码会话。进行中重复调用会先中止旧会话再重新生成（界面「重新生成」按钮依赖此行为）。
+     * 旧会话被 stop 时 SDK 会异步触发 onFailure("已取消")，用 #session 隔离，避免覆盖新会话状态。
+     */
     start(): Promise<QrLoginSnapshot>;
     /** 取消进行中的扫码。 */
     cancel(): QrLoginSnapshot;

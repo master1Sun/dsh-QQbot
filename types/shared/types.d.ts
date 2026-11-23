@@ -106,6 +106,8 @@ export interface BotState {
     /** 机器人自己发出的消息 id（chatKey → 环形缓冲），供表情撤回 / /撤回 命令使用。 */
     sentByChat: Map<string, string[]>;
     counters: BotCounters;
+    /** 按天收到消息数（上海日期 YYYY-MM-DD → 条数），与 counters.received 同步累加。 */
+    dailyReceived: Record<string, number>;
 }
 /** QQ 事件信封（WebSocket 接收源组装，与官方 webhook 推送体同构）。 */
 export interface QqEnvelope {
