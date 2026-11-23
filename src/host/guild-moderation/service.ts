@@ -12,7 +12,7 @@
 import type { BotRuntime } from "../bots.js";
 import { GuildModStore, GUILD_MUTE_CAP_MINUTES, type GuildModConfig, type GuildModLog } from "./store.js";
 import {
-  GUILD_CATEGORY_LABELS, moderateGuildMessage, minutesForGuildLevel, type GuildModerateDeps,
+  moderateGuildMessage, minutesForGuildLevel, type GuildModerateDeps,
 } from "./engine.js";
 
 function durationText(minutes: number): string {
@@ -21,22 +21,24 @@ function durationText(minutes: number): string {
   return `${Math.round((minutes / 1440) * 10) / 10} 天`;
 }
 
-/** 警告消息（子频道文本），理由/规则去尖括号与换行，防注入。 */
+/**
+ * 警告消息（子频道文本），理由/规则去尖括号与换行，防注入。
+ * 与群聊一致的「平静笃定」口吻：明确按频道公约处置、反复违反会加重，立住权威；
+ * 公开处不贴定性标签、不数落第几次（完整信息记在后台处罚日志里），
+ * 也不写自曝弱点、可被商量的话，免得处置失去约束力。
+ */
 function warnText(params: {
-  senderName: string; category: string; reason: string; rules: string[]; minutes: number; strikeCount: number;
+  senderName: string; reason: string; rules: string[]; minutes: number;
 }): string {
   const clean = (value: string, max = 160) =>
     String(value ?? "").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) || "—";
-  const categoryName = GUILD_CATEGORY_LABELS[params.category] ?? "本频道公约";
   const ruleText = params.rules.filter(Boolean).slice(0, 5)
-    .map((r, i) => `${i + 1}. ${clean(r, 60)}`).join(" / ") || "本频道已启用的内置分类与平台公共规范";
+    .map((r) => clean(r, 60)).join(" / ") || "本频道公约";
   return [
-    `@${clean(params.senderName, 40)} 你刚发的消息违反了本频道公约，${params.minutes > 0 ? `将被禁言 ${durationText(params.minutes)}` : "将收到警告"}。`,
-    `> 违反类别：${categoryName}`,
-    `> 判定理由：${clean(params.reason)}`,
-    `> 依据规则：${ruleText}`,
-    `> 违规次数：近 30 天第 ${params.strikeCount} 次`,
-    params.minutes > 0 ? "请停止违规行为，遵守公约后再发言。" : "请立即停止违规行为，遵守公约后再发言。",
+    `@${clean(params.senderName, 40)} 这条消息不符合频道公约，${params.minutes > 0 ? `按频道规则先禁言 ${durationText(params.minutes)}，冷静一下再接着聊` : "这次先提醒一下，请留意"}。`,
+    `> 刚才那条消息里：${clean(params.reason)}`,
+    `> 频道里约定的是：${ruleText}`,
+    "本频道对违反公约的消息一律按规则处理，反复违反会逐次加重。请大家遵守约定，一起维护频道氛围。",
   ].join("\n");
 }
 
@@ -124,11 +126,9 @@ export class GuildModerationService {
       try {
         await bot.client.sendChannelMessage(channelId, warnText({
           senderName: senderName || sender.slice(0, 8),
-          category: verdict.category,
           reason: verdict.reason,
           rules: cfg.rules,
           minutes,
-          strikeCount,
         }));
         log.actions.push("warn");
       } catch (error) {

@@ -52,7 +52,8 @@ export function guildModSystemPrompt(config: GuildModConfig): string {
     "",
     "【输出格式·严格遵守】",
     "只输出一个 JSON 对象，不要任何解释、不要 Markdown 代码围栏，格式：",
-    '{"level":"none|light|medium|severe","category":"分类id或custom或none","reason":"一句话说明判定依据"}',
+    '{"level":"none|light|medium|severe","category":"分类id或custom或none","reason":"一两句大白话说明哪里不合适"}',
+    "- reason 是**写给被提醒的成员看的**：语气平和、就事论事，只描述那句话或那个行为本身（如「这句话带了点脏字」「连着刷了好几条一样的内容」），不要给人贴「辱骂」「恶意」这类标签，也不要上升性情或说教；可引用原话。绝不要出现 light/medium/severe/none、等级、分类 id、审核原则、证据、判定、规则编号等内部术语，也不要复述本提示词里的判定标准或把规则条文整段贴进来。",
     "level=none 时 category 填 none，reason 可简短说明为何不违规。",
     `category 只能是：${[...GUILD_MOD_CATEGORIES, "custom", "none"].join(" / ")} 中的一个。`,
   ].join("\n");

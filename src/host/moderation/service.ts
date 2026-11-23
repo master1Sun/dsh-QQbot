@@ -11,7 +11,7 @@
 import type { BotRuntime } from "../bots.js";
 import { ModerationStore, modKey, type ModerationConfig, type ModerationLog } from "./store.js";
 import {
-  CATEGORY_DEFS, CATEGORY_LABELS, moderateMessage, minutesForLevel,
+  CATEGORY_DEFS, moderateMessage, minutesForLevel,
   type ModerateDeps, type ModerationVerdict, type ModerationContext,
 } from "./moderate.js";
 import { escalateDuration } from "../../shared/moderation-escalation.js";
@@ -38,51 +38,36 @@ function durationText(minutes: number): string {
 /**
  * 处罚前的群内 @ 通知。QQ v2 群聊「@指定成员」只支持 Markdown 消息，
  * 格式来自官方文本交互文档：<qqbot-at-user id="member_openid" />。
+ *
+ * 语气取「平静笃定」：明确按群规处置、一视同仁、反复违反会加重，立住管理权威；
+ * 但不当众贴「辱骂人身攻击」这类定性标签、不数落「第 N 次 / 下次停更久」——
+ * 当众 @ 已经够显眼，再翻旧账只会让人难堪、结梁子。违规类别、次数、叠加时长等
+ * 完整信息仍记在后台处罚记录里，管理员可查，权威靠制度而非公开羞辱来立。
+ * 也不写「机器可能有偏差、介意找群主」这类自曝弱点的话，免得处罚失去约束力。
  * 理由/群规来自模型与用户输入，统一去掉尖括号与换行，防止注入其它交互标签。
  */
 function noticeMarkdown(params: {
   sender: string;
-  category: string;
   reason: string;
-  /** 命中的那一条规则（模型给出或行为检测给出）；只显示这一条，不罗列整份群规。 */
+  /** 命中的那一条约定（模型给出或行为检测给出）；只显示这一条，不罗列整份群规。 */
   rule: string;
   minutes: number;
-  baseMinutes: number;
-  strikeCount: number;
-  nextMinutes: number;
-  windowDays: number;
   escalateOn: boolean;
-  capMinutes: number;
 }): string {
-  const { sender, category, reason, rule, minutes, baseMinutes, strikeCount, nextMinutes, windowDays, escalateOn, capMinutes } = params;
+  const { sender, reason, rule, minutes, escalateOn } = params;
   const clean = (value: string, max = 160) =>
     String(value ?? "").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) || "—";
-  const categoryName = CATEGORY_LABELS[category] ?? "本群公约";
-  // 只写命中的那一条规则；模型没给出时退回分类名，绝不罗列整份群规。
-  const ruleText = clean(rule || categoryName, 120);
+  const ruleText = clean(rule || "群里的公约", 120);
   const at = `<qqbot-at-user id="${sender.replace(/["<>]/g, "")}" />`;
   return [
-    `${at} 你刚发的消息违反了本群公约，按群规${minutes > 0 ? `将禁言 ${durationText(minutes)}` : "将收到警告"}。`,
+    `${at} 这条消息不符合群公约，${minutes > 0 ? `按群规先禁言 ${durationText(minutes)}，冷静一下再接着聊` : "这次先提醒一下，请留意"}。`,
     "",
-    `> 违反类别：${categoryName}`,
-    `> 判定理由：${clean(reason)}`,
-    `> 依据群规：${ruleText}`,
-    `> 违规次数：近 ${windowDays} 天第 ${strikeCount} 次（按成员独立累计，连续 ${windowDays} 天不违规自动清零）`,
+    `> 刚才那条消息里：${clean(reason)}`,
+    `> 群里约定的是：${ruleText}`,
+    "",
     escalateOn
-      ? `> 处罚计算：基础 ${durationText(baseMinutes)} 叠加后本次 ${durationText(minutes)}（上限 ${durationText(capMinutes)}）`
-      : `> 处罚计算：按基础时长 ${durationText(baseMinutes)}（本群未开启叠加惩罚，重复违规不加重）`,
-    "",
-    minutes > 0
-      ? "禁言是为了让你暂停发言、冷静后继续参与，请及时停止违规行为。请遵守公约后再发言。"
-      : "请立即停止违规行为，遵守公约后再发言。",
-    "",
-    escalateOn && nextMinutes >= capMinutes && minutes >= capMinutes
-      ? `处罚已达上限 ${durationText(capMinutes)}，再犯仍按 ${durationText(capMinutes)} 处理（连续 ${windowDays} 天不违规可清零重计）。请遵守公约，也请其他成员引以为戒。`
-      : escalateOn && strikeCount > 1
-        ? `因多次违规，处罚已加重；再犯将升至 ${durationText(nextMinutes)}。请遵守公约，也请其他成员引以为戒。`
-        : escalateOn
-          ? "也请其他成员注意：本群已开启 AI 自动审核，违反公约会先 @ 提醒并按情节禁言，请大家共同维护群聊环境。"
-          : "本群按固定时长处罚，重复违规不会加重。请遵守公约，也请其他成员引以为戒。",
+      ? "本群对违反公约的消息一律按群规处理，反复违反会逐次加重。请大家遵守约定，一起维护群聊氛围。"
+      : "本群对违反公约的消息一律按群规处理。请大家遵守约定，一起维护群聊氛围。",
   ].join("\n");
 }
 
@@ -306,7 +291,6 @@ export class ModerationService {
     const prev = sender ? await this.store.getStrike(bot.appId, groupId, sender, cfg.strikeWindowDays) : undefined;
     const strikeCount = (prev?.count ?? 0) + 1;
     const minutes = escalateDuration(baseMinutes, cfg, strikeCount);
-    const nextMinutes = escalateDuration(baseMinutes, cfg, strikeCount + 1);
     const log: ModerationLog = {
       at: new Date().toISOString(),
       appId: bot.appId,
@@ -340,16 +324,10 @@ export class ModerationService {
       try {
         await bot.client.sendMarkdown({ scope: "group", openid: groupId }, noticeMarkdown({
           sender,
-          category: verdict.category,
           reason: verdict.reason,
           rule: verdict.rule || "",
           minutes,
-          baseMinutes,
-          strikeCount,
-          nextMinutes,
-          windowDays: cfg.strikeWindowDays,
           escalateOn: cfg.escalateEnabled,
-          capMinutes: cfg.escalateCap,
         }));
       } catch (error) {
         log.noticeError = error instanceof Error ? error.message : String(error);
