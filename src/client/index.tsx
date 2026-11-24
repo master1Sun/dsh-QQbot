@@ -79,6 +79,12 @@ const RPC_CHANNEL = "/qqbot-settings";
 /** 提示条自动消失时长（秒）：倒计时归零后清空并隐藏。 */
 const NOTICE_TTL_SECONDS = 8;
 
+/**
+ * 频道管理界面暂不展示：隐藏详情页入口卡片（新版控制台已由 console-dialog 的开关过滤掉导航组）。
+ * 频道能力本身全部保留，需要重新放出界面时把这里改回 true 即可。
+ */
+const GUILD_UI_VISIBLE = false;
+
 /* ── 更新状态（模块级托管） ───────────────────────────────────────────────
  * 设置页切到别的分区会卸载本组件，组件内 state 随之丢失，而宿主侧的
  * update.apply（下载 → 备份 → 覆盖安装目录）仍在跑。这里把状态托管到模块级，
@@ -561,7 +567,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
   const detailTabs: Array<{ id: "runtime" | "config" | "manage"; label: string; count: number }> = [
     { id: "runtime", label: t("detail.groupRuntime"), count: (status ? 1 : 0) + 2 },
     { id: "config", label: t("detail.groupConfig"), count: 5 },
-    { id: "manage", label: t("detail.groupManage"), count: 3 },
+    { id: "manage", label: t("detail.groupManage"), count: 2 },
   ];
   const detailTabBar = h("div", { className: "qbot-detailTabs", role: "tablist" },
     detailTabs.map((tb) =>
@@ -919,13 +925,13 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
       disabled: !detailBot, onClick: () => setPlatformOpen(true),
     }),
 
-    // ── 频道管理入口：整卡可点，频道能力在独立弹窗里用竖向 Tab 切换 ──
-    actionCard({
+    // ── 频道管理入口：界面暂隐藏（能力保留），见 GUILD_UI_VISIBLE ──
+    GUILD_UI_VISIBLE ? actionCard({
       icon: "◈", tone: "info",
       title: t("gv.title"), desc: t("gv.hint"),
       summary: t("gv.summary"),
       disabled: !detailBot, onClick: () => setGuildOpen(true),
-    }),
+    }) : null,
 
     // ── 连接与移除（放在管理 Tab 最下面；关于已移到页面底部页脚） ──
     connectionPane])));

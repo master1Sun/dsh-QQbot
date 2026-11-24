@@ -56,7 +56,7 @@ const guildLeaf = (id: string, label: string, icon: string, tab: GuildFocus["tab
 });
 
 /** 单棵三级导航树：一级分组 → 二级能力 → 三级子 Tab。 */
-const NAV_TREE: NavGroup[] = [
+const NAV_TREE_ALL: NavGroup[] = [
   {
     id: "overview", label: "console.grpOverview", icon: "▤",
     items: [{ id: "overview", label: "console.navOverview", icon: "◈", view: { kind: "overview" } }],
@@ -82,32 +82,9 @@ const NAV_TREE: NavGroup[] = [
     id: "group", label: "console.navPlatform", icon: "⚡",
     items: [
       platLeaf("g:info", "pt.navInfo", "◈", "g:info"),
-      platLeaf("g:members", "pt.navMembers", "♙", "g:members"),
-      platLeaf("g:black", "pt.navBlack", "⊘", "g:black"),
-      {
-        id: "g:join", label: "pt.navJoin", icon: "⌑",
-        view: { kind: "platform", focus: { nav: "g:join", joinTab: "auto" } },
-        children: [
-          platLeaf("g:join:auto", "pt.jaTabAuto", "·", "g:join", { joinTab: "auto" }),
-          platLeaf("g:join:manual", "pt.jaTabManual", "·", "g:join", { joinTab: "manual" }),
-          platLeaf("g:join:records", "pt.jaTabRecords", "·", "g:join", { joinTab: "records" }),
-        ],
-      },
-      {
-        id: "g:moderation", label: "pt.navModeration", icon: "✦",
-        view: { kind: "platform", focus: { nav: "g:moderation", modTab: "config" } },
-        children: [
-          platLeaf("g:moderation:config", "pt.modTabConfig", "·", "g:moderation", { modTab: "config" }),
-          platLeaf("g:moderation:logs", "pt.modTabLogs", "·", "g:moderation", { modTab: "logs" }),
-          platLeaf("g:moderation:muted", "pt.modTabMuted", "·", "g:moderation", { modTab: "muted" }),
-        ],
-      },
-      platLeaf("g:panels", "pt.panelsTitle", "▦", "g:panels"),
-      platLeaf("g:assistant", "ai.title", "✧", "g:assistant"),
-      platLeaf("u:share", "pt.navShare", "↗", "u:share"),
-      platLeaf("u:menu", "pt.navMenu", "☰", "u:menu"),
-      platLeaf("u:material", "pt.navMaterial", "▣", "u:material"),
-      platLeaf("u:card", "pt.navCard", "▤", "u:card"),
+      // 入群审批 / 群规审核：与旧版弹窗一致，导航里是单个项，子页用组件内部 subNav 切换。
+      platLeaf("g:join", "pt.navJoin", "⌑", "g:join", { joinTab: "auto" }),
+      platLeaf("g:moderation", "pt.navModeration", "✦", "g:moderation", { modTab: "config" }),
     ],
   },
   {
@@ -165,6 +142,16 @@ const NAV_TREE: NavGroup[] = [
   },
 ];
 
+/**
+ * 频道管理界面暂不展示：从导航树里过滤掉「频道管理」整组，
+ * 频道能力本身（后端审核 / 关键词 / 消息处理 / AI 助手频道 API）全部保留。
+ * 需要重新放出界面时把这里改回 NAV_TREE_ALL 即可。
+ */
+const GUILD_UI_VISIBLE = false;
+const NAV_TREE: NavGroup[] = GUILD_UI_VISIBLE
+  ? NAV_TREE_ALL
+  : NAV_TREE_ALL.filter((g) => g.id !== "guild");
+
 interface NavPath {
   group: NavGroup;
   parent?: Leaf;
@@ -210,7 +197,6 @@ export function ConsoleDialog(props: {
   const { rpcCall, bot, groups, onClose, configPanes, connectionPane, onConfigSaved } = props;
   useLocale();
   const [selected, setSelected] = React.useState("overview");
-  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
   /** 群聊管理当前选中的群：切到别的菜单再回来仍保留，避免每次重新选群。 */
   const [pickedGroup, setPickedGroup] = React.useState("");
   /** 弹窗顶部悬浮提示：汇聚内部所有功能（群聊/频道/定时/清单等）的错误与成功提示。 */
@@ -441,17 +427,8 @@ export function ConsoleDialog(props: {
   };
 
   const pickLeaf = (item: Leaf) => {
-    if (item.children?.length) {
-      const willExpand = !expanded.has(item.id);
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
-        return next;
-      });
-      if (willExpand) setSelected(item.children[0].id);
-    } else {
-      setSelected(item.id);
-    }
+    // 有子项：左侧只保留父项，点击直接选中第一个子项，子项在右侧顶部横向 tab 切换。
+    setSelected(item.children?.length ? item.children[0].id : item.id);
   };
 
   return h("div", {
@@ -485,32 +462,17 @@ export function ConsoleDialog(props: {
                 h("span", { className: "qbot-consoleMenuIcon", "aria-hidden": "true" }, g.icon),
                 h("span", null, t(g.label))),
               ...g.items.map((item) => {
-                const hasChildren = !!item.children?.length;
+                // 子项不再在左侧竖排展开，统一移到右侧顶部横向 tab；左侧只显示父项。
                 const isBranchActive = selected === item.id || item.children?.some((c) => c.id === selected);
-                const isOpen = expanded.has(item.id);
-                return h("div", { className: "qbot-consoleMenuNode", key: item.id },
-                  h("button", {
-                    type: "button",
-                    className: `qbot-consoleMenuItem${isBranchActive ? " is-active" : ""}`,
-                    "aria-current": selected === item.id ? "page" : undefined,
-                    "aria-expanded": hasChildren ? isOpen : undefined,
-                    onClick: () => pickLeaf(item),
-                  },
-                    h("span", { className: "qbot-consoleMenuIcon", "aria-hidden": "true" }, item.icon),
-                    h("span", { className: "qbot-consoleMenuLabel" }, t(item.label)),
-                    hasChildren ? h("span", {
-                      className: `qbot-consoleMenuCaret${isOpen ? " is-open" : ""}`, "aria-hidden": "true",
-                    }, "›") : null),
-                  hasChildren && isOpen
-                    ? h("div", { className: "qbot-consoleSubMenu" },
-                        ...item.children!.map((child) =>
-                          h("button", {
-                            key: child.id, type: "button",
-                            className: `qbot-consoleMenuItem qbot-consoleSubItem${selected === child.id ? " is-active" : ""}`,
-                            "aria-current": selected === child.id ? "page" : undefined,
-                            onClick: () => setSelected(child.id),
-                          }, h("span", null, t(child.label)))))
-                    : null);
+                return h("button", {
+                  key: item.id,
+                  type: "button",
+                  className: `qbot-consoleMenuItem${isBranchActive ? " is-active" : ""}`,
+                  "aria-current": isBranchActive ? "page" : undefined,
+                  onClick: () => pickLeaf(item),
+                },
+                  h("span", { className: "qbot-consoleMenuIcon", "aria-hidden": "true" }, item.icon),
+                  h("span", { className: "qbot-consoleMenuLabel" }, t(item.label)));
               })))),
       h("div", { className: `qbot-consoleContent${isFill ? " is-fill" : ""}${view.kind === "overview" ? " is-overview" : ""}` },
         h("div", { className: "qbot-consolePaneHead" },
@@ -520,5 +482,16 @@ export function ConsoleDialog(props: {
               path.parent ? h("span", null, h("i", null, "›"), t(path.parent.label)) : null,
               path.parent ? h("span", null, h("i", null, "›"), t(path.leaf.label)) : null),
             h("h3", null, t(path.leaf.label)))),
+        // 子项从左侧竖排移到右侧顶部横向 tab（如「入群审批」「群规审核」的子页）。
+        path.parent?.children?.length
+          ? h("div", { className: "qbot-consoleSubTabs", "aria-label": t(path.parent.label) },
+              ...path.parent.children.map((child) =>
+                h("button", {
+                  key: child.id, type: "button",
+                  className: `qbot-consoleSubTab${selected === child.id ? " is-active" : ""}`,
+                  "aria-current": selected === child.id ? "page" : undefined,
+                  onClick: () => setSelected(child.id),
+                }, t(child.label))))
+          : null,
         h("div", { className: "qbot-consolePaneBody" }, content())))));
 }

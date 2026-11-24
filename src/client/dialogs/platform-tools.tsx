@@ -273,7 +273,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     escalateSteps: number[];
     escalateCap: number;
     strikeWindowDays: number;
-    strictness: "lenient" | "normal" | "strict";
+    strictness: "lenient";
   }
   interface ModLog {
     at: string; appId: string; groupId: string; sender: string; senderName: string;
@@ -353,6 +353,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
     if (!res.ok) throw new Error(errText(res));
     const cfg = { ...emptyModConfig(), ...(val(res)?.config ?? {}) } as ModConfig;
     cfg.durations = normalizeDuration(cfg.durations);
+    cfg.strictness = "lenient";
     setModCfg(cfg);
     setModRulesText((cfg.rules ?? []).join("\n"));
     setModWhiteText((cfg.whitelist ?? []).join("\n"));
@@ -376,7 +377,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
       .map((n) => Math.min(43200, Math.round(n))).slice(0, 20),
     escalateCap: Math.max(1, Math.min(43200, Math.round(Number(modCfg.escalateCap) || 43200))),
     strikeWindowDays: Math.max(1, Math.min(3650, Math.round(Number(modCfg.strikeWindowDays) || 30))),
-    strictness: modCfg.strictness === "strict" || modCfg.strictness === "normal" ? modCfg.strictness : "lenient",
+    strictness: "lenient",
   });
   const saveModeration = () => void run("mod.save", async () => {
     if (!group) throw new Error(t("pt.groupNoSelect"));
@@ -947,7 +948,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
             h("strong", null, modEscPreview())))
       : h("div", { className: "qbot-ptModEscOff" }, t("pt.modEscOffHint")));
 
-  /** 步骤 2：违规类型勾选 + 判定尺度（宽松/标准/严格）。 */
+  /** 步骤 2：违规类型勾选。 */
   const modCatsStep = modStep("2", t("pt.modSecCats"), "",
     h("div", { className: "qbot-ptModCats" },
       MOD_CATS.map((cat) => h("label", { key: cat, className: "qbot-ptModCat" },
@@ -962,17 +963,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
                 : [...c.categories, cat],
             }));
           } }),
-        h("span", null, t(`pt.modCat.${cat}`))))),
-    h("div", { className: "qbot-ptModStrict" },
-      h("div", { className: "qbot-ptModStrictLabel" }, t("pt.modStrictness")),
-      h("div", { className: "qbot-ptModRadioGroup" },
-        (["lenient", "normal", "strict"] as const).map((s) =>
-          h("label", { key: s, className: "qbot-ptModRadio" },
-            h("input", { type: "radio", name: "modStrictness", className: "qbot-radio",
-              checked: modCfg.strictness === s, disabled: !canAdmin,
-              onChange: () => setModCfg((c) => ({ ...c, strictness: s })) }),
-            h("span", null, t(`pt.modStrict.${s}`))))),
-      h("div", { className: "qbot-ptFieldHint" }, t("pt.modStrictHint"))));
+        h("span", null, t(`pt.modCat.${cat}`))))));
 
   /** 审核配置 pane：Hero 概览 + 两个逻辑分组 + 沉底保存。 */
   const modConfigPane = h(React.Fragment, null,
@@ -1636,26 +1627,18 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
       ) },
   ];
 
-  // 左侧导航两大组：群聊（含执行记录）/ 通用。图标仅装饰，不参与本地化。
+  // 左侧导航只展示：群资料 / 入群审批 / 群规审核（与新版控制台一致）。
+  // 其余入口不展示，内容面板保留、能力不变。图标仅装饰，不参与本地化。
+  const GROUP_NAV_KEYS = ["info", "join", "moderation"];
   const NAV_GROUPS: Array<{
     title: string; items: Array<{ key: string; label: string; icon: string }>;
   }> = [
     {
       title: t("pt.catGroup"),
-      items: [
-        ...groupPanes.map((p, i) => ({
-          key: `g:${p.key}`, label: p.label,
-          icon: ["◈", "♙", "⊘", "⌑", "✦", "▦"][i] ?? "•",
-        })),
-        { key: "g:assistant", label: t("ai.title"), icon: "✧" },
-      ],
-    },
-    {
-      title: t("pt.catGeneral"),
-      items: generalPanes.map((p, i) => ({
-        key: `u:${p.key}`, label: p.label,
-        icon: ["↗", "☰", "▣", "▤"][i] ?? "•",
-      })),
+      items: groupPanes
+        .map((p, i) => ({ ...p, icon: ["◈", "♙", "⊘", "⌑", "✦", "▦"][i] ?? "•" }))
+        .filter((p) => GROUP_NAV_KEYS.includes(p.key))
+        .map((p) => ({ key: `g:${p.key}`, label: p.label, icon: p.icon })),
     },
   ];
   const isGroupScope = navKey.startsWith("g:");

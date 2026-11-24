@@ -1025,9 +1025,6 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 /* ── AI 群规审核：违规类型 + 配置/记录双 tab ───────────────────────────── */
 .qbot-ptModCats { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .qbot-ptModCat { min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dsw-alias-label-primary, #1f2329); cursor: pointer; }
-/* 判定尺度（宽松/标准/严格）：分类下方的一组单选按钮。 */
-.qbot-ptModStrict { min-width: 0; display: flex; flex-direction: column; gap: 7px; margin-top: 11px; padding-top: 11px; border-top: 1px dashed var(--dsw-alias-border-l1, #eef0f3); }
-.qbot-ptModStrictLabel { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
 .qbot-ptModPane { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 /* 配置 Hero：状态总览卡，开启时用品牌色渐变强调。 */
 .qbot-ptModHero { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 15px 17px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 2px 10px rgb(31 35 41 / 4%); }
@@ -1063,15 +1060,6 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-ptModCheck:has(.qbot-checkbox:checked) { border-color: color-mix(in srgb, var(--qbot-business) 45%, transparent); background: color-mix(in srgb, var(--qbot-business) 6%, var(--dsw-alias-bg-layer-1, #fff)); }
 .qbot-ptModCheck > span { font-size: 12.5px; color: var(--dsw-alias-label-secondary, #646a73); }
 .qbot-ptModCheck:has(.qbot-checkbox:checked) > span { color: var(--qbot-business); font-weight: 600; }
-/* 单选框组：Element UI 风格圆点单选，横排可换行。 */
-.qbot-ptModRadioGroup { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
-.qbot-ptModRadio { min-width: 0; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12.5px; color: var(--dsw-alias-label-primary, #1f2329); }
-.qbot-radio { appearance: none; flex: none; width: 16px; height: 16px; margin: 0; border: 1.5px solid var(--dsw-alias-border-l2, #c9cdd4); border-radius: 50%; background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; position: relative; transition: border-color .15s ease; }
-.qbot-radio:hover { border-color: var(--qbot-business); }
-.qbot-radio:checked { border-color: var(--qbot-business); }
-.qbot-radio:checked::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--qbot-business); }
-.qbot-radio:focus-visible { outline: 2px solid color-mix(in srgb, var(--qbot-business) 45%, transparent); outline-offset: 2px; }
-.qbot-radio:disabled { cursor: not-allowed; opacity: .55; }
 .qbot-ptModStatus { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
 .qbot-ptModStatusDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .qbot-ptModStatus.is-on { color: var(--dsw-alias-state-success-primary, #20a162); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #20a162) 12%, transparent); }
@@ -1698,14 +1686,6 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-consoleMenuItem.is-active { background: var(--dsw-alias-bg-layer-1, #fff); color: var(--qbot-blue, #1677ff); font-weight: 650; box-shadow: 0 1px 3px rgb(31 35 41 / 8%); }
 .qbot-consoleMenuIcon { flex: none; width: 18px; text-align: center; opacity: .85; }
 .qbot-consoleMenuLabel { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.qbot-consoleMenuCaret { flex: none; width: 12px; text-align: center; color: var(--dsw-alias-label-tertiary, #8f959e); transition: transform .15s ease; }
-/* 三级：子 Tab——再缩进、无图标、圆点连接线、更轻的字号 */
-.qbot-consoleSubMenu { margin: 2px 0 5px 36px; padding-left: 11px; border-left: 1px solid var(--dsw-alias-border-l2, #dfe1e5); }
-.qbot-consoleSubItem { padding: 5px 9px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary, #8f959e); }
-.qbot-consoleSubItem::before { content: ""; display: inline-block; width: 4px; height: 4px; margin-right: 9px; vertical-align: middle; border-radius: 50%; background: var(--dsw-alias-label-placeholder, #bbbfc4); }
-.qbot-consoleSubItem:hover { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
-.qbot-consoleSubItem.is-active { background: transparent; color: var(--qbot-blue, #1677ff); font-weight: 600; box-shadow: none; }
-.qbot-consoleSubItem.is-active::before { background: var(--qbot-blue, #1677ff); }
 .qbot-consoleContent { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 30px 28px; }
 /* 运营总览：单屏自适应，压缩留白让所有区块一屏放得下，不出现外层滚动条。 */
 .qbot-consoleContent.is-overview { display: flex; flex-direction: column; overflow: hidden; padding: 18px 26px 20px; }
@@ -1715,6 +1695,11 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-consoleContent.is-fill { display: flex; flex-direction: column; overflow: hidden; }
 .qbot-consoleContent.is-fill .qbot-consolePaneBody { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .qbot-consolePaneHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+/* 右侧顶部横向子 tab：替代原来左侧竖排的子菜单，定高 flex 列的直接子元素需 flex:none。 */
+.qbot-consoleSubTabs { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -4px 0 16px; padding: 4px; border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.qbot-consoleSubTab { flex: none; padding: 6px 13px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; transition: background .14s ease, color .14s ease, box-shadow .14s ease; }
+.qbot-consoleSubTab:hover { color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.qbot-consoleSubTab.is-active { color: var(--qbot-blue, #1677ff); background: var(--dsw-alias-bg-layer-1, #fff); font-weight: 650; box-shadow: 0 1px 3px rgb(31 35 41 / 8%); }
 .qbot-consoleCrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11.5px; }
 .qbot-consoleCrumb i { color: var(--dsw-alias-label-placeholder, #bbbfc4); font-style: normal; }
 .qbot-consoleHeadActions { display: flex; align-items: center; gap: 8px; flex: none; }
@@ -1877,11 +1862,11 @@ select.qbot-input { cursor: pointer; font-family: inherit; }
 .qbot-consoleContent.is-fill .qbot-cmCode { overflow: auto !important; }
 .qbot-consoleContent.is-fill .qbot-cmHelpScroll { overflow-y: auto !important; overscroll-behavior: contain !important; }
 .qbot-consoleContent.is-fill .qbot-cmIssues { overflow-y: auto !important; }
-/* 内嵌模式下，频道/群聊组件只出内容——导航由控制台左侧唯一的三级树接管。 */
+/* 内嵌模式下，导航由控制台左侧树接管，隐藏组件自带导航。
+   群聊的入群审批 / 群规审核沿用各自组件内部的 subNav（与旧版弹窗一致），故不隐藏 qbot-ptSubNav。 */
 .qbot-consoleContent .qbot-gvLayout.is-embedded .qbot-gvNav,
 .qbot-consoleContent .qbot-gvLayout.is-embedded .qbot-gvSubTabs,
-.qbot-consoleContent .qbot-ptLayout.is-embedded .qbot-ptNav,
-.qbot-consoleContent .qbot-ptLayout.is-embedded .qbot-ptSubNav { display: none !important; }
+.qbot-consoleContent .qbot-ptLayout.is-embedded .qbot-ptNav { display: none !important; }
 .qbot-consoleContent .qbot-gvLayout.is-embedded .qbot-gvContent,
 .qbot-consoleContent .qbot-ptLayout.is-embedded .qbot-ptContent { padding: 0; }
 .qbot-consoleEntry { max-width: 460px; margin: 48px auto; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }

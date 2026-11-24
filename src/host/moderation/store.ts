@@ -50,8 +50,8 @@ export interface ModerationConfig extends EscalationSettings {
   durations: MuteDurationRange;
   /** 免审成员 openid（命中直接跳过，不调模型）。 */
   whitelist: string[];
-  /** 判定尺度：lenient 宽松（默认，只判明确违规）/ normal 标准 / strict 严格。 */
-  strictness: "lenient" | "normal" | "strict";
+  /** 判定尺度：固定宽松（只判明确违规）；保留字段兼容旧配置。 */
+  strictness: "lenient";
   /** 累进窗口天数：连续 N 天无新违规即从第 1 次重算（默认 30）。 */
   strikeWindowDays: number;
 }
@@ -244,8 +244,8 @@ export function normalizeConfig(raw: unknown): ModerationConfig {
     whitelist: Array.isArray(src.whitelist)
       ? src.whitelist.filter((o): o is string => typeof o === "string" && o.trim().length > 0).map((o) => o.trim())
       : d.whitelist,
-    // 判定尺度：老配置没有该字段，默认宽松（减少误判），用户可在设置页调整。
-    strictness: src.strictness === "normal" || src.strictness === "strict" ? src.strictness : d.strictness,
+    // 判定尺度固定宽松：忽略旧配置里可能存过的 standard/strict，减少误判。
+    strictness: "lenient",
     // 叠加惩罚：老配置没有这些字段，回退默认（开启 + 线性系数 1 = 原来的 × 次数），行为不变。
     escalateEnabled: typeof src.escalateEnabled === "boolean" ? src.escalateEnabled : d.escalateEnabled,
     escalateMode: (["linear", "geometric", "custom"] as const).includes(src.escalateMode as EscalateMode)

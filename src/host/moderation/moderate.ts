@@ -21,15 +21,11 @@ export const CATEGORY_DEFS: Record<string, string> = {
   flood: "刷屏骚扰：短时间大量重复消息、无意义灌水、故意刷屏干扰他人",
 };
 
-/** 审核尺度：宽松（默认，只判明确违规）/ 标准 / 严格。老配置缺省视为宽松。 */
-export type Strictness = "lenient" | "normal" | "strict";
+/** 判定尺度固定宽松：只判明确违规；保留类型兼容旧配置字段。 */
+export type Strictness = "lenient";
 
-/** 不同尺度下注入模型的判定门槛说明。 */
-const STRICTNESS_RULES: Record<Strictness, string> = {
-  lenient: "【判定尺度：宽松】只有消息明确、无歧义地违反规则时才判违规。任何拿不准、有多种理解、可能是玩笑/调侃/情绪话的，一律 none。宁可放过十句，不可错杀一句。",
-  normal: "【判定尺度：标准】按规则明确含义判断，明显违规照常处理；对存在合理无害解释的语境仍应从宽判 none。",
-  strict: "【判定尺度：严格】按规则字面从严判断，只要内容命中违规表述即判违规，语境宽容度最低。",
-};
+/** 注入模型的判定门槛说明（固定宽松）。 */
+const STRICTNESS_RULE = "【判定尺度：宽松】只有消息明确、无歧义地违反规则时才判违规。任何拿不准、有多种理解、可能是玩笑/调侃/情绪话的，一律 none。宁可放过十句，不可错杀一句。";
 
 /** 分类中文名（群内 @ 通知与日志用；与客户端 pt.modCat.* 文案对应）。 */
 export const CATEGORY_LABELS: Readonly<Record<string, string>> = Object.freeze({
@@ -56,11 +52,10 @@ export function moderationSystemPrompt(config: ModerationConfig): string {
     .filter((c) => CATEGORY_DEFS[c])
     .map((c) => `- ${c}：${CATEGORY_DEFS[c]}`);
   const rules = config.rules.filter(Boolean);
-  const strictness = config.strictness === "strict" || config.strictness === "normal" ? config.strictness : "lenient";
   return [
     "你是 QQ 群的消息审核助手。判断用户消息是否违反下列规则，并给出严重程度等级。",
     "",
-    STRICTNESS_RULES[strictness],
+    STRICTNESS_RULE,
     "",
     "【审核原则·必须遵守】",
     "- 只依据下面列出的规则判断，不要引入你自己的额外标准。",
