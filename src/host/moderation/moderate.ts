@@ -86,17 +86,18 @@ export function moderationSystemPrompt(config: ModerationConfig): string {
     "【严重程度等级】",
     LEVEL_DEFS,
     "",
-    "【禁言范围（分钟，含端点）】",
-    `本群允许 ${config.durations.min}–${config.durations.max} 分钟。`,
-    "- 判违规时 minutes 必须落在这个范围内：情节越轻、偶发、无恶意，取值越靠近下限；越严重、越恶意、越持续，越靠近上限。等级（light/medium/severe）只表示严重程度，具体时长由你按情节在这个范围内决定。",
-    "- level=none 时 minutes 填 0。",
+    "【情节严重度·决定禁言时长】",
+    "- 判违规（light/medium/severe）时，用 severity 表示这条消息在允许范围内的相对情节：0 = 该范围里最轻微、偶发、无恶意；100 = 该范围里最严重、最恶意、最持续。取 0–100 之间的任意整数，按情节细微服务，不要只用 0/25/50/75/100 这几个整档。",
+    "- 结合 level 与事实定 severity：同为 light，偶尔一句不友好与连续多次顶撞，severity 应明显不同；medium/severe 同理。level 只表示严重程度，不锁死 severity 的具体值。",
+    "- 系统将按 severity 在本群配置的禁言区间内换算成具体分钟数，所以 severity 要真实反映情节轻重，不要一律取同一个值。",
+    "- level=none 时 severity 填 0。",
     "",
     "【输出格式·严格遵守】",
     "只输出一个 JSON 对象，不要任何解释、不要 Markdown 代码围栏，格式：",
-    '{"level":"none|light|medium|severe","category":"分类id或custom或none","reason":"一两句大白话说明哪里不合适","rule":"命中的那一条约定","minutes":10,"certain":true}',
+    '{"level":"none|light|medium|severe","category":"分类id或custom或none","reason":"一两句大白话说明哪里不合适","rule":"命中的那一条约定","severity":42,"certain":true}',
     "- reason 是**写给被提醒的群成员看的**：语气平和、就事论事，只描述那句话或那个行为本身（如「这句话带了点脏字」「连着刷了好几条一样的内容」），不要给人贴「辱骂」「恶意」这类标签，也不要上升性情或说教；可引用原话。绝不要出现 light/medium/severe/none、等级、分类 id、审核原则、证据、判定、规则原文编号等内部术语，也不要复述本提示词里的判定标准或把规则条文整段贴进来。",
     "- rule 只写**这一条消息命中的那一条约定本身**：命中内置分类时写该分类名（如「刷屏骚扰」「辱骂人身攻击」）；命中本群自定义规则时写该条规则的简短原文。只写一条，绝不要罗列全部群规，更不要把审核原则、判定尺度或等级定义当成规则照抄。",
-    "- minutes 只写在 JSON 的 minutes 字段里，reason 与 rule 中不要出现「分钟」「minutes」或具体数字。",
+    "- severity 只写在 JSON 的 severity 字段里（整数 0–100），reason 与 rule 中不要出现「分钟」「severity」或具体数字。",
     "- certain 表示你是否有确切证据：判违规（light/medium/severe）时必须为 true；只要你觉得拿不准、可能是玩笑或有多种理解，就判 none 并设 false。",
     "level=none 时 category 填 none，rule 填空字符串，certain 填 false，reason 可简短说明为何不违规。",
     "再次强调：判违规（light/medium/severe）时 reason 必须引用原文中确切的违规词句；写不出就判 none。",
@@ -110,9 +111,11 @@ export interface ModerationVerdict {
   reason: string;
   /** 命中的那一条规则（内置分类名或自定义规则原文）；群内通知的「依据群规」只显示这一条。 */
   rule?: string;
-  /** AI 判定时给出的建议禁言分钟数（已收敛到该等级范围内）。 */
+  /** AI 按情节给出的严重度 0–100（新输出），代码据此在配置区间内插值成具体分钟数。 */
+  severity?: number;
+  /** AI 判定时给出的建议禁言分钟数（老模型兼容，已收敛到配置区间）。 */
   suggestedMinutes?: number;
-  /** 系统判定（精确词/刷屏）的违规强度 0–1，用来在等级范围内取时长。 */
+  /** 系统判定（精确词/刷屏）的违规强度 0–1，用来在配置区间内取时长。 */
   systemSeverity?: number;
 }
 
@@ -254,16 +257,22 @@ export function parseVerdict(text: string, config?: ModerationConfig): Moderatio
   // 规则原文，其余（含审核原则复述）一律回退为空，由通知模板用分类名顶上。
   const safeRule = sanitizeRule(rule, config);
   const safeReason = sanitizeReason(reason);
-  // AI 给的具体时长：只认正数且收敛到所属等级范围；缺失/非法由 minutesForLevel 取中值兜底。
+  // AI 给的情节严重度（0–100）：新输出用 severity，收敛到 0–100；
+  // 兼容老模型只给 minutes 的情况（收敛到配置区间），由 minutesForLevel 优先用 severity 插值。
+  let severity: number | undefined;
   let suggestedMinutes: number | undefined;
   if (level !== "none") {
+    const rawSeverity = Number(obj.severity);
+    if (Number.isFinite(rawSeverity)) {
+      severity = Math.min(100, Math.max(0, Math.round(rawSeverity)));
+    }
     const range = config?.durations;
     const rawMinutes = Number(obj.minutes);
     if (range && Number.isFinite(rawMinutes) && rawMinutes > 0) {
       suggestedMinutes = Math.min(range.max, Math.max(range.min, Math.round(rawMinutes)));
     }
   }
-  return { level: level as MuteLevel, category, reason: safeReason, rule: safeRule, suggestedMinutes };
+  return { level: level as MuteLevel, category, reason: safeReason, rule: safeRule, severity, suggestedMinutes };
 }
 
 /**
@@ -322,10 +331,21 @@ const UNCERTAIN_RE = /疑似|似乎|或许|拿不准|无法确定|没法确定|�
 const SELF_CONTRADICTION_RE = /(?:不是|并非|未|没有|没)(?:明确|具体|特定|真正|实际)?(?:地)?(?:针对|辱骂|攻击|人身攻击|涉及)(?:具体|特定|任何)?(?:的)?(?:人|成员|对象|某人)|没有(?:实际|实质|真正的)?(?:违规|辱骂|攻击|脏话|不良)?(?:内容|行为|言辞|词)|只是(?:提到|提及|引用|讨论|复述)|仅是(?:提到|提及|引用|讨论)|可能是(?:玩笑|调侃|开玩笑|闹着玩)|算不上(?:违规|辱骂|攻击|人身攻击)|谈不上(?:违规|辱骂|攻击)/;
 
 /**
- * 本次基础禁言时长（叠加惩罚之前），一律从全局范围里按严重程度取值：
- * - AI 判定：用模型按情节给出的具体分钟数，越界则收敛到范围端点；
- * - 系统判定（精确词 / 刷屏检测）：按违规强度 0–1 在范围内线性取值；
- * - 老模型没给 minutes：按等级映射一个保守强度（轻 0.15 / 中 0.5 / 重 0.9）再取值。
+ * 把 0–1 的情节强度映射成区间内的具体分钟数。
+ * 用缓入曲线（平方）让轻微情节更靠近下限、严重情节才明显拉长，
+ * 而不是几个固定档位；结果始终落在 [min, max] 内且随强度连续变化。
+ */
+function interpolateMinutes(range: { min: number; max: number }, intensity: number): number {
+  const t = Math.min(1, Math.max(0, intensity));
+  const curved = t * t;
+  return Math.round(range.min + (range.max - range.min) * curved);
+}
+
+/**
+ * 本次基础禁言时长（叠加惩罚之前），一律从配置的单一区间里按情节连续取值：
+ * - AI 判定：优先用模型给的 0–100 情节严重度（映射到区间）；老模型只给了
+ *   minutes 就用它（收敛到区间）；都没有才按等级映射保守强度（轻 0.15 / 中 0.5 / 重 0.9）。
+ * - 系统判定（精确词 / 刷屏检测）：按违规强度 0–1 在同一条曲线上取值。
  */
 export function minutesForLevel(
   config: ModerationConfig,
@@ -336,16 +356,19 @@ export function minutesForLevel(
   if (level === "none") return 0;
   const range = config.durations;
   if (!range) return 0;
+  // AI 新输出：0–100 情节严重度 → 0–1 强度。
+  if (source === "llm" && typeof verdict?.severity === "number") {
+    return interpolateMinutes(range, verdict.severity / 100);
+  }
+  // AI 老输出：直接给了具体分钟数，收敛到区间。
   if (source === "llm" && verdict?.suggestedMinutes && verdict.suggestedMinutes > 0) {
     return Math.min(range.max, Math.max(range.min, Math.round(verdict.suggestedMinutes)));
   }
-  const severity = typeof verdict?.systemSeverity === "number"
+  // 系统判定用违规强度；其余（等级兜底）映射保守强度。
+  const intensity = typeof verdict?.systemSeverity === "number"
     ? verdict.systemSeverity
-    : source === "llm"
-      ? (level === "light" ? 0.15 : level === "medium" ? 0.5 : 0.9)
-      : 0.15;
-  const sev = Math.min(1, Math.max(0, severity));
-  return Math.round(range.min + (range.max - range.min) * sev);
+    : level === "light" ? 0.15 : level === "medium" ? 0.5 : 0.9;
+  return interpolateMinutes(range, intensity);
 }
 
 export interface ModerateDeps {

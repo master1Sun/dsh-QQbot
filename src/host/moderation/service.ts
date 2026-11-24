@@ -59,10 +59,8 @@ function noticeMarkdown(params: {
   strikeCount: number;
   windowDays: number;
   escalateOn: boolean;
-  /** 近窗口内的历史违规记录（不含本次）；有多条时公示最近 5 条。 */
-  history?: ModerationLog[];
 }): string {
-  const { sender, category, reason, rule, minutes, strikeCount, windowDays, escalateOn, history = [] } = params;
+  const { sender, category, reason, rule, minutes, strikeCount, windowDays, escalateOn } = params;
   const clean = (value: string, max = 160) =>
     String(value ?? "").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) || "—";
   const categoryName = CATEGORY_LABELS[category] ?? "本群公约";
@@ -80,65 +78,12 @@ function noticeMarkdown(params: {
     `> 违规次数：近 ${windowDays} 天第 ${strikeCount} 次`,
     `> 处罚计算：${penalty}`,
   ];
-  // 多次违规：把最近 5 条历史记录一并公示，反复提醒。
-  if (history.length) {
-    lines.push("", `这是近 ${windowDays} 天第 ${strikeCount} 次违规，近期记录一并公示：`, ...historyLines(history));
-  }
   lines.push(
     "",
     escalateOn
       ? "本群对违反公约的消息一律按群规处理，反复违反会逐次加重。请大家遵守约定，一起维护群聊氛围。"
       : "本群对违反公约的消息一律按群规处理。请大家遵守约定，一起维护群聊氛围。",
   );
-  return lines.join("\n");
-}
-
-/** 处罚日志的 at 是 UTC ISO，转成北京时间 MM-DD HH:mm 给群里看。 */
-function logStamp(at: string): string {
-  const t = Date.parse(at);
-  if (!Number.isFinite(t)) return "—";
-  const d = new Date(t + 8 * 3600_000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-}
-
-/** 违规历史公示行：最近 5 条，最多 5 条（本次日志在通知后才落盘，不含本次）。 */
-function historyLines(history: ModerationLog[]): string[] {
-  const clean = (value: string, max = 40) =>
-    String(value ?? "").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) || "不符合群公约";
-  return history.slice(0, 5).map((item) => {
-    const category = CATEGORY_LABELS[item.category] ?? "本群公约";
-    const duration = item.minutes > 0 ? `禁言 ${durationText(item.minutes)}` : "提醒";
-    return `> ${logStamp(item.at)} · ${category} · ${duration} · ${clean(item.reason)}`;
-  });
-}
-
-/**
- * 禁言未成功时的群内回执：平台不允许禁言管理员/群主/机器人，
- * 就把该成员近 30 天的违规记录公示给群里，反复提醒以身作则——
- * 对管理者的要求应当高于普通成员。具体报错仍只写后台日志。
- */
-function warningMarkdown(params: {
-  sender: string;
-  strikeCount: number;
-  windowDays: number;
-  history: ModerationLog[];
-}): string {
-  const { sender, strikeCount, windowDays, history } = params;
-  const at = `<qqbot-at-user id="${sender.replace(/["<>]/g, "")}" />`;
-  const lines = [
-    `${at} 群规对所有人一视同仁，管理员更应以身作则，不要知法犯法。`,
-    history.length
-      ? `这是你近 ${windowDays} 天第 ${strikeCount} 次违规，过往记录一并公示：`
-      : `这是你近 ${windowDays} 天第 ${strikeCount} 次违规，请以此为戒：`,
-    "",
-  ];
-  if (history.length) {
-    lines.push(...historyLines(history));
-  } else {
-    lines.push(`> 本次是近 ${windowDays} 天的第 1 次记录。`);
-  }
-  lines.push("", "请以身作则，给群里做个好样子。");
   return lines.join("\n");
 }
 
@@ -194,8 +139,10 @@ export class ModerationService {
       const word = norm(raw);
       if (!word || word.length > 12) continue; // 长规则是自然语言，交给模型按语境判断
       if (msg === word) {
-        // 精确整条命中禁词，情节最轻：取该等级范围的下限。
-        return { level: "light", category: "custom", reason: `消息内容命中本群禁止词「${raw}」`, rule: raw, systemSeverity: 0 };
+        // 精确整条命中禁词：按短词重复度给一个偏低的情节强度，在区间内连续取值，不死取下限。
+        // 词越短、越像刷屏数字，强度略高；上限仍压在 light 区间内偏轻的位置。
+        const intensity = 0.12 + Math.min(0.12, word.length * 0.02);
+        return { level: "light", category: "custom", reason: `消息内容命中本群禁止词「${raw}」`, rule: raw, systemSeverity: intensity };
       }
     }
     return null;
@@ -393,8 +340,9 @@ export class ModerationService {
       }
     }
 
-    // 先执行禁言，再按结果决定群内回执：
-    // 成功才发完整的五标签处置回执；失败只发警告，具体报错仅落后台日志。
+    // 先执行禁言，再按结果决定是否发群回执：
+    // 只有普通成员被成功禁言才在群里 @ 本人发回执；
+    // 管理员/群主/机器人等被平台拒绝禁言时不在群里发任何消息，只落后台处罚记录。
     let muteError: string | undefined;
     if (minutes > 0 && sender) {
       try {
@@ -406,33 +354,18 @@ export class ModerationService {
       }
     }
 
-    // 多次违规时翻出该成员近窗口内的违规记录公示：普通成员附在处置回执后，
-    // 平台拒绝禁言（多为管理员/群主）则走警告回执公示。两者都只列最近 5 条。
-    let history: ModerationLog[] = [];
-    if (sender && strikeCount > 1) {
-      try {
-        const cutoff = Date.now() - Math.max(1, cfg.strikeWindowDays) * 86_400_000;
-        history = (await this.store.listLogs({ appId: bot.appId, groupId, limit: 300 }))
-          .filter((l) => l.sender === sender && Date.parse(l.at) >= cutoff);
-      } catch (error) {
-        this.#logger.warn("[dsh-qqbot] AI 审核查询历史违规记录失败:", error instanceof Error ? error.message : error);
-      }
-    }
-
-    if (sender) {
-      const notice = muteError
-        ? warningMarkdown({ sender, strikeCount, windowDays: cfg.strikeWindowDays, history })
-        : noticeMarkdown({
-            sender,
-            category: verdict.category,
-            reason: verdict.reason,
-            rule: verdict.rule || "",
-            minutes,
-            strikeCount,
-            windowDays: cfg.strikeWindowDays,
-            escalateOn: cfg.escalateEnabled,
-            history,
-          });
+    // 只有禁言成功才发群回执；禁言失败（管理员/群主/机器人）一律不在群里出声。
+    if (sender && !muteError) {
+      const notice = noticeMarkdown({
+        sender,
+        category: verdict.category,
+        reason: verdict.reason,
+        rule: verdict.rule || "",
+        minutes,
+        strikeCount,
+        windowDays: cfg.strikeWindowDays,
+        escalateOn: cfg.escalateEnabled,
+      });
       try {
         await bot.client.sendMarkdown({ scope: "group", openid: groupId }, notice);
       } catch (error) {
