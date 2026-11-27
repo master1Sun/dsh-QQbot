@@ -4,7 +4,8 @@
  * - token：POST tokenUrl，JSON { appId, clientSecret } → { access_token, expires_in }。
  * - 发送：POST {apiBase}/v2/users/{openid}/messages 或 /v2/groups/{openid}/messages。
  *   Authorization 头使用 QQ 机器人 OpenAPI v2 约定的 `QQBot <access_token>`（注意是 QQBot，不是 QQ）。
- * - 被动回复携带 msg_id + msg_seq（群 5 分钟窗口内 5 次 / 单聊 60 分钟 4 次）；
+ * - 被动回复携带 msg_id + msg_seq（群 60 分钟内 5 次，机器人为该群群主/管理员时 50 次；
+ *   单聊 60 分钟内 4 次。窗口与次数上限的唯一事实来源见 shared/passive-reply.ts）；
  *   主动消息省略 msg_id（需开启「机器人主动在群聊内发言」）。
  * - sendReply：优先 Markdown（msg_type=2），单条被平台拒绝（40034090 等）时
  *   该分片回退纯文本（msg_type=0），避免无 Markdown 权限的机器人回复失败。
@@ -28,11 +29,13 @@ export interface QqApiClientOptions {
   getSdk?: () => QQBot | null;
 }
 
-/** QQ 官方被动回复次数上限。 */
-export const PASSIVE_REPLY_LIMIT: Record<ReplyTarget["scope"], number> = Object.freeze({
-  c2c: 4,
-  group: 5,
-});
+/**
+ * QQ 官方被动回复次数上限（默认场景）。
+ * 已迁移到 shared/passive-reply.ts 统一维护——群主/管理员群的 50 次需要配合群内角色判定，
+ * 生效上限请用 `effectiveReplyLimit(config.maxRepliesPerMessage, scope, groupRole)`。
+ * 此处保留再导出，兼容既有调用方。
+ */
+export { PASSIVE_REPLY_LIMIT } from "../../shared/passive-reply.js";
 
 /**
  * 平台明确拒绝 markdown 消息的错误码（回退纯文本）。

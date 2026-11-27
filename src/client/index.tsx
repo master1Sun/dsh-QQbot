@@ -45,6 +45,7 @@ import {
   countdownBadge,
   errText,
   formatTime,
+  permissionOptions,
   presetOptions,
   useCountdown,
   val,
@@ -649,6 +650,13 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
     ? t("detail.customWorkspace")
     : t("session.defaultWorkspace");
   const sessionSummary = fmt("detail.summarySession", modelLabel, workspaceLabel);
+  // 工作区权限提示：静态说明 + 宿主对该 preset 的一句话描述（理解「选了等于什么」）。
+  // 配置留空时按真正生效的宿主默认项取描述。
+  const effectivePermission = String(form.permissionPreset ?? "").trim() || catalogs.permissionDefaultPreset;
+  const permissionDesc = (catalogs.permissionPresets ?? []).find((p) => p.id === effectivePermission)?.description;
+  const permissionHint = permissionDesc
+    ? `${t("session.permissionHint")} ${permissionDesc}`
+    : t("session.permissionHint");
   const switches = switchDefs();
   const enabledSwitches = switches.filter((it) => Boolean(form[it.key] ?? it.def)).length;
   const policySummary = fmt("detail.summaryPolicy", String(enabledSwitches), String(switches.length));
@@ -739,6 +747,17 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
             "aria-label": t("session.preset"),
           }, presetOptions(catalogs.agentPresets).map((o) =>
             h("option", { key: o.value, value: o.value }, o.label))),
+        }),
+        // 工作区权限 = 宿主权限 Preset（沙箱模式 + 审批策略）。每个机器人独立设置，
+        // 留空跟随宿主 defaultPreset；只对新建会话生效，已建会话需重置。
+        SettingRow({
+          label: t("session.permission"), desc: permissionHint,
+          control: h("select", {
+            className: "qbot-settingSelect", value: String(form.permissionPreset ?? ""),
+            onChange: (e: any) => void saveField("permissionPreset", e.target.value),
+            "aria-label": t("session.permission"),
+          }, permissionOptions(catalogs.permissionPresets, catalogs.permissionDefaultPreset).map((o) =>
+            h("option", { key: o.value, value: o.value }, o.label))),
         })), undefined, { icon: "◇", tone: "info", summary: sessionSummary }),
 
     policy: sectionCard(t("policy.title"), t("policy.hint"),
@@ -807,7 +826,7 @@ export function QqbotSettingsTab({ rpcCall }: { rpcCall: RpcCall }) {
         numSelect("groupCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
         numSelect("senderCooldownMs", COOLDOWN_OPTIONS, cooldownLabel),
         numSelect("replyChunkChars", [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000]),
-        numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5]),
+        numSelect("maxRepliesPerMessage", [1, 2, 3, 4, 5, 10, 20, 50]),
         numSelect("quoteMaxChars", [40, 60, 80, 100, 120, 160, 200, 300, 500], (n) => fmt("override.charsOption", n)),
         numSelect("quotaPerDay", [0, 10, 20, 30, 50, 100, 200, 500], (n) => (n === 0 ? t("quota.unlimitedZero") : fmt("override.perDayOption", n)))),
       undefined, { icon: "≋", tone: "warning", summary: t("detail.summaryTune") }),

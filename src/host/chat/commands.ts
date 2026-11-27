@@ -15,7 +15,8 @@ import { randomUUID } from "node:crypto";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { MessageId } from "@deepseek-ai/dsh-llm";
 import type { QqApiClient } from "../qq/api.js";
-import { PASSIVE_REPLY_LIMIT } from "../qq/api.js";
+import { effectiveReplyLimit } from "../../shared/passive-reply.js";
+import { botRoleInGroup } from "../qq/group-role.js";
 import type { QqbotConfig } from "../../shared/config.js";
 import { helpText, tr, type ReplyLocale } from "../../shared/reply-i18n.js";
 import { trScheduleError } from "../../shared/schedule-error-i18n.js";
@@ -158,7 +159,12 @@ export async function runCommand(
 
   const reply = async (content: string): Promise<void> => {
     const record = recordFor(ctx.state, chatKey, { scope, openid }, msgId);
-    const limit = Math.min(config.maxRepliesPerMessage, PASSIVE_REPLY_LIMIT[scope]);
+    // 群被动回复上限：默认 5 次；机器人为该群群主/管理员时平台放宽到 50 次（官方 20261117）。
+    // 角色查询带缓存、失败回落 "member"（保守 5 次），不抛错。
+    const groupRole = scope === "group"
+      ? await botRoleInGroup(ctx.client, ctx.appId, openid, ctx.logger)
+      : null;
+    const limit = effectiveReplyLimit(config.maxRepliesPerMessage, scope, groupRole);
     try {
       await ctx.client.sendReply(record.target, content, {
         msgId: record.msgId,

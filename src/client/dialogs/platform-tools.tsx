@@ -802,7 +802,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
   const [cardDesc, setCardDesc] = React.useState("");
   const [cardUrl, setCardUrl] = React.useState("");
   const [cardPic, setCardPic] = React.useState("");
-  // 被动回复：目标聊天最近 5 分钟内可回复的消息（msgId 有时效）。
+  // 被动回复：目标聊天最近 60 分钟内可回复的消息（msgId 有时效）。
   const [replyMsgs, setReplyMsgs] = React.useState<Array<{
     msgId: string; senderName: string; sender: string; content: string; leftSec: number;
   }>>([]);
@@ -1607,7 +1607,7 @@ export function PlatformTools({ rpcCall, appId, groups, onNotify, focus, embedde
                 onChange: (e: any) => setReplyMsgId(e.target.value), "aria-label": t("pt.cardReplyMsg") },
                 h("option", { value: "" }, t("pt.cardReplyNone")),
                 ...replyMsgs.map((m) => h("option", { key: m.msgId, value: m.msgId },
-                  `${m.senderName || m.sender || "?"}：${m.content.slice(0, 24)} · ${fmt("pt.replyLeft", m.leftSec)}`)))
+                  `${m.senderName || m.sender || "?"}：${m.content.slice(0, 24)} · ${fmt("pt.replyLeft", Math.max(1, Math.ceil(m.leftSec / 60)))}`)))
             : null),
         h("div", { className: "qbot-ptGrid" },
           h("label", { className: "qbot-ptField" },

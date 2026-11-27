@@ -11,6 +11,7 @@
  *
  * 帮助文案用 zh/en 二元组，渲染时按当前语言选取（避免模块级 t() 冻结语言）。
  */
+import { MAX_REPLIES_CAP } from "../shared/passive-reply.js";
 
 export type FieldType = "string" | "number" | "boolean" | "string[]" | "enum" | "object";
 
@@ -71,9 +72,9 @@ export const CONFIG_FIELDS: readonly ConfigFieldMeta[] = [
     example: ["留空（默认）", "empty (default)"],
     notes: ["手填了下拉里没有的 id，会被宿主忽略或导致该会话加载失败，建议用下拉选。", "An id not in the dropdown is ignored or may break the session; prefer the dropdown."] },
   { key: "permissionPreset", group: "session", type: "string",
-    help: ["权限预设 id（对话权限注入），留空跟随宿主默认。", "Permission preset id (conversation permission injection); empty = host default."],
-    example: ["留空（默认）", "empty (default)"],
-    notes: ["无效的 id 会让对话权限注入被跳过，AI 行为约束减弱。", "An invalid id skips permission injection and weakens AI behaviour constraints."] },
+    help: ["工作区权限：会话的沙箱 + 审批权限预设 id，每个机器人独立。留空跟随宿主默认权限。设置页有下拉可直接选。", "Workspace permission: the sandbox + approval preset id for this bot's sessions. Empty = host default. Use the dropdown in settings."],
+    example: ["workspace-write（默认，仅可在工作区内修改）", "workspace-write (default, write inside the workspace only)"],
+    notes: ["常用取值：read-only=仅可查看；workspace-write=工作区内修改；danger-full-access=完全权限（不做审批）；auto=自动审查（实验性）。填了宿主不存在的 id 会让权限注入被跳过并回落到宿主默认。改完只对新建会话生效。", "Common values: read-only; workspace-write; danger-full-access (no approval prompts); auto (experimental review). An id the host does not know is skipped and falls back to the host default. Applies to new sessions only."] },
   { key: "model", group: "session", type: "string",
     help: ["显式模型路由，格式 \"provider/model[:输出token上限]\"，留空跟随默认模型。", "Explicit model route, format \"provider/model[:maxTokens]\"; empty = default model."],
     example: ["openai/gpt-4o:4096", "openai/gpt-4o:4096"],
@@ -103,9 +104,9 @@ export const CONFIG_FIELDS: readonly ConfigFieldMeta[] = [
 
   // ── 消息与回复 ──────────────────────────────────────────────────────────
   { key: "markdownReply", group: "reply", type: "boolean",
-    help: ["回复优先用 QQ Markdown（msg_type=2），被平台拒绝时逐条回退纯文本。", "Prefer QQ Markdown for replies (msg_type=2); falls back to plain text per message if rejected."],
-    example: ["true（默认，优先 Markdown）", "true (default, prefer Markdown)"],
-    notes: ["Markdown 被平台拒绝时会自动逐条降级，无需手动关闭；关闭则所有回复都用纯文本。", "Rejected Markdown auto-falls back per message; no need to turn it off manually."] },
+    help: ["允许用 QQ Markdown（msg_type=2）回复。开启后**按内容自动判定**：代码、表格、清单、粗体等才用 Markdown，日常闲聊走纯文本。", "Allow QQ Markdown (msg_type=2) replies. When on, the format is chosen per message by content: code, tables, lists and emphasis use Markdown, casual chat goes plain."],
+    example: ["true（默认，按内容自动选择）", "true (default, chosen by content)"],
+    notes: ["被平台拒绝时自动降级纯文本，无需手动关闭；关闭则所有回复都用纯文本。", "Rejected Markdown falls back to plain text automatically; turning this off forces plain text everywhere."] },
   { key: "quoteReply", group: "reply", type: "enum", options: ENUM_QUOTE,
     help: ["出站引用范围（仅群聊）。", "Outbound quote scope (groups only)."],
     example: ["\"at\"（默认，仅 @ 回复引用）", "\"at\" (default, quote @ replies only)"],
@@ -160,10 +161,10 @@ export const CONFIG_FIELDS: readonly ConfigFieldMeta[] = [
     help: ["单条回复的最大字符数，超长自动分条发送。", "Max chars per reply message; longer replies are split."],
     example: ["1000（默认）", "1000 (default)"],
     notes: ["太小会把回复拆成很多条刷屏，太大可能超过 QQ 单条消息长度上限被拒。必须是 200–4000 的整数。", "Too small splits replies into many messages; too large may exceed QQ's per-message limit. Integer 200–4000."] },
-  { key: "maxRepliesPerMessage", group: "pacing", type: "number", min: 1, max: 5,
+  { key: "maxRepliesPerMessage", group: "pacing", type: "number", min: 1, max: MAX_REPLIES_CAP,
     help: ["单条用户消息最多触发几条回复。", "Max replies per user message."],
-    example: ["5（默认，平台上限）", "5 (default, platform maximum)"],
-    notes: ["平台硬上限 5，填超过 5 会被校验拦下；调小可减少刷屏和用量。", "Hard platform limit is 5; higher values fail validation. Lower values reduce spam and usage."] },
+    example: ["5（默认）", "5 (default)"],
+    notes: ["群默认上限 5 次；机器人为该群群主/管理员时平台放宽到 50 次（官方 20261117）；单聊每条消息固定 4 次。群内设为 ≥10 且机器人为该群群主/管理员时，助手会「边生成边发」分段提前发送（每段占 1 次）。填超过 50 会被校验拦下；调小可减少刷屏和用量。", "Groups default to 5; the platform raises the cap to 50 when the bot is the group owner/admin (official 2026-11-17 change). Direct chats are fixed at 4. In groups, a value ≥ 10 lets the bot send each finished section as it is written (when it is the group owner/admin), one reply slot per section. Values above 50 fail validation; lower values reduce spam and usage."] },
   { key: "quotaPerDay", group: "pacing", type: "number", min: 0, max: 100000,
     help: ["主动消息每日配额，超出后停止主动发送并告警。", "Daily proactive-message quota; stops sending with an alert when exceeded."],
     example: ["50（默认）", "50 (default)"],

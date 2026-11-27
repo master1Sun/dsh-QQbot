@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { MAX_REPLIES_DEFAULT } from "../../shared/passive-reply.js";
 
 /** DSH 家目录下的插件数据目录。 */
 export function pluginDataDir(): string {
@@ -231,7 +232,7 @@ export const DEFAULT_BEHAVIOR_CONFIG: StoredBotConfig = {
   atContextMessages: 10,
   groupBufferMax: 50,
   replyChunkChars: 1000,
-  maxRepliesPerMessage: 5,
+  maxRepliesPerMessage: MAX_REPLIES_DEFAULT,
   proactiveFallback: false,
   archiveEnabled: true,
   archiveMedia: "off",

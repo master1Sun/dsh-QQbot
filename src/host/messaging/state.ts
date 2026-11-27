@@ -5,6 +5,8 @@ import type {
   BotState,
   GroupBufferEntry,
   PassiveReplyRecord,
+  ReplyTarget,
+  TurnSendState,
 } from "../../shared/types.js";
 import { tr, type ReplyLocale } from "../../shared/reply-i18n.js";
 
@@ -16,6 +18,7 @@ export function createBotState(): BotState {
     recordQueue: new Map(),
     chatSession: new Map(),
     turnText: new Map(),
+    turnSend: new Map(),
     groupBuffer: new Map(),
     incomingFingerprints: new Map(),
     mergeRecords: new Map(),
@@ -178,6 +181,45 @@ export function clearRecordQueue(state: BotState, sessionId: string): void {
   state.recordQueue.delete(sessionId);
 }
 
+/**
+ * 由会话 id 反查它对应的 QQ 聊天（群 / 单聊）。
+ * 优先用仍在的被动回复记录；记录已被消费（如 /new 之后）时用 chatSession 反查聊天键。
+ * 供「交互提问转 QQ」「交付文件自动发送」这类**不是回复泵主路径**的场景定位目标聊天。
+ */
+export function resolveChatTarget(state: BotState, sessionId: string): ReplyTarget | null {
+  if (!sessionId) return null;
+  const record = state.recordBySession.get(sessionId);
+  if (record) return record.target;
+  for (const [chatKey, sid] of state.chatSession) {
+    if (sid !== sessionId) continue;
+    const [scope, openid] = chatKey.split(":");
+    if ((scope === "group" || scope === "c2c") && openid) return { scope, openid };
+  }
+  return null;
+}
+
+/** 读取（不出队）最早入队、尚未回复的记录；队列空时回退到该会话最近一条。 */
+export function peekRecord(state: BotState, sessionId: string): PassiveReplyRecord | null {
+  const q = state.recordQueue.get(sessionId);
+  if (q && q.length > 0) return q[0]!;
+  return state.recordBySession.get(sessionId) ?? null;
+}
+
+/**
+ * 按对象身份把一条记录从队列里移除（返回是否移除成功）。
+ * 「边生成边发」已用掉这条记录，turn/end 需复用同一条：按身份移除可保证
+ * recordQueue 仍与 turn 顺序一一对应，不会误出队别条消息的记录。
+ */
+export function removeRecord(state: BotState, sessionId: string, record: PassiveReplyRecord): boolean {
+  const q = state.recordQueue.get(sessionId);
+  if (!q) return false;
+  const index = q.indexOf(record);
+  if (index < 0) return false;
+  q.splice(index, 1);
+  if (q.length === 0) state.recordQueue.delete(sessionId);
+  return true;
+}
+
 /** 绑定 deliveryId 与会话：此后该会话的助手回复发回 QQ。 */
 export function bindSession(state: BotState, deliveryId: string, sessionId: string): PassiveReplyRecord | null {
   const pending = state.pending.get(deliveryId);
@@ -213,6 +255,118 @@ export function takeTurnText(state: BotState, sessionId: string, turn: number): 
     if (turns.size === 0) state.turnText.delete(sessionId);
   }
   return text && text.trim() ? text : null;
+}
+
+/** 读取（不清理）某会话某 turn 已收集的文本；无则 null。 */
+export function peekTurnText(state: BotState, sessionId: string, turn: number): string | null {
+  return state.turnText.get(sessionId)?.get(turn) ?? null;
+}
+
+/** 覆盖写回某会话某 turn 的文本（提前发送后回写剩余内容）；空则清理该 turn。 */
+export function setTurnText(state: BotState, sessionId: string, turn: number, text: string): void {
+  let turns = state.turnText.get(sessionId);
+  if (!text || !text.trim()) {
+    if (!turns) return;
+    turns.delete(turn);
+    if (turns.size === 0) state.turnText.delete(sessionId);
+    return;
+  }
+  if (!turns) {
+    turns = new Map();
+    state.turnText.set(sessionId, turns);
+  }
+  turns.set(turn, text);
+}
+
+/** 单会话保留的 turn 发送状态上限（防御性淘汰；正常每个 turn 结束即清理）。 */
+const TURN_SEND_CAP = 8;
+
+/**
+ * 取/建本 turn 的发送状态；first=true 表示这是本 turn 的第一次发送
+ * （引用卡片只挂第一条，后续分段不重复挂引用）。
+ */
+export function beginTurnSend(
+  state: BotState,
+  sessionId: string,
+  turn: number,
+  record: PassiveReplyRecord,
+): { record: PassiveReplyRecord; first: boolean } {
+  let turns = state.turnSend.get(sessionId);
+  if (!turns) {
+    turns = new Map();
+    state.turnSend.set(sessionId, turns);
+  }
+  const existing = turns.get(turn);
+  if (existing) {
+    existing.sent = true;
+    return { record: existing.record, first: false };
+  }
+  if (turns.size >= TURN_SEND_CAP) {
+    const oldest = [...turns.keys()].sort((a, b) => a - b)[0];
+    if (oldest !== undefined) turns.delete(oldest);
+  }
+  turns.set(turn, { record, sent: true });
+  return { record, first: true };
+}
+
+/** 取并清理本 turn 的发送状态（turn/end 消费）；无则 null。 */
+export function takeTurnSend(state: BotState, sessionId: string, turn: number): TurnSendState | null {
+  const turns = state.turnSend.get(sessionId);
+  const entry = turns?.get(turn) ?? null;
+  if (turns) {
+    turns.delete(turn);
+    if (turns.size === 0) state.turnSend.delete(sessionId);
+  }
+  return entry;
+}
+
+/**
+ * 取「可以立刻发出去」的前缀（「边生成边发」的关键）。
+ *
+ * 在 maxChars 预算内取**最靠后的安全边界**（段落 → 换行 → 句末标点 → 空格）作为切点，
+ * 返回 head 与剩余 rest；累计字数不足 minChars、或找不到安全切点时返回 null
+ * （回退到 turn/end 走既有的整条分片发送）。
+ *
+ * 与 chunkReply 的 findCut 刻意不同：findCut 的阈值按 budget 的百分比取（为的是「尽量贴满
+ * 一片」），用在提前发送上会导致「350 字的段落边界落在 1000 字预算的 40% 以下」而被判为
+ * 无边界 → 永远发不出去。这里改判：只要边界不早于 minChars 就接受，取最靠后的那个。
+ *
+ * 两道安全约束（每个候选切点都独立校验，不满足则退到更早的候选）：
+ *  - head 不能停在未闭合的代码块里（否则单条消息里是残缺的 ``` 块）；
+ *  - 不能把 URL 劈成两半（切点后紧跟非空白，说明 URL 还在继续）。
+ * 另外不加「还有约 N 字未发送」的截断提示——剩余内容稍后会继续发，不是被丢弃。
+ */
+export function takeFlushablePrefix(
+  text: string,
+  { minChars, maxChars }: { minChars: number; maxChars: number },
+): { head: string; rest: string } | null {
+  const clean = text.replace(/\r\n/g, "\n");
+  const budget = Math.max(1, Math.min(CHUNK_HARD_CAP, Math.floor(maxChars) || 1000));
+  const floor = Math.max(1, Math.floor(minChars) || 1);
+  if (clean.trim().length < floor) return null;
+  const window = clean.slice(0, budget);
+  const candidates: number[] = [];
+  const para = window.lastIndexOf("\n\n");
+  if (para > 0) candidates.push(para);
+  const nl = window.lastIndexOf("\n");
+  if (nl > 0) candidates.push(nl);
+  let sentence = -1;
+  for (const m of window.matchAll(/[。！？!?；;]/g)) sentence = (m.index ?? 0) + m[0].length;
+  if (sentence > 0) candidates.push(sentence);
+  const space = window.lastIndexOf(" ");
+  if (space > 0) candidates.push(space + 1);
+  const ordered = [...new Set(candidates)].filter((c) => c >= floor).sort((a, b) => b - a);
+  for (const cut of ordered) {
+    const head = clean.slice(0, cut).trim();
+    if (!head) continue;
+    if (openFenceLang(head) !== null) continue;
+    const partialUrl = /(?:https?:\/\/|www\.)\S*$/i.test(head);
+    const next = clean.charAt(cut);
+    if (partialUrl && next !== "" && !/\s/.test(next)) continue;
+    const rest = clean.slice(cut).replace(/^[\r\n]+/, "").trim();
+    return { head, rest };
+  }
+  return null;
 }
 
 /** 把回复文本切成不超过 maxChars 的分片（优先按空行/换行断开），最多 maxChunks 片。 */

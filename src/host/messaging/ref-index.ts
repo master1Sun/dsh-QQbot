@@ -20,6 +20,7 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pluginDataDir } from "../infra/store-file.js";
+import { passiveWindowMsForChat } from "../../shared/passive-reply.js";
 import type { QqMessagePayload } from "../../shared/types.js";
 
 export interface RefIndexEntry {
@@ -156,10 +157,11 @@ export class RefIndex {
 
   /**
    * 列出某个聊天最近「可作为被动回复凭证」的消息。
-   * 条件：chat 匹配、有 msgId、入库时间不早于 sinceMs（默认 5 分钟内）、非机器人自己发的。
+   * 条件：chat 匹配、有 msgId、入库时间不早于 sinceMs（默认取该聊天的被动回复窗口，
+   * 单聊 / 群聊均为 60 分钟，见 shared/passive-reply）、非机器人自己发的。
    * 按入库时间倒序，最多 limit 条。供图文卡片等主动发送受限时选用被动回复。
    */
-  recentByChat(chat: string, limit = 20, sinceMs = 5 * 60 * 1000): RefIndexEntry[] {
+  recentByChat(chat: string, limit = 20, sinceMs = passiveWindowMsForChat(chat)): RefIndexEntry[] {
     if (!chat) return [];
     const cutoff = Date.now() - Math.max(0, sinceMs);
     const out: RefIndexEntry[] = [];

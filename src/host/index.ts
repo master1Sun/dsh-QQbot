@@ -20,6 +20,7 @@ import { createAdminService } from "./admin/admin.js";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { QrLoginManager } from "./qq/qr-login.js";
 import { createQqRule } from "./messaging/rule.js";
+import { resolveChatTarget } from "./messaging/state.js";
 import { ModerationService } from "./moderation/service.js";
 import { JoinApprovalService } from "./join-approval/service.js";
 import { installReplyPump } from "./messaging/reply.js";
@@ -59,8 +60,11 @@ import { GuildReplyService } from "./guild-reply/service.js";
 import { GuildKeywordService } from "./guild-keyword-mod/service.js";
 import { AiOpsService } from "./ai-ops/service.js";
 import type { ApprovalInteractionEvent } from "./messaging/approval.js";
-import type { QqbotConfig } from "../shared/config.js";
-import { SILENT_MARKER, isSilentReply } from "../shared/types.js";
+import { skipAnswer, type UserQuestionItem } from "./messaging/user-question.js";
+import { botRoleInGroup } from "./qq/group-role.js";
+import { effectiveReplyLimit } from "../shared/passive-reply.js";
+import { configForGroup, type QqbotConfig } from "../shared/config.js";
+import { SILENT_MARKER, isSilentReply, type PassiveReplyRecord, type ReplyTarget } from "../shared/types.js";
 
 export const name = "qqbot";
 
@@ -611,13 +615,92 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
       guildReplyService.setBotUser(appId, user?.id);
     },
     onInteraction: (bot, event) => {
-      void bot.approvals.handleInteraction(event as ApprovalInteractionEvent).then((consumed) => {
-        if (!consumed) logger.info(`[dsh-qqbot] 按钮回调未命中任何待决审批（机器人 ${bot.appId}）`);
-      }).catch((error) => {
-        logger.error("[dsh-qqbot] 按钮回调处理失败:", error);
-      });
+      // 审批与交互提问共用 INTERACTION_CREATE，靠各自的 data 前缀区分，先审批后提问。
+      void bot.approvals.handleInteraction(event as ApprovalInteractionEvent)
+        .then(async (consumedByApproval) => {
+          if (consumedByApproval) return;
+          const consumedByQuestion = await bot.questions.handleInteraction(event as ApprovalInteractionEvent);
+          if (!consumedByQuestion) {
+            logger.info(`[dsh-qqbot] 按钮回调未命中任何待决审批/提问（机器人 ${bot.appId}）`);
+          }
+        })
+        .catch((error) => {
+          logger.error("[dsh-qqbot] 按钮回调处理失败:", error);
+        });
     },
   });
+
+  /**
+   * 由 Agent 的会话 id 反查它属于哪个 QQ 聊天。
+   * 优先用仍在的被动回复记录（有凭证可走被动通道）；记录已被消费时用 chatSession 反查聊天键。
+   */
+  const chatForSession = (
+    sessionId: string,
+  ): { bot: BotRuntime; record: PassiveReplyRecord | null; target: ReplyTarget | null } | null => {
+    const bot = bots.botForSession(sessionId);
+    if (!bot) return null;
+    const target = resolveChatTarget(bot.state, sessionId);
+    if (!target) return null;
+    return { bot, record: bot.state.recordBySession.get(sessionId) ?? null, target };
+  };
+
+  /**
+   * 把 DSH 的交互提问（ask_user_question）接到 QQ 侧。
+   *
+   * 背景：DSH 的提问默认只渲染在 Agent 界面（Web GUI）。QQ 会话是在后台跑的，用户
+   * 看不到那张选项卡，turn 就一直等到超时——表现就是「消息卡死」。这里认领 DSH 的
+   * `user-questions/request` 瀑布事件，把选择发到群里 / 单聊里让用户点按钮
+   * （实现见 messaging/user-question.ts）。
+   *
+   * 边界：只认领「能对应到 QQ 聊天」的请求，其余一律 next() 交回界面（不影响你在
+   * Agent 界面里的正常选择）；一旦确认是 QQ 会话就**绝不 next()**（那等于挂死），
+   * 任何异常都退化成「按跳过」的答案让模型自行决定。
+   */
+  const onUserQuestionRequest = async (
+    request: { questions?: unknown; agent?: { sessionId?: unknown; id?: unknown } } | undefined,
+    next: () => Promise<unknown>,
+  ): Promise<unknown> => {
+    const questions = (Array.isArray(request?.questions) ? request.questions : []) as UserQuestionItem[];
+    if (questions.length === 0) return next();
+    const agent = request?.agent;
+    const sessionId = typeof agent?.sessionId === "string" ? agent.sessionId
+      : typeof agent?.id === "string" ? agent.id : "";
+    const found = sessionId ? chatForSession(sessionId) : null;
+    if (!found || !found.target) {
+      // 诊断用：这条日志能区分「监听器没被触发」与「触发了但认不出是 QQ 会话」。
+      // 前者不会打这条日志（说明作用域/注册有问题），后者会打（说明会话→聊天反查失败）。
+      logger.info(
+        `[dsh-qqbot] 收到交互提问但不是 QQ 会话，交回界面（session=${sessionId || "-"} 问题数=${questions.length}）`,
+      );
+      return next();
+    }
+    const { bot, record, target } = found;
+    try {
+      // 提问消息优先走被动回复（不占主动配额）：有凭证就带 msg_id + 递增 msg_seq。
+      // 预算用尽/无凭证时 allocate 返回空对象，退回主动通道。
+      const config = record ? configForGroup(bot.config, target.openid) : bot.config;
+      const role = record && target.scope === "group"
+        ? await botRoleInGroup(bot.client, bot.appId, target.openid, logger)
+        : null;
+      const limit = record
+        ? effectiveReplyLimit(config.maxRepliesPerMessage, record.target.scope, role)
+        : 0;
+      const allocateSendOpts = (): Record<string, unknown> => {
+        if (!record || record.nextSeq > limit) return {};
+        const msgSeq = record.nextSeq++;
+        return { msgId: record.msgId, msgSeq };
+      };
+      logger.info(
+        `[dsh-qqbot] 交互提问转到 QQ chat=${record?.chatKey ?? `${target.scope}:${target.openid}`} 问题数=${questions.length}`,
+      );
+      return await bot.questions.ask(target, { questions, allocateSendOpts });
+    } catch (error) {
+      logger.error("[dsh-qqbot] 交互提问转 QQ 失败，改为按跳过返回:", error);
+      return skipAnswer(questions);
+    }
+  };
+  (ctx as unknown as { on?: (name: string, fn: unknown) => unknown })
+    .on?.("user-questions/request", onUserQuestionRequest);
 
   /**
    * 把 webhook 运行时接入消息链路：注册规则后，onEvent 才会把 QQ 事件分发进会话。
@@ -824,6 +907,44 @@ export async function apply(ctx: Context, entryConfig: Partial<QqbotConfig>) {
         logger.warn("[dsh-qqbot] 读取宿主 Agent Preset 目录失败:", error);
       }
       return { defaultId: "", items: [] };
+    },
+    listPermissionPresets: async () => {
+      try {
+        const host = ctx as unknown as {
+          get?(name: string): unknown;
+          permissionPresets?: { catalog?(): unknown; defaultPreset?: unknown };
+        };
+        const service = ((typeof host.get === "function" ? host.get("permissionPresets") : undefined)
+          ?? host.permissionPresets) as { catalog?(): unknown; defaultPreset?: unknown } | undefined;
+        if (service && typeof service.catalog === "function") {
+          // catalog()：{ options: [{ value, name, description? }], defaultOptions, defaultPreset }。
+          // options 已含当前可选的「实时」项（如实验性的 auto），是下拉应展示的全集。
+          const raw = service.catalog() as { options?: unknown; defaultPreset?: unknown } | undefined;
+          const rawOptions = Array.isArray(raw?.options) ? raw!.options : [];
+          const items = rawOptions
+            .map((entry) => {
+              if (typeof entry === "string") return { id: entry, label: entry };
+              const rec = entry as { value?: unknown; name?: unknown; description?: unknown };
+              if (!rec || typeof rec.value !== "string" || !rec.value) return null;
+              const label = typeof rec.name === "string" && rec.name.trim() ? rec.name.trim() : rec.value;
+              return {
+                id: rec.value,
+                label,
+                ...(typeof rec.description === "string" && rec.description.trim()
+                  ? { description: rec.description.trim() }
+                  : {}),
+              };
+            })
+            .filter((v): v is { id: string; label: string; description?: string } => v !== null);
+          const defaultPreset = typeof raw?.defaultPreset === "string"
+            ? raw.defaultPreset
+            : typeof service.defaultPreset === "string" ? service.defaultPreset : "";
+          return { defaultPreset, items };
+        }
+      } catch (error) {
+        logger.warn("[dsh-qqbot] 读取宿主权限 Preset 目录失败:", error);
+      }
+      return { defaultPreset: "", items: [] };
     },
   });
 

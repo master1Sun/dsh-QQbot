@@ -781,6 +781,14 @@ async function enterConversation(args: EnterConversationArgs): Promise<WebhookSe
     ? rawBody
     : "（用户发送了一个文件/媒体附件，没有附文字。内容见下方附件部分，请根据附件内容回复。）";
   let prompt = body;
+  // 回复形态与交付物指引（紧贴正文，见上方分层说明）：
+  //  - 排版由系统按内容自动判定，模型不必为了「好看」硬堆 Markdown；
+  //  - 生成了文件要真的交付（present / qqbot_send_file），否则用户什么都拿不到。
+  const formatGuide = [
+    "【回复形态】直接自然作答即可：排版由系统按内容自动选择——代码、表格、清单会自动用 Markdown 渲染，日常闲聊走纯文本，不必刻意堆 Markdown 标记。",
+    "【产出文件】如果你生成了文件（报告、表格、图片、代码等），要把它真的交付出去：用 present 声明为交付物（会自动发到当前 QQ 聊天），或直接用 qqbot_send_file 发送。只回复「已生成 xx 文件」用户是拿不到的。",
+  ].join("\n");
+  prompt = `${formatGuide}\n\n${prompt}`;
   if (quoteContext) prompt = `${quoteContext}\n\n${prompt}`;
   if (attachmentContext) prompt = `${attachmentContext}\n\n${prompt}`;
   if (memoryBlock) prompt = `${memoryBlock}\n\n${prompt}`;

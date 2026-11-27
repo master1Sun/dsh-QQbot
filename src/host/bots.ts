@@ -19,6 +19,7 @@ import { SelfOpenidStore } from "./messaging/self-id.js";
 import { UserProfileStore } from "./messaging/user-profile.js";
 import { TypingKeeper } from "./messaging/typing.js";
 import { ApprovalManager } from "./messaging/approval.js";
+import { UserQuestionBridge } from "./messaging/user-question.js";
 import { QqApiClient } from "./qq/api.js";
 import { QqWsSource, type WsStatus } from "./qq/ws.js";
 import { StatsStore, ZERO_COUNTERS } from "./infra/stats.js";
@@ -43,6 +44,11 @@ export interface BotRuntime {
   typing: TypingKeeper;
   /** 按钮审批管理器：qqbot_request_approval 工具发按钮消息等点击，INTERACTION_CREATE 回调唤醒。 */
   approvals: ApprovalManager;
+  /**
+   * 交互提问桥：把 DSH 的 ask_user_question 选择转到 QQ 侧（按钮 + 超时按跳过），
+   * 避免 Agent 界面的选项卡在 QQ 会话里无人可点、把 turn 挂死。
+   */
+  questions: UserQuestionBridge;
   archiver: Archiver;
   /**
    * 引用索引（REFIDX → 原文）：用户引用别人消息时，平台只给索引键不给原文，
@@ -277,6 +283,7 @@ export class BotRuntimeManager {
       if (seen.has(appId)) continue;
       bot.typing.stopAll();
       bot.approvals.dispose();
+      bot.questions.dispose();
       await bot.ws.stop();
       this.#bots.delete(appId);
       this.#options.logger.info(`[dsh-qqbot] 机器人 ${appId} 已移除，连接已断开`);
@@ -316,6 +323,7 @@ export class BotRuntimeManager {
       ws: undefined as unknown as QqWsSource,
       typing: undefined as unknown as TypingKeeper,
       approvals: undefined as unknown as ApprovalManager,
+      questions: undefined as unknown as UserQuestionBridge,
       archiver: undefined as unknown as Archiver,
       refIndex: undefined as unknown as RefIndex,
       selfStore: undefined as unknown as SelfOpenidStore,
@@ -329,6 +337,7 @@ export class BotRuntimeManager {
     });
     bot.typing = new TypingKeeper(bot.client, this.#options.logger);
     bot.approvals = new ApprovalManager(bot.client, this.#options.logger);
+    bot.questions = new UserQuestionBridge(bot.client, this.#options.logger);
     bot.archiver = new Archiver(() => bot.config.archiveEnabled, this.#options.logger, bot.appId);
     bot.refIndex = new RefIndex({ logger: this.#options.logger, appId: bot.appId });
     // 历史引用索引异步加载（缓存性质，加载慢不影响建连与收发）。
@@ -443,6 +452,7 @@ export class BotRuntimeManager {
     for (const bot of this.#bots.values()) {
       bot.typing.stopAll();
       bot.approvals.dispose();
+      bot.questions.dispose();
       await bot.ws.stop();
     }
     this.#bots.clear();

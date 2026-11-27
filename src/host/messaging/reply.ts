@@ -13,23 +13,41 @@
  * 回复给用户（而非静默）——已有部分文本则附加提示，无文本则只发提示；
  * 同一聊天 60 秒内只提示一次。
  */
+import { basename, isAbsolute, join } from "node:path";
+import { stat } from "node:fs/promises";
 import type { BotRuntime, BotRuntimeManager } from "../bots.js";
-import { PASSIVE_REPLY_LIMIT } from "../qq/api.js";
+import {
+  INCREMENTAL_FLUSH_CHARS,
+  INCREMENTAL_MIN_BUDGET,
+  PASSIVE_REPLY_LIMIT,
+  effectiveReplyLimit,
+  isGroupAdminRole,
+} from "../../shared/passive-reply.js";
+import { botRoleInGroup } from "../qq/group-role.js";
 import type { Outbox } from "./outbox.js";
 import type { QuotaTracker } from "../infra/quota.js";
 import { tr } from "../../shared/reply-i18n.js";
 import { SILENT_MARKER, isSilentReply, type PassiveReplyRecord } from "../../shared/types.js";
 import { configForGroup } from "../../shared/config.js";
 import { sanitizeOutgoingText } from "./sanitize.js";
+import { looksLikeMarkdown, isSensitiveFilePath } from "./format.js";
 import { synthesizeSpeech } from "./voice.js";
 import {
   appendAssistantText,
   assistantTextOf,
+  beginTurnSend,
   bindSession,
   chunkReply,
   dequeueRecord,
+  peekRecord,
+  peekTurnText,
+  removeRecord,
   rememberSent,
+  resolveChatTarget,
   sessionIdOf,
+  setTurnText,
+  takeFlushablePrefix,
+  takeTurnSend,
   takeTurnText,
   webhookDeliveryIdOf,
 } from "./state.js";
@@ -51,6 +69,11 @@ export interface ReplyPumpContext {
 
 /** AI 报错提示的限流窗口：同一聊天 60 秒内最多提示一次（连续报错不刷屏）。 */
 const ERROR_NOTICE_WINDOW_MS = 60_000;
+
+/** 单个交付文件的体积上限；超限只记日志不发送（QQ 富媒体通道限制较严）。 */
+const MAX_DELIVERABLE_BYTES = 30 * 1_048_576;
+/** 单个 turn 最多自动外发的交付文件数（防刷屏、防媒体配额被一次吃光）。 */
+const MAX_DELIVERABLE_FILES = 5;
 
 /**
  * 判断一次发送失败是否「平台明确拒绝、确定未创建消息」（可安全降级重发）：
@@ -86,7 +109,13 @@ type SessionBus = {
 export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, onScheduleSilent }: ReplyPumpContext): () => void {
   const bus = ctx as SessionBus;
 
-  const send = async (bot: BotRuntime, sessionId: string, rawText: string, recordOverride?: PassiveReplyRecord) => {
+  const send = async (
+    bot: BotRuntime,
+    sessionId: string,
+    rawText: string,
+    recordOverride?: PassiveReplyRecord,
+    opts: { noQuote?: boolean } = {},
+  ) => {
     // 优先用调用方按 turn 精确取出的记录（recordQueue 出队）：同一聊天并发多条消息时，
     // recordBySession 只保留最新一条，直接读它会把 @ 消息的引用门控字段挤掉。
     const record = recordOverride ?? bot.state.recordBySession.get(sessionId);
@@ -121,7 +150,17 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
       }
       return;
     }
-    const limit = Math.min(config.maxRepliesPerMessage, PASSIVE_REPLY_LIMIT[record.target.scope]);
+    // 群被动回复上限：默认 5 次；机器人为该群群主/管理员时平台放宽到 50 次（官方 20261117）。
+    // 角色查询带 10 分钟缓存，探测失败/无权限回落 "member"（保守 5 次）且不抛错，不影响正常投递。
+    const groupRole = record.target.scope === "group"
+      ? await botRoleInGroup(bot.client, bot.appId, record.target.openid, logger)
+      : null;
+    const limit = effectiveReplyLimit(config.maxRepliesPerMessage, record.target.scope, groupRole);
+    if (isGroupAdminRole(groupRole) && limit > PASSIVE_REPLY_LIMIT.group) {
+      logger.info(
+        `[dsh-qqbot] 群被动回复上限按平台新规放宽 chat=${record.chatKey} 角色=${groupRole} 上限=${limit}`,
+      );
+    }
     // 出站引用组合矩阵（平台主动消息能力收敛后实测定版）：
     //   仅 message_reference（主动通道，不传 msg_id）→ 手机端同一条内容出现两条；
     //   仅 msg_id                                    → 两端都不显示引用（实测「引用没了」）；
@@ -137,7 +176,8 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
     // 出现两次（手机端「两条重复内容」的头号来源），直接抛出走投递出箱。
     // 限制：message_reference 与 Markdown 同时携带时，部分场景下平台会剥离 Markdown 改为纯文本
     // （引用卡片仍保留）。这是 QQ 平台约束，无法两全；若需保留 Markdown 排版，请将 quoteReply 设为 off。
-    const quoteReply = record.target.scope === "group"
+    const quoteReply = !opts.noQuote
+      && record.target.scope === "group"
       && config.quoteReply !== "off"
       && (config.quoteReply === "all" || record.quoteMention)
       && Boolean(record.selfIdx)
@@ -171,7 +211,10 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
         logger.warn("[dsh-qqbot] 语音回复发送失败，回退文字回复:", error instanceof Error ? error.message : error);
       }
     }
-    let usedMarkdown = config.markdownReply;
+    // 排版：按**内容**决定这一片用不用 Markdown（模型写下的语法就是它的排版决定），
+    // 而不是全局一刀切——日常闲聊走纯文本更自然，代码/表格/清单才切 Markdown。
+    // markdownReply=false 时彻底不用；平台拒绝 Markdown 后本 turn 内不再尝试（见循环内）。
+    let markdownAllowed = config.markdownReply;
     // 合成事件（定时任务）没有 msg_id → 整条回复走主动消息，消耗每日配额。
     // 但定时任务的额度已由调度层在触发时预扣 1 次，这里**不再逐片扣费**：
     // 否则「一条分 N 片的定时广播」会被记成 1+N 次主动消息（旧行为，明显超扣）。
@@ -184,12 +227,13 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
       }
       if (isProactive && quota && !quotaPrepaid && !(await quota.tryConsume(1, bot.appId))) break;
       const seq = record.nextSeq++;
+      const wantMarkdown = markdownAllowed && looksLikeMarkdown(chunk);
       // withQuote=true：被动回复（msg_id + msgSeq）同传引用卡片（message_reference=REFIDX）；
       // false：普通被动回复（msg_id，无卡片）。
       const sendOnce = (withQuote: boolean) =>
         bot.client.sendReply(record.target, chunk, withQuote
-          ? { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown, quoteMsgId: record.selfIdx, forceVerifyImage: bot.config.forceVerifyImage }
-          : { msgId: record.msgId || undefined, msgSeq: seq, markdown: usedMarkdown, forceVerifyImage: bot.config.forceVerifyImage });
+          ? { msgId: record.msgId || undefined, msgSeq: seq, markdown: wantMarkdown, quoteMsgId: record.selfIdx, forceVerifyImage: bot.config.forceVerifyImage }
+          : { msgId: record.msgId || undefined, msgSeq: seq, markdown: wantMarkdown, forceVerifyImage: bot.config.forceVerifyImage });
       try {
         let channel = quoteReply ? "被动(引用)" : "被动";
         let result: { mode: "markdown" | "text"; id?: string };
@@ -219,10 +263,12 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
           result = await sendOnce(false);
         }
         // 平台拒绝 Markdown 后，后续分片直接走纯文本（少一次注定失败的请求）。
-        if (result.mode === "text") usedMarkdown = false;
+        // 只在「这次确实要了 Markdown」时降级：否则会把按内容判定走的纯文本误判成平台拒绝。
+        if (wantMarkdown && result.mode === "text") markdownAllowed = false;
         // 诊断日志：与手机端「两条重复内容」表现精确关联（每次实际 API 调用一行）。
         logger.info(
-          `[dsh-qqbot] 已发送 chat=${record.chatKey} seq=${seq} 通道=${channel} 格式=${result.mode} 消息id=${result.id ?? "-"}`,
+          `[dsh-qqbot] 已发送 chat=${record.chatKey} seq=${seq} 通道=${channel} 格式=${result.mode} `
+          + `按内容要MD=${wantMarkdown ? "y" : "n"} 消息id=${result.id ?? "-"}`,
         );
         // 记录自己发出的消息 id（供表情撤回 / /撤回 命令使用）。
         if (result.id) rememberSent(bot.state, record.chatKey, result.id);
@@ -260,6 +306,157 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
     }
   };
 
+  /**
+   * 每会话一条发送链：同一聊天的多次发送串行化。
+   * 「边生成边发」下同一 turn 会有多段发送，串行才能保证：
+   *  - msg_seq 不重复（平台对「相同 msg_id + msg_seq」的直接判失败）；
+   *  - 群里显示顺序与生成顺序一致。
+   * 链在后台运行（不 await），agent 继续执行后续步骤，用户不必等整个 turn 结束。
+   */
+  const sendChains = new Map<string, Promise<void>>();
+  const enqueueSend = (
+    bot: BotRuntime,
+    sessionId: string,
+    text: string,
+    recordOverride?: PassiveReplyRecord,
+    opts: { noQuote?: boolean } = {},
+  ): void => {
+    const previous = sendChains.get(sessionId) ?? Promise.resolve();
+    const next = previous
+      .then(() => send(bot, sessionId, text, recordOverride, opts))
+      .catch((error) => {
+        logger.error("[dsh-qqbot] 回复发送失败（发送链）:", error);
+      })
+      .finally(() => {
+        if (sendChains.get(sessionId) === next) sendChains.delete(sessionId);
+      });
+    sendChains.set(sessionId, next);
+  };
+
+  /**
+   * 「边生成边发」：本 turn 的助手文本攒够阈值，就先把成篇的一段发出去。
+   *
+   * 只在「群聊 + 有被动凭证 + 非静默定时任务 + 有效上限 ≥ INCREMENTAL_MIN_BUDGET」时启用：
+   *  - 官方明确「群消息不支持流式参数」，所以每段就是一条独立的被动回复，各占 1 次回复次数；
+   *  - 预算不足（非管理员群只有 5 次）时整条回退到 turn/end 一次性分片发送；
+   *  - record.silentOk（定时任务）必须攒到最后，否则「本次无需发送」的静默标记会被提前发出去；
+   *  - 切点必须落在自然边界且不在未闭合的代码块里（见 takeFlushablePrefix）。
+   */
+  const flushEarly = async (bot: BotRuntime, sessionId: string, turn: number): Promise<void> => {
+    const record = peekRecord(bot.state, sessionId);
+    if (!record || !record.msgId || record.silentOk) return;
+    if (record.target.scope !== "group") return;
+    const config = configForGroup(bot.config, record.target.openid);
+    const role = await botRoleInGroup(bot.client, bot.appId, record.target.openid, logger);
+    const limit = effectiveReplyLimit(config.maxRepliesPerMessage, record.target.scope, role);
+    if (limit < INCREMENTAL_MIN_BUDGET || record.nextSeq > limit) return;
+    const pending = peekTurnText(bot.state, sessionId, turn);
+    if (!pending) return;
+    const split = takeFlushablePrefix(pending, {
+      minChars: INCREMENTAL_FLUSH_CHARS,
+      maxChars: config.replyChunkChars,
+    });
+    if (!split) return;
+    // 先同步回写剩余内容再排入发送链：下一条 assistant/message 不会重复读到已发文本。
+    setTurnText(bot.state, sessionId, turn, split.rest);
+    const { record: bound, first } = beginTurnSend(bot.state, sessionId, turn, record);
+    void bot.archiver.append({
+      kind: "reply",
+      chat: `${record.target.scope}:${record.target.openid}`,
+      content: split.head.slice(0, 2000),
+      sessionId,
+    });
+    logger.info(
+      `[dsh-qqbot] 边生成边发 chat=${record.chatKey} turn=${turn} `
+      + `本段=${split.head.length}字 剩余=${split.rest.length}字 序号=${bound.nextSeq}/${limit}`,
+    );
+    enqueueSend(bot, sessionId, split.head, bound, { noQuote: !first });
+  };
+
+  /**
+   * 交付文件自动外发：模型用 `present` 声明了交付物时，DSH 会发会话事件
+   * `deliverables/presented`（{ turn, callId, files: [{ path, description }] }），
+   * 这里把文件发到对应的 QQ 聊天。
+   *
+   * 设计取舍：
+   *  - **只发模型显式声明为交付物的文件**，不去扫描工作区新建文件——后者会把临时文件、
+   *    中间产物一并外发；
+   *  - 文件走富媒体通道（**不挂 msg_id**）：既不占被动回复次数，也不会和回复泵的
+   *    msg_seq 计数打架（`sendFile` 没有 msgSeq 参数，挂 msg_id 会让序号失去统一管理）；
+   *  - 三道闸：敏感文件（.env/*.pem/id_rsa 等）不外发、超体积不发、单 turn 限量，
+   *    每一条都写日志说明原因，不静默吞掉。
+   */
+  const sendPresentedFiles = async (bot: BotRuntime, sessionId: string, data: unknown): Promise<void> => {
+    const target = resolveChatTarget(bot.state, sessionId);
+    if (!target) return;
+    const files = (data as { files?: unknown } | null | undefined)?.files;
+    if (!Array.isArray(files) || files.length === 0) return;
+    const workspace = bot.config.workspacePath || process.cwd();
+    const chatKey = `${target.scope}:${target.openid}`;
+    const seen = new Set<string>();
+    let sent = 0;
+    for (const raw of files) {
+      if (sent >= MAX_DELIVERABLE_FILES) {
+        logger.warn(`[dsh-qqbot] 交付文件超过 ${MAX_DELIVERABLE_FILES} 个，其余未自动发送 chat=${chatKey}`);
+        break;
+      }
+      const rel = typeof (raw as { path?: unknown } | null)?.path === "string"
+        ? (raw as { path: string }).path.trim()
+        : "";
+      if (!rel) continue;
+      const full = isAbsolute(rel) ? rel : join(workspace, rel);
+      if (seen.has(full)) continue;
+      seen.add(full);
+      if (isSensitiveFilePath(full)) {
+        logger.warn(`[dsh-qqbot] 交付文件疑似凭据，已跳过不外发：${full}`);
+        continue;
+      }
+      let size = 0;
+      try {
+        const info = await stat(full);
+        if (!info.isFile()) {
+          logger.warn(`[dsh-qqbot] 交付路径不是普通文件，跳过：${full}`);
+          continue;
+        }
+        size = info.size;
+      } catch {
+        logger.warn(`[dsh-qqbot] 交付文件不存在或不可读，跳过：${full}`);
+        continue;
+      }
+      if (size > MAX_DELIVERABLE_BYTES) {
+        logger.warn(
+          `[dsh-qqbot] 交付文件超过 ${Math.round(MAX_DELIVERABLE_BYTES / 1_048_576)}MB，未自动发送：${full}`,
+        );
+        continue;
+      }
+      const description = (raw as { description?: unknown } | null)?.description;
+      try {
+        await bot.client.sendFile(target, { localPath: full }, {
+          fileName: basename(full),
+          content: typeof description === "string" && description.trim()
+            ? description.trim().slice(0, 100)
+            : undefined,
+        });
+        sent += 1;
+        bot.state.counters.proactive += 1;
+        logger.info(
+          `[dsh-qqbot] 交付文件已发送 chat=${chatKey} 文件=${basename(full)}（${Math.round(size / 1024)}KB）`,
+        );
+        void bot.archiver.append({
+          kind: "proactive",
+          chat: chatKey,
+          content: `[交付文件] ${basename(full)}`,
+          note: "deliverable:present",
+        });
+      } catch (error) {
+        logger.error(
+          `[dsh-qqbot] 交付文件发送失败（${basename(full)}）:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  };
+
   const onSessionEvent = (session: unknown, event: { type: string; data?: unknown }) => {
     try {
       switch (event.type) {
@@ -290,6 +487,17 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
           const turn = Number(data?.turn);
           if (!Number.isSafeInteger(turn)) return;
           appendAssistantText(bot.state, sessionId, turn, assistantTextOf(event.data));
+          // 边生成边发：攒够阈值就先把成篇的一段发出去，agent 继续执行后续步骤。
+          void flushEarly(bot, sessionId, turn);
+          return;
+        }
+        case "deliverables/presented": {
+          // 模型用 present 声明了交付文件 → 自动发到对应 QQ 聊天（见 sendPresentedFiles）。
+          const sessionId = sessionIdOf(session);
+          if (!sessionId) return;
+          const bot = bots.botForSession(sessionId);
+          if (!bot) return;
+          void sendPresentedFiles(bot, sessionId, event.data);
           return;
         }
         case "turn/end": {
@@ -309,7 +517,13 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
           const failure = failureMessageOf(data?.reason);
           // 按 turn 精确取出触发本次回复的记录（FIFO）：并发消息下避免读到后到消息的记录，
           // 从而保住 @ 消息的引用门控字段（quoteMention/selfIdx/msgId）。队列空则回退最新记录。
-          const record = dequeueRecord(bot.state, sessionId) ?? bot.state.recordBySession.get(sessionId);
+          // 本 turn 已提前分段发送过时复用同一条记录（msg_seq 继续往下走），并按对象身份把它
+          // 从队列移除——队列按 turn 顺序一一出队，不能重复取走别条消息的记录。
+          const sentState = takeTurnSend(bot.state, sessionId, turn);
+          const record = sentState?.record
+            ?? dequeueRecord(bot.state, sessionId)
+            ?? bot.state.recordBySession.get(sessionId);
+          if (sentState) removeRecord(bot.state, sessionId, sentState.record);
           let notice: string | null = null;
           if (failure) {
             const now = Date.now();
@@ -335,7 +549,7 @@ export function installReplyPump(ctx: unknown, { bots, outbox, quota, logger, on
             content: content.slice(0, 2000),
             sessionId,
           });
-          void send(bot, sessionId, content, record ?? undefined);
+          enqueueSend(bot, sessionId, content, record ?? undefined, { noQuote: Boolean(sentState) });
           return;
         }
         default:

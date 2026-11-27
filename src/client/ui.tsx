@@ -147,6 +147,51 @@ export const presetOptions = (list: Array<{ id: string; label: string }>): Optio
       }),
   ];
 
+/**
+ * 宿主内置「权限模式」preset 的显示名 key。这些 preset 只配了沙箱/审批组合、没有中文名，
+ * 宿主目录接口回传的 name 就是英文 id；沿用 DSH 权限下拉的官方译名保持一致。
+ * 用户自定义 preset 有自己的 name（label !== id），保持原样、不翻译。
+ */
+const BUILT_IN_PERMISSION_LABELS: Record<string, string> = {
+  "read-only": "session.permissionReadOnly",
+  "workspace-write": "session.permissionWorkspaceWrite",
+  "danger-full-access": "session.permissionFullAccess",
+  auto: "session.permissionAuto",
+};
+
+/**
+ * 工作区权限选项：首项「跟随宿主默认（<生效项>）」，其后是宿主权限 Preset 目录。
+ * 与 Agent preset 一样，只有 label 恰好等于 id（宿主没给名称）时才套本地化译名。
+ *
+ * 目录为空时回落到官方默认三项：客户端刚更新、宿主还没重载（catalogs 仍是旧实现）
+ * 这一瞬时状态下，下拉也不该只剩「跟随宿主默认」一个选项。
+ */
+export const permissionOptions = (
+  list: Array<{ id: string; label: string }>,
+  defaultPreset?: string,
+): Option[] => {
+  const source = list && list.length > 0 ? list : [
+    { id: "read-only", label: "read-only" },
+    { id: "workspace-write", label: "workspace-write" },
+    { id: "danger-full-access", label: "danger-full-access" },
+  ];
+  const resolved = source.filter((p) => p && typeof p.id === "string" && p.id);
+  const labelOf = (p: { id: string; label: string }): string => {
+    const label = typeof p.label === "string" && p.label ? p.label : p.id;
+    const key = BUILT_IN_PERMISSION_LABELS[p.id];
+    return key && label === p.id ? t(key) : label;
+  };
+  // 「跟随宿主默认」后面缀上真正生效的那一项，避免用户选了留空却不知道等于什么。
+  const current = resolved.find((p) => p.id === defaultPreset);
+  const followLabel = current
+    ? `${t("session.followHostDefault")}（${labelOf(current)}）`
+    : t("session.followHostDefault");
+  return [
+    { value: "", label: followLabel },
+    ...resolved.map((p) => ({ value: p.id, label: labelOf(p) })),
+  ];
+};
+
 /** 弹窗编辑表单行：标签 + 控件 + 提示（提示写清「怎么填、影响什么」）。 */
 export function editRow(label: string, hint: string, control: any) {
   return h("div", { className: "qbot-editRow" },

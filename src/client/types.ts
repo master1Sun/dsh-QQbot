@@ -57,9 +57,21 @@ export interface Catalogs {
   models: Array<{ id: string; label: string; group?: string }>;
   /** 宿主 Agent Preset 目录（agentPresets 服务）。 */
   agentPresets: Array<{ id: string; label: string }>;
+  /**
+   * 宿主权限 Preset 目录（permissionPresets 服务）：「工作区权限」下拉的数据源。
+   * 每项是「沙箱模式 + 审批策略」的组合（如 read-only / workspace-write / danger-full-access / auto）。
+   */
+  permissionPresets: Array<{ id: string; label: string; description?: string }>;
+  /** 宿主权限默认 preset id：机器人配置留空时新会话实际跟随的那一项。 */
+  permissionDefaultPreset: string;
 }
 
-export const EMPTY_CATALOGS: Catalogs = { models: [], agentPresets: [] };
+export const EMPTY_CATALOGS: Catalogs = {
+  models: [],
+  agentPresets: [],
+  permissionPresets: [],
+  permissionDefaultPreset: "",
+};
 
 export interface Option {
   value: string;

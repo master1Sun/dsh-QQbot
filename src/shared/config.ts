@@ -5,6 +5,7 @@
  * credentials.json（扫码 / 手动保存的凭据）> 环境变量（仅 appId/appSecret）> 默认值。
  * 解析是容错的：缺凭据不抛错（插件照常加载，状态接口提示未配置，引导扫码/填写）。
  */
+import { MAX_REPLIES_CAP, MAX_REPLIES_DEFAULT } from "./passive-reply.js";
 
 /** 可选的显式模型路由，格式 "provider/model[:输出token上限]"。 */
 export interface QqbotModelSelection {
@@ -189,15 +190,21 @@ function str(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** "provider/model" 或 "provider/model:cap" → 显式模型路由；非法返回 null。 */
+/**
+ * "provider/model" 或 "provider/model:cap" → 显式模型路由；非法返回 null。
+ * 模型 id 自身可能含 "/"（如 deepseek-ai/DeepSeek-V4.1-Flash），所以只能在第一个
+ * "/" 处切出 provider，其余整段是模型 id；只有结尾的 :<正整数> 才算 maxTokens。
+ */
 export function parseModelSelection(raw: string): QqbotModelSelection | null {
   const text = raw.trim();
-  if (!text || !text.includes("/")) return null;
-  const [provider, rest] = text.split("/", 2);
-  if (!provider || !rest) return null;
-  const [model, capRaw] = rest.split(":", 2);
+  const slash = text.indexOf("/");
+  if (slash <= 0 || slash === text.length - 1) return null;
+  const provider = text.slice(0, slash);
+  const rest = text.slice(slash + 1);
+  const tail = /^(.*):(\d+)$/.exec(rest);
+  const model = tail ? tail[1] : rest;
   if (!model) return null;
-  const cap = Number(capRaw);
+  const cap = tail ? Number(tail[2]) : Number.NaN;
   return {
     provider,
     model,
@@ -265,7 +272,7 @@ export function resolveGroupOverrides(raw: unknown): Record<string, GroupOverrid
           ov.replyChunkChars = clampInt(v, 200, 4000, 1000);
           break;
         case "maxRepliesPerMessage":
-          ov.maxRepliesPerMessage = clampInt(v, 1, 5, 5);
+          ov.maxRepliesPerMessage = clampInt(v, 1, MAX_REPLIES_CAP, MAX_REPLIES_DEFAULT);
           break;
         case "groupCooldownMs":
         case "senderCooldownMs":
@@ -339,7 +346,7 @@ export function resolveConfig({ entry = {}, stored = {}, credentials = {} }: Con
     atContextMessages: clampInt(pick("atContextMessages"), 0, 50, 10),
     groupBufferMax: clampInt(pick("groupBufferMax"), 0, 200, 50),
     replyChunkChars: clampInt(pick("replyChunkChars"), 200, 4000, 1000),
-    maxRepliesPerMessage: clampInt(pick("maxRepliesPerMessage"), 1, 5, 5),
+    maxRepliesPerMessage: clampInt(pick("maxRepliesPerMessage"), 1, MAX_REPLIES_CAP, MAX_REPLIES_DEFAULT),
     proactiveFallback: boolOr(pick("proactiveFallback"), false),
     archiveEnabled: boolOr(pick("archiveEnabled"), true),
     archiveMedia: oneOf(pick("archiveMedia"), ["off", "image", "imageVideo", "all"], "off"),

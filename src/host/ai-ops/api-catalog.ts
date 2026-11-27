@@ -97,7 +97,7 @@ export const GROUP_API_CATALOG: ReadonlyArray<ApiEntry> = [
   ["GET", "/v2/groups/{group_openid}/member_blacklist", "群黑名单列表；query: cursor,limit", "admin,whitelist"],
   ["POST", "/v2/groups/{group_openid}/member_blacklist", "黑名单增删；body: {op:add|del,member_openids[]}", "admin,whitelist"],
   // 消息
-  ["POST", "/v2/groups/{group_openid}/messages", "发群消息；body: {msg_type:0|2|7|8,content|markdown|media|card,msg_id?,msg_seq?,event_id?,keyboard?,message_reference?}", "quota"],
+  ["POST", "/v2/groups/{group_openid}/messages", "发群消息；body: {msg_type:0|2|7|8,content|markdown|media|card,msg_id?,msg_seq?,event_id?,keyboard?,message_reference?}；被动回复 60 分钟内有效、默认 5 次，机器人为该群群主/管理员时 50 次", "quota"],
   ["DELETE", "/v2/groups/{group_openid}/messages/{message_id}", "撤回群消息（发送 2 分钟内；管理员可撤他人消息）", "admin"],
   ["POST", "/v2/groups/{group_openid}/files", "富媒体上传；body: {file_type,url|file_data|upload_id,file_name?,srv_send_msg?},返回 file_info", "media"],
   // 互动 / 面板

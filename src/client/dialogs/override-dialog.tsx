@@ -218,7 +218,7 @@ export function OverrideDialog(props: {
           [200, 300, 500, 800, 1000, 1500, 2000, 3000, 4000], (n) => String(n)))),
       ovField(t("group.maxReplies"), t("group.maxRepliesHint"),
         ovSelect("maxRepliesPerMessage", t("group.maxReplies"), numOptions(
-          [1, 2, 3, 4, 5], (n) => fmt("override.countOption", n)))),
+          [1, 2, 3, 4, 5, 10, 20, 50], (n) => fmt("override.countOption", n)))),
     ]),
 
     ovGroup("content", t("group.secContent"), [

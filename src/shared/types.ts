@@ -28,7 +28,10 @@ export interface PassiveReplyRecord {
   selfIdx?: string;
   /** 下一次被动回复使用的 msg_seq（从 1 开始）。 */
   nextSeq: number;
-  /** 收到时间（epoch ms），用于判断被动回复窗口（群 5 分钟 / 单聊 60 分钟）。 */
+  /**
+   * 收到时间（epoch ms），用于判断被动回复窗口。
+   * 群 / 单聊均为 60 分钟（官方 20261117 起群由 5 分钟延长），见 shared/passive-reply.ts。
+   */
   receivedAt: number;
   /**
    * 该回复是否源于 @/单聊（而非群全量价值过滤）。
@@ -49,6 +52,18 @@ export interface PassiveReplyRecord {
   silentOk?: boolean;
   /** 产生本条回复的定时任务 id（静默时用于把跳过原因写回任务条目）。 */
   scheduleId?: string;
+}
+
+/** 本 turn 的发送状态（「边生成边发」用）。 */
+export interface TurnSendState {
+  /**
+   * 本 turn 首次发送所用的被动回复记录。
+   * 同一 turn 的多段提前发送与 turn/end 共用它，保证 msg_seq 连续且不重复
+   * （平台对「相同 msg_id + msg_seq」会直接判失败）。
+   */
+  record: PassiveReplyRecord;
+  /** 本 turn 是否已发过至少一段（引用卡片只挂本 turn 的第一条）。 */
+  sent: boolean;
 }
 
 /** 群全量消息缓冲条目（供 AT 消息附带上下文）。 */
@@ -89,6 +104,13 @@ export interface BotState {
   recordQueue: Map<string, PassiveReplyRecord[]>;
   /** 会话 id → turn → 已收集的助手文本（turn/end 时统一发送）。 */
   turnText: Map<string, Map<number, string>>;
+  /**
+   * 会话 id → turn → 本 turn 的发送状态（「边生成边发」用）。
+   * 记下本 turn 首次发送所用的被动回复记录，使同一 turn 的多段提前发送共用同一条
+   * 记录的 msg_seq（序号连续、不重复），并让 turn/end 复用同一条记录——
+   * recordQueue 按 turn 顺序一一出队，不能重复取出别人的记录。
+   */
+  turnSend: Map<string, Map<number, TurnSendState>>;
   /** 群全量消息环形缓冲：groupOpenid → 最近消息。 */
   groupBuffer: Map<string, GroupBufferEntry[]>;
   /** 跨事件指纹去重（GROUP_AT 与 GROUP_MESSAGE 双推送）：`群:发送者:内容` → 时间。 */

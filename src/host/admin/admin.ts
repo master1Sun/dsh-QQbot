@@ -19,6 +19,7 @@ import { archiveStats, listArchiveChats, listArchiveDays, readArchiveChat, readA
 import { readArchivedMedia, type ArchiveMediaKind } from "../infra/archive-media.js";
 import { applyUpdate, checkUpdate } from "./updater.js";
 import { toShanghaiISO } from "../../shared/time.js";
+import { passiveWindowMsForChat } from "../../shared/passive-reply.js";
 import type { BotRuntimeManager, BotRuntime } from "../bots.js";
 import {
   patchBotConfig,
@@ -63,6 +64,15 @@ export interface AdminServiceContext {
   listModels?: () => Promise<ModelOption[]>;
   /** 宿主 Agent Preset 目录（ctx.agentPresets 服务：list() + defaultId）。 */
   listAgentPresets?: () => Promise<{ defaultId: string; items: Array<{ id: string; label: string }> }>;
+  /**
+   * 宿主权限 Preset 目录（ctx.permissionPresets 服务：catalog()）——「工作区权限」下拉的数据源。
+   * items 是「沙箱模式 + 审批策略」组合（如 read-only / workspace-write / danger-full-access / auto），
+   * defaultPreset 是配置留空时新会话真正生效的那个。
+   */
+  listPermissionPresets?: () => Promise<{
+    defaultPreset: string;
+    items: Array<{ id: string; label: string; description?: string }>;
+  }>;
   /** AI 群规审核服务（配置读写 / 日志；设置页「AI 群规审核」区使用）。 */
   moderation?: ModerationService;
   /** 入群 AI 自动审批服务（配置读写 / 执行 / 日志）。 */
@@ -230,7 +240,7 @@ export function createAdminService(ctx: AdminServiceContext) {
     return { ok: true, data: { removed: appId } };
   };
 
-  // ── 下拉目录：模型 / Agent Preset（读宿主真实配置） ────────────────────────────
+  // ── 下拉目录：模型 / Agent Preset / 权限 Preset（读宿主真实配置） ──────────────
 
   const catalogs = async () => {
     const models: Array<{ id: string; label: string; group?: string }> = [];
@@ -269,9 +279,35 @@ export function createAdminService(ctx: AdminServiceContext) {
     }
     if (presets.length === 0) presets = [{ id: "default", label: "default" }];
 
+    // 权限 Preset（工作区权限）：沙箱 + 审批的组合，宿主 permissionPresets 服务是唯一真源。
+    // 宿主服务缺失（老版本 / 未装插件）时回落到官方默认三项，保证下拉永远可选。
+    let permissionPresets: Array<{ id: string; label: string; description?: string }> = [];
+    let permissionDefaultPreset = "";
+    try {
+      const catalog = ctx.listPermissionPresets ? await ctx.listPermissionPresets() : { defaultPreset: "", items: [] };
+      permissionPresets = (catalog.items ?? [])
+        .filter((item) => item && typeof item.id === "string" && item.id)
+        .map((item) => ({
+          id: item.id,
+          label: typeof item.label === "string" && item.label ? item.label : item.id,
+          ...(typeof item.description === "string" && item.description ? { description: item.description } : {}),
+        }));
+      permissionDefaultPreset = typeof catalog.defaultPreset === "string" ? catalog.defaultPreset : "";
+    } catch (error) {
+      logger.warn("[dsh-qqbot] 读取权限 Preset 目录失败:", error);
+    }
+    if (permissionPresets.length === 0) {
+      permissionPresets = [
+        { id: "read-only", label: "read-only" },
+        { id: "workspace-write", label: "workspace-write" },
+        { id: "danger-full-access", label: "danger-full-access" },
+      ];
+      permissionDefaultPreset = permissionDefaultPreset || "workspace-write";
+    }
+
     return {
       ok: true,
-      data: { models, agentPresets: presets },
+      data: { models, agentPresets: presets, permissionPresets, permissionDefaultPreset },
     };
   };
 
@@ -756,7 +792,7 @@ export function createAdminService(ctx: AdminServiceContext) {
     return { ok: true, data: { sent: true, id: id ?? "" } };
   };
 
-  /** 列出某聊天最近可作为被动回复凭证的消息（msg_id 5 分钟内有效）。 */
+  /** 列出某聊天最近可作为被动回复凭证的消息（msg_id 在被动回复窗口内有效：单聊 / 群聊 60 分钟）。 */
   const platformRecentMessages = async (payload: { appId?: unknown; scope?: unknown; openid?: unknown }) => {
     const bot = platformBot(payload.appId);
     if (!bot) return { ok: false, error: "没有可用的机器人" };
@@ -765,14 +801,15 @@ export function createAdminService(ctx: AdminServiceContext) {
     if (!scope || !openid) return { ok: false, error: "scope/openid 必填" };
     const chat = `${scope}:${openid}`;
     const now = Date.now();
-    const items = bot.refIndex.recentByChat(chat, 20, 5 * 60 * 1000).map((entry) => ({
+    const windowMs = passiveWindowMsForChat(chat);
+    const items = bot.refIndex.recentByChat(chat, 20, windowMs).map((entry) => ({
       msgId: entry.msgId,
       senderName: entry.senderName,
       sender: entry.sender,
       content: entry.content,
       at: entry.at,
-      /** 剩余有效秒数（被动回复窗口 5 分钟）。 */
-      leftSec: Math.max(0, Math.floor((entry.at + 5 * 60 * 1000 - now) / 1000)),
+      /** 剩余有效秒数（被动回复窗口：单聊 / 群聊 60 分钟）。 */
+      leftSec: Math.max(0, Math.floor((entry.at + windowMs - now) / 1000)),
     }));
     return { ok: true, data: { messages: items } };
   };
